@@ -18,9 +18,9 @@ function StatCard({ icon, label, value, sublabel }: StatCardProps): React.JSX.El
   return (
     <Card>
       <CardContent className="p-4 flex items-center gap-3">
-        <div className="flex-shrink-0 text-muted-foreground">{icon}</div>
+        <div className="flex-shrink-0 text-muted-foreground" aria-hidden="true">{icon}</div>
         <div>
-          <p className="text-2xl font-semibold leading-none">{value}</p>
+          <p className="text-2xl font-semibold leading-none" aria-label={`${label}: ${value}`}>{value}</p>
           <p className="text-xs text-muted-foreground mt-1">{label}</p>
           {sublabel && <p className="text-xs text-muted-foreground/60">{sublabel}</p>}
         </div>
@@ -44,31 +44,33 @@ export function StatsBar({ events }: StatsBarProps): React.JSX.Element {
   const blueprintCount = getBlueprintCount();
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-      <StatCard
-        icon={<Zap className="h-5 w-5" />}
-        label="Total Events"
-        value={events.length}
-        sublabel="in current view"
-      />
-      <StatCard
-        icon={<CheckCircle2 className="h-5 w-5 text-emerald-500" />}
-        label="Translated"
-        value={translated}
-        sublabel={`${translationRate}% success rate`}
-      />
-      <StatCard
-        icon={<HelpCircle className="h-5 w-5 text-amber-500" />}
-        label="Cryptic"
-        value={cryptic}
-        sublabel="need blueprints"
-      />
-      <StatCard
-        icon={<BookOpen className="h-5 w-5 text-violet-500" />}
-        label="Blueprints"
-        value={blueprintCount}
-        sublabel="registered contracts"
-      />
-    </div>
+    <section aria-label="Event statistics">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatCard
+          icon={<Zap className="h-5 w-5" />}
+          label="Total Events"
+          value={events.length}
+          sublabel="in current view"
+        />
+        <StatCard
+          icon={<CheckCircle2 className="h-5 w-5 text-emerald-500" />}
+          label="Translated"
+          value={translated}
+          sublabel={`${translationRate}% success rate`}
+        />
+        <StatCard
+          icon={<HelpCircle className="h-5 w-5 text-amber-500" />}
+          label="Cryptic"
+          value={cryptic}
+          sublabel="need blueprints"
+        />
+        <StatCard
+          icon={<BookOpen className="h-5 w-5 text-violet-500" />}
+          label="Blueprints"
+          value={blueprintCount}
+          sublabel="registered contracts"
+        />
+      </div>
+    </section>
   );
 }

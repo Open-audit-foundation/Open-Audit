@@ -32,9 +32,16 @@ export default function RootLayout({ children }: RootLayoutProps): React.JSX.Ele
     <html lang="en" suppressHydrationWarning>
       <body className={`${inter.variable} font-sans antialiased min-h-screen bg-background`}>
         <div className="relative flex min-h-screen flex-col">
+          {/* Skip to main content for keyboard users */}
+          <a
+            href="#main-content"
+            className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:top-2 focus:left-2 focus:px-4 focus:py-2 focus:rounded focus:bg-background focus:text-foreground focus:shadow-md focus:outline-none"
+          >
+            Skip to main content
+          </a>
           <Header />
-          <div className="flex-1">{children}</div>
-          <footer className="border-t py-6 mt-8">
+          <div id="main-content" className="flex-1">{children}</div>
+          <footer aria-label="Site footer" className="border-t py-6 mt-8">
             <div className="container mx-auto px-4 max-w-5xl">
               <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-muted-foreground">
                 <p>

@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 
 export default function DashboardPage(): React.JSX.Element {
   return (
-    <main className="container mx-auto px-4 py-8 max-w-5xl">
+    <main aria-label="Event Dashboard" className="container mx-auto px-4 py-8 max-w-5xl">
       {/* Page header */}
       <div className="mb-8">
         <h1 className="text-2xl font-semibold tracking-tight">Event Dashboard</h1>

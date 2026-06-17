@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { AlertCircle, BookOpen, ArrowRight, Radio, PauseCircle, PlayCircle } from "lucide-react";
+import { useState, useCallback, useEffect, useMemo } from "react";
+import { AlertCircle, BookOpen, ArrowRight, Radio, PauseCircle, PlayCircle, Upload, FileJson, Trash2 } from "lucide-react";
 import { SearchBar } from "@/components/dashboard/SearchBar";
 import { EventFeedTable } from "@/components/dashboard/EventFeedTable";
 import { StatsBar } from "@/components/dashboard/StatsBar";
@@ -16,8 +16,7 @@ import {
 } from "@/lib/translator/custom-abi";
 import { getMockEventsForContract, MOCK_RAW_EVENTS } from "@/lib/mock-data";
 import { useLiveFeed } from "@/lib/hooks/useLiveFeed";
-import { Button } from "@/components/ui/button";
-import type { TranslatedEvent } from "@/lib/translator/types";
+import type { TranslatedEvent, RawEvent, CustomAbi } from "@/lib/translator/types";
 
 /** Simulates a network delay for realistic UX. */
 function simulateNetworkDelay(ms: number): Promise<void> {
@@ -59,7 +58,7 @@ export function DashboardClient(): React.JSX.Element {
   );
 
   const handleNewEvent = useCallback((event: TranslatedEvent) => {
-    setEvents((prev) => [event, ...prev]);
+    setRawEvents((prev) => [event.raw, ...prev]);
   }, []);
 
   const { isLive, isPaused, newEventIds, toggleLive, togglePause } = useLiveFeed(handleNewEvent);
@@ -128,6 +127,7 @@ export function DashboardClient(): React.JSX.Element {
               handleSearch("");
             }}
             className="text-violet-600 dark:text-violet-400 hover:underline text-xs"
+            aria-label={`Clear filter for contract ${searchedContract?.slice(0, 10)}`}
           >
             Clear filter
           </button>
@@ -191,12 +191,12 @@ export function DashboardClient(): React.JSX.Element {
               >
                 {isPaused ? (
                   <>
-                    <PlayCircle className="h-3.5 w-3.5 mr-1 text-green-500" />
+                    <PlayCircle className="h-3.5 w-3.5 mr-1 text-green-500" aria-hidden="true" />
                     Resume
                   </>
                 ) : (
                   <>
-                    <PauseCircle className="h-3.5 w-3.5 mr-1 text-amber-500" />
+                    <PauseCircle className="h-3.5 w-3.5 mr-1 text-amber-500" aria-hidden="true" />
                     Pause
                   </>
                 )}
@@ -207,11 +207,16 @@ export function DashboardClient(): React.JSX.Element {
               size="sm"
               className={`h-7 px-3 text-xs ${!isLive ? "border-violet-300 text-violet-700 hover:bg-violet-50 dark:border-violet-700 dark:text-violet-400 dark:hover:bg-violet-950" : ""}`}
               onClick={toggleLive}
+              aria-label={isLive ? "Stop live event feed" : "Start live event feed"}
             >
-              <Radio className={`h-3.5 w-3.5 mr-1.5 ${isLive ? "animate-pulse" : ""}`} />
+              <Radio className={`h-3.5 w-3.5 mr-1.5 ${isLive ? "animate-pulse" : ""}`} aria-hidden="true" />
               {isLive ? "Stop Live" : "Live Feed"}
             </Button>
-            <span className="text-xs text-muted-foreground">
+            <span
+              className="text-xs text-muted-foreground"
+              aria-live="polite"
+              aria-atomic="true"
+            >
               {isLoading ? "Loading..." : `${events.length} events`}
             </span>
           </div>

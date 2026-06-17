@@ -82,15 +82,20 @@ export function EventFeedTable({
 
   return (
     <>
+      {/* aria-live region announces new events to screen readers */}
+      <div aria-live="polite" aria-atomic="false" className="sr-only">
+        {newEventIds.size > 0 && `${newEventIds.size} new event${newEventIds.size > 1 ? "s" : ""} received`}
+      </div>
+
       <div className="rounded-lg border bg-card overflow-hidden">
-        <Table>
+        <Table aria-label="Soroban contract events">
           <TableHeader>
             <TableRow className="bg-muted/30 hover:bg-muted/30">
-              <TableHead className="w-[130px]">Status</TableHead>
-              <TableHead className="w-[100px]">Time</TableHead>
-              <TableHead>Translated Description</TableHead>
-              <TableHead className="w-[160px] hidden md:table-cell">Contract</TableHead>
-              <TableHead className="w-[180px] text-right">Actions</TableHead>
+              <TableHead scope="col" className="w-[130px]">Status</TableHead>
+              <TableHead scope="col" className="w-[100px]">Time</TableHead>
+              <TableHead scope="col">Translated Description</TableHead>
+              <TableHead scope="col" className="w-[160px] hidden md:table-cell">Contract</TableHead>
+              <TableHead scope="col" className="w-[180px] text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -100,10 +105,14 @@ export function EventFeedTable({
                 })
               : events.map(function (event) {
                   const isTranslated = event.status === "translated";
+                  const rowLabel = isTranslated
+                    ? `${event.eventType ?? "Event"}: ${event.description}, contract ${event.raw.contractId.slice(0, 6)}, ${formatRelativeTime(event.raw.timestamp)}`
+                    : `Untranslated event from contract ${event.raw.contractId.slice(0, 6)}, ${formatRelativeTime(event.raw.timestamp)}`;
 
                   return (
                     <TableRow
                       key={event.raw.id}
+                      aria-label={rowLabel}
                       className={`group transition-colors ${newEventIds.has(event.raw.id) ? "animate-slide-in bg-violet-50/60 dark:bg-violet-950/30" : ""}`}
                     >
                       {/* Status */}
@@ -132,7 +141,7 @@ export function EventFeedTable({
                             <p className="text-sm text-muted-foreground italic">
                               No translation available for this event.
                             </p>
-                            <p className="font-mono text-xs text-muted-foreground/70">
+                            <p className="font-mono text-xs text-muted-foreground/70" aria-label={`Raw data: ${truncateHex(event.raw.data, 10)}`}>
                               {truncateHex(event.raw.data, 10)}
                             </p>
                           </div>
@@ -141,7 +150,11 @@ export function EventFeedTable({
 
                       {/* Contract ID */}
                       <TableCell className="hidden md:table-cell">
-                        <span className="font-mono text-xs text-muted-foreground">
+                        <span
+                          className="font-mono text-xs text-muted-foreground"
+                          title={event.raw.contractId}
+                          aria-label={`Contract ID: ${event.raw.contractId.slice(0, 6)}...${event.raw.contractId.slice(-4)}`}
+                        >
                           {event.raw.contractId.slice(0, 6)}...
                           {event.raw.contractId.slice(-4)}
                         </span>
@@ -154,11 +167,12 @@ export function EventFeedTable({
                             variant="ghost"
                             size="sm"
                             className="h-8 px-2 text-xs"
+                            aria-label={`View raw data for event from contract ${event.raw.contractId.slice(0, 6)}`}
                             onClick={function () {
                               handleViewRaw(event.raw);
                             }}
                           >
-                            <Eye className="h-3.5 w-3.5 mr-1" />
+                            <Eye className="h-3.5 w-3.5 mr-1" aria-hidden="true" />
                             View Raw
                           </Button>
 
@@ -167,11 +181,12 @@ export function EventFeedTable({
                               variant="outline"
                               size="sm"
                               className="h-8 px-2 text-xs border-violet-200 text-violet-700 hover:bg-violet-50 hover:text-violet-800 dark:border-violet-800 dark:text-violet-400 dark:hover:bg-violet-950"
+                              aria-label={`Contribute a translation for event from contract ${event.raw.contractId.slice(0, 6)}`}
                               onClick={function () {
                                 handleContribute(event.raw);
                               }}
                             >
-                              <GitBranch className="h-3.5 w-3.5 mr-1" />
+                              <GitBranch className="h-3.5 w-3.5 mr-1" aria-hidden="true" />
                               Contribute
                             </Button>
                           )}

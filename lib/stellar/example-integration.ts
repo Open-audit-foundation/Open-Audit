@@ -26,9 +26,10 @@ function convertToRawEvent(
   return {
     id: event.id,
     contractId,
-    topics: event.topic, // Array of hex-encoded topics
+    topics: event.topic.map((t) => t.toXDR("base64")), // Array of hex-encoded topics
     data: event.value.toString(), // XDR-encoded data
     ledger: event.ledger,
+    txHash: event.id, // event.id contains the tx hash in Soroban SDK
     timestamp: Date.now(), // Note: You may want to get actual block timestamp
   };
 }
@@ -64,12 +65,12 @@ class EventStore {
    */
   getAllEvents(): TranslatedEvent[] {
     const allEvents: TranslatedEvent[] = [];
-    for (const events of this.events.values()) {
+    this.events.forEach(function (events) {
       allEvents.push(...events);
-    }
+    });
     // Sort by timestamp descending
     return allEvents.sort(function (a, b) {
-      return b.timestamp - a.timestamp;
+      return b.raw.timestamp - a.raw.timestamp;
     });
   }
 
