@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TranslatedEvent } from "../translator/types";
+import { loadInChunks } from "../utils/chunkLoader";
 
 export interface LiveFeedState {
   isLive: boolean;
@@ -85,19 +86,25 @@ export function useLiveFeed(onEvent: (event: TranslatedEvent) => void): LiveFeed
       isPausedRef.current = !prev;
 
       // Flush buffered events when unpausing.
+      // Use loadInChunks so a large pause buffer doesn't freeze the UI.
       if (prev) {
         const buffered = pauseBufferRef.current.splice(0);
-        for (const event of buffered) {
-          onEventRef.current(event);
-          setNewEventIds((ids) => new Set(ids).add(event.raw.id));
-          setTimeout(() => {
-            setNewEventIds((ids) => {
-              const next = new Set(ids);
-              next.delete(event.raw.id);
-              return next;
-            });
-          }, 600);
-        }
+        loadInChunks<TranslatedEvent>(
+          buffered,
+          (chunk) => {
+            for (const event of chunk) {
+              onEventRef.current(event);
+              setNewEventIds((ids) => new Set(ids).add(event.raw.id));
+              setTimeout(() => {
+                setNewEventIds((ids) => {
+                  const next = new Set(ids);
+                  next.delete(event.raw.id);
+                  return next;
+                });
+              }, 600);
+            }
+          },
+        );
       }
 
       return !prev;
