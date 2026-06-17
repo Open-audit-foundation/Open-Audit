@@ -97,6 +97,7 @@ export function SearchBar({
                 handleExampleClick(contract.id);
               }}
               className="text-xs text-violet-600 dark:text-violet-400 hover:underline font-mono"
+              aria-label={`Search example contract: ${contract.label}`}
             >
               {contract.label}
             </button>

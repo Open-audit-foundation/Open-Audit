@@ -207,8 +207,9 @@ export function DashboardClient(): React.JSX.Element {
               size="sm"
               className={`h-7 px-3 text-xs ${!isLive ? "border-violet-300 text-violet-700 hover:bg-violet-50 dark:border-violet-700 dark:text-violet-400 dark:hover:bg-violet-950" : ""}`}
               onClick={toggleLive}
+              aria-label={isLive ? "Stop live feed" : "Start live feed"}
             >
-              <Radio className={`h-3.5 w-3.5 mr-1.5 ${isLive ? "animate-pulse" : ""}`} />
+              <Radio className={`h-3.5 w-3.5 mr-1.5 ${isLive ? "animate-pulse" : ""}`} aria-hidden="true" />
               {isLive ? "Stop Live" : "Live Feed"}
             </Button>
             <span className="text-xs text-muted-foreground">

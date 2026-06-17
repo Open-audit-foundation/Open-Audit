@@ -18,12 +18,12 @@ function StatCard({ icon, label, value, sublabel }: StatCardProps): React.JSX.El
   return (
     <Card>
       <CardContent className="p-4 flex items-center gap-3">
-        <div className="flex-shrink-0 text-muted-foreground">{icon}</div>
-        <div>
-          <p className="text-2xl font-semibold leading-none">{value}</p>
-          <p className="text-xs text-muted-foreground mt-1">{label}</p>
-          {sublabel && <p className="text-xs text-muted-foreground/60">{sublabel}</p>}
-        </div>
+        <div className="flex-shrink-0 text-muted-foreground" aria-hidden="true">{icon}</div>
+        <dl>
+          <dd className="text-2xl font-semibold leading-none">{value}</dd>
+          <dt className="text-xs text-muted-foreground mt-1">{label}</dt>
+          {sublabel && <dd className="text-xs text-muted-foreground/60">{sublabel}</dd>}
+        </dl>
       </CardContent>
     </Card>
   );
@@ -44,7 +44,7 @@ export function StatsBar({ events }: StatsBarProps): React.JSX.Element {
   const blueprintCount = getBlueprintCount();
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3" role="region" aria-label="Event statistics">
       <StatCard
         icon={<Zap className="h-5 w-5" />}
         label="Total Events"

@@ -27,7 +27,7 @@ function StatusBadge({ status }: { status: TranslatedEvent["status"] }): React.J
   if (status === "translated") {
     return (
       <Badge variant="success" className="gap-1 whitespace-nowrap">
-        <CheckCircle2 className="h-3 w-3" />
+        <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
         Translated
       </Badge>
     );
@@ -36,7 +36,7 @@ function StatusBadge({ status }: { status: TranslatedEvent["status"] }): React.J
   if (status === "pending") {
     return (
       <Badge variant="secondary" className="gap-1 whitespace-nowrap">
-        <Clock className="h-3 w-3" />
+        <Clock className="h-3 w-3" aria-hidden="true" />
         Pending
       </Badge>
     );
@@ -44,7 +44,7 @@ function StatusBadge({ status }: { status: TranslatedEvent["status"] }): React.J
 
   return (
     <Badge variant="warning" className="gap-1 whitespace-nowrap">
-      <HelpCircle className="h-3 w-3" />
+      <HelpCircle className="h-3 w-3" aria-hidden="true" />
       Cryptic
     </Badge>
   );
@@ -52,7 +52,7 @@ function StatusBadge({ status }: { status: TranslatedEvent["status"] }): React.J
 
 function SkeletonRow(): React.JSX.Element {
   return (
-    <TableRow>
+    <TableRow aria-hidden="true">
       {[1, 2, 3, 4, 5].map(function (i) {
         return (
           <TableCell key={i}>
@@ -84,6 +84,7 @@ export function EventFeedTable({
     <>
       <div className="rounded-lg border bg-card overflow-hidden">
         <Table>
+          <caption className="sr-only">Soroban contract events — showing translation status, timestamp, description, contract ID, and actions</caption>
           <TableHeader>
             <TableRow className="bg-muted/30 hover:bg-muted/30">
               <TableHead className="w-[130px]">Status</TableHead>
@@ -157,8 +158,9 @@ export function EventFeedTable({
                             onClick={function () {
                               handleViewRaw(event.raw);
                             }}
+                            aria-label={`View raw data for event ${event.raw.id}`}
                           >
-                            <Eye className="h-3.5 w-3.5 mr-1" />
+                            <Eye className="h-3.5 w-3.5 mr-1" aria-hidden="true" />
                             View Raw
                           </Button>
 
@@ -170,8 +172,9 @@ export function EventFeedTable({
                               onClick={function () {
                                 handleContribute(event.raw);
                               }}
+                              aria-label={`Contribute a translation for contract ${event.raw.contractId}`}
                             >
-                              <GitBranch className="h-3.5 w-3.5 mr-1" />
+                              <GitBranch className="h-3.5 w-3.5 mr-1" aria-hidden="true" />
                               Contribute
                             </Button>
                           )}
