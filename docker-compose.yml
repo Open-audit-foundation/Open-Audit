@@ -1,0 +1,14 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"       # HTTP dashboard
+      - "3000:3000/tcp"   # WebSocket shares the same port (/ws/events)
+    env_file:
+      - .env.local        # Provide your NEXT_PUBLIC_* vars here
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+    restart: unless-stopped

@@ -6,8 +6,9 @@
  * to handle HTTP 429 (Too Many Requests) errors gracefully.
  */
 
-import { SorobanRpc } from "stellar-sdk";
+import { SorobanRpc, Horizon, xdr, scValToNative, StrKey } from "stellar-sdk";
 import type { StellarNetworkConfig } from "./client";
+import type { RawEvent } from "../translator/types";
 
 /** Configuration for the indexer retry mechanism. */
 export interface IndexerRetryConfig {
@@ -263,7 +264,8 @@ export function startEventIndexer(options: IndexerOptions): IndexerControls {
         if (response.latestLedger) {
           cursor = {
             lastLedger: response.latestLedger,
-            paginationCursor: response.cursor,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            paginationCursor: (response as any).cursor,
           };
           console.log(`[indexer] Cursor updated to ledger ${cursor.lastLedger}`);
         }
@@ -306,6 +308,118 @@ export function startEventIndexer(options: IndexerOptions): IndexerControls {
     },
     getCursor: function () {
       return { ...cursor };
+    },
+  };
+}
+
+/**
+ * Options for starting the Horizon streaming indexer.
+ */
+export interface StreamingIndexerOptions {
+  /** Network configuration. */
+  networkConfig: StellarNetworkConfig;
+  /** Contract IDs to monitor (optional, for filtering). */
+  contractIds?: string[];
+  /** Callback for handling new events. */
+  onEvent: (event: RawEvent) => void | Promise<void>;
+  /** Callback for handling errors. */
+  onError?: (error: Error) => void;
+}
+
+/**
+ * Starts a real-time event indexer using Stellar Horizon's transaction stream.
+ *
+ * This function establishes a persistent SSE connection to Horizon and decodes
+ * Soroban events from transaction metadata in real-time.
+ */
+export function startHorizonStreamingIndexer(options: StreamingIndexerOptions): {
+  stop: () => void;
+} {
+  const { networkConfig, contractIds, onEvent, onError } = options;
+  const server = new Horizon.Server(networkConfig.horizonUrl);
+
+  let isRunning = true;
+  let closeStream: (() => void) | null = null;
+
+  async function startStream() {
+    if (!isRunning) return;
+
+    console.log("[streaming-indexer] Starting Horizon transaction stream...");
+
+    try {
+      closeStream = server
+        .transactions()
+        .cursor("now")
+        .stream({
+          onmessage: async (tx) => {
+            if (!tx.result_meta_xdr) return;
+
+            try {
+              const meta = xdr.TransactionMeta.fromXDR(tx.result_meta_xdr, "base64");
+              let events: xdr.ContractEvent[] = [];
+
+              // Extract events from meta (v3 or v4)
+              if (meta.switch() === xdr.TransactionMeta.v3().switch()) {
+                events = meta.v3().sorobanMeta().events();
+              } else if (meta.switch() === 4) {
+                // @ts-ignore - v4 might not be in all types yet
+                events = meta.v4().sorobanMeta().events();
+              }
+
+              for (const event of events) {
+                const contractId = event.contractId()
+                  ? StrKey.encodeContract(event.contractId())
+                  : "unknown";
+
+                // Filter by contract ID if provided
+                if (contractIds && contractIds.length > 0 && !contractIds.includes(contractId)) {
+                  continue;
+                }
+
+                // Convert to RawEvent format
+                const rawEvent: RawEvent = {
+                  id: `${tx.id}-${events.indexOf(event)}`,
+                  contractId,
+                  topics: event.body().v0().topics().map((t) => t.toXDR("hex")),
+                  data: event.body().v0().data().toXDR("base64"),
+                  ledger: tx.ledger_attr,
+                  timestamp: Math.floor(Date.now() / 1000), // Horizon tx doesn't have easy timestamp in stream?
+                };
+
+                await onEvent(rawEvent);
+              }
+            } catch (err) {
+              console.error("[streaming-indexer] Error decoding transaction meta:", err);
+            }
+          },
+          onerror: (err) => {
+            console.error("[streaming-indexer] Stream error:", err);
+            if (onError) onError(new Error(String(err)));
+
+            // Auto-reconnect logic
+            if (isRunning) {
+              console.log("[streaming-indexer] Attempting to reconnect in 5s...");
+              setTimeout(startStream, 5000);
+            }
+          },
+        });
+    } catch (err) {
+      console.error("[streaming-indexer] Failed to start stream:", err);
+      if (isRunning) {
+        setTimeout(startStream, 5000);
+      }
+    }
+  }
+
+  startStream();
+
+  return {
+    stop: () => {
+      isRunning = false;
+      if (closeStream) {
+        closeStream();
+      }
+      console.log("[streaming-indexer] Stopped");
     },
   };
 }

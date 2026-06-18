@@ -67,6 +67,30 @@ cp .env.example .env.local
 
 ---
 
+## Architecture
+
+Open-Audit follows a five-component architecture that processes blockchain data in real-time:
+
+```
+Stellar Network → Event Indexer → Translation Engine → WebSocket Server → Frontend Dashboard
+```
+
+For new contributors wanting to understand the system's data flow and internal architecture, see the comprehensive [**ARCHITECTURE.md**](ARCHITECTURE.md) guide which includes:
+
+- 📊 **Interactive Mermaid diagrams** showing data flow
+- 🔍 **Component deep dives** for each service
+- 📝 **Step-by-step event journey** from blockchain to UI
+- 🛠️ **Development guides** for adding new features
+
+**Quick Overview:**
+
+1. **Event Indexer** (`lib/stellar/`) — Polls Stellar RPC with rate limit handling
+2. **Translation Engine** (`lib/translator/`) — Converts XDR to human-readable text
+3. **WebSocket Server** (`server.ts`) — Broadcasts events in real-time
+4. **Frontend Dashboard** (`app/dashboard/`, `components/`) — Interactive UI
+
+---
+
 ## Project Structure
 
 ```
@@ -85,9 +109,14 @@ open-audit/
 │   │   ├── registry.ts     # Registry lookup function
 │   │   └── blueprints/     # Per-contract translation blueprints
 │   ├── stellar/            # Stellar SDK helpers
+│   │   ├── indexer.ts      # Event polling with rate limit handling
+│   │   └── client.ts       # RPC client configuration
+│   ├── hooks/              # React hooks for live data
 │   └── utils.ts            # Shared utilities
 ├── docs/
 │   └── good-first-issues.json
+├── server.ts               # Custom Next.js + WebSocket server
+├── ARCHITECTURE.md         # 📖 Detailed architecture guide
 └── public/
 ```
 
