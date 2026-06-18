@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { SearchBar } from "@/components/dashboard/SearchBar";
 import { EventFeedTable } from "@/components/dashboard/EventFeedTable";
-import { StatsBar } from "@/components/dashboard/StatsBar";
+import { AnalyticsSummaryCards } from "@/components/dashboard/AnalyticsSummaryCards";
 import { UploadAbiDialog } from "@/components/dashboard/UploadAbiDialog";
 import { ExportDataDialog } from "@/components/dashboard/ExportDataDialog";
 import { Button } from "@/components/ui/button";
