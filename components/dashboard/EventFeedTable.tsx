@@ -36,6 +36,7 @@ import { Input } from "@/components/ui/input";
 import { RawDataDialog } from "./RawDataDialog";
 import { ContributeDialog } from "./ContributeDialog";
 import { formatRelativeTime, truncateHex } from "@/lib/translator/decode";
+import { useUrlSync } from "@/lib/hooks/useUrlSync";
 import type { TranslatedEvent, RawEvent } from "@/lib/translator/types";
 
 const STORAGE_KEY = "open-audit:filter-state";
@@ -182,19 +183,47 @@ export function EventFeedTable({
   const [rawDialogEvent, setRawDialogEvent] = useState<RawEvent | null>(null);
   const [contributeDialogEvent, setContributeDialogEvent] = useState<RawEvent | null>(null);
 
+  const { get: getParam, setParams } = useUrlSync();
+
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTER_STATE);
+  const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: PAGE_SIZE });
   const [hydrated, setHydrated] = useState(false);
 
-  // Hydrate from localStorage after mount to avoid SSR mismatch
+  // Hydrate from the URL first (so deep links rule), falling back to
+  // localStorage when no URL params are present.
   useEffect(function () {
-    setFilters(loadFilterState());
+    const urlFilters: FilterState = {
+      contractFilter: getParam("q"),
+      dateFrom: getParam("from"),
+      dateTo: getParam("to"),
+      eventTypeFilter: getParam("topic"),
+    };
+    const hasUrl =
+      urlFilters.contractFilter ||
+      urlFilters.dateFrom ||
+      urlFilters.dateTo ||
+      urlFilters.eventTypeFilter;
+    setFilters(hasUrl ? urlFilters : loadFilterState());
+
+    const pageParam = parseInt(getParam("page") || "1", 10);
+    const pageIndex = Number.isFinite(pageParam) ? Math.max(0, pageParam - 1) : 0;
+    setPagination({ pageIndex, pageSize: PAGE_SIZE });
+
     setHydrated(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Persist filter state on change (skip initial hydration pass)
+  // Mirror filters to both the URL and localStorage on change.
   useEffect(
     function () {
       if (!hydrated) return;
+      setParams({
+        q: filters.contractFilter || null,
+        from: filters.dateFrom || null,
+        to: filters.dateTo || null,
+        topic: filters.eventTypeFilter || null,
+      });
+
       const isEmpty =
         !filters.contractFilter &&
         !filters.dateFrom &&
@@ -206,7 +235,18 @@ export function EventFeedTable({
         saveFilterState(filters);
       }
     },
-    [filters, hydrated]
+    [filters, hydrated, setParams]
+  );
+
+  // Mirror pagination to the URL (page 1 stays implicit).
+  useEffect(
+    function () {
+      if (!hydrated) return;
+      setParams({
+        page: pagination.pageIndex > 0 ? String(pagination.pageIndex + 1) : null,
+      });
+    },
+    [pagination.pageIndex, hydrated, setParams]
   );
 
   const dateRangeError =
@@ -360,16 +400,22 @@ export function EventFeedTable({
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
-    state: { columnFilters },
-    initialState: {
-      pagination: { pageSize: PAGE_SIZE },
-    },
+    state: { columnFilters, pagination },
+    onPaginationChange: setPagination,
   });
 
-  // Reset to page 1 when filters change
+  // Reset to page 1 when filters change, but skip the run that follows
+  // hydration so a deep link like ?topic=Transfer&page=3 doesn't get clobbered.
+  const skipFilterReset = useRef(true);
   useEffect(
     function () {
-      table.setPageIndex(0);
+      if (skipFilterReset.current) {
+        skipFilterReset.current = false;
+        return;
+      }
+      setPagination(function (prev) {
+        return { ...prev, pageIndex: 0 };
+      });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [filters]

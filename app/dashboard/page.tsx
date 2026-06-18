@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
 import { DashboardClient } from "./DashboardClient";
 
@@ -18,7 +19,11 @@ export default function DashboardPage(): React.JSX.Element {
         </p>
       </div>
 
-      <DashboardClient />
+      {/* Suspense is required by next/navigation's useSearchParams in a
+          statically-rendered route. */}
+      <Suspense fallback={null}>
+        <DashboardClient />
+      </Suspense>
     </main>
   );
 }

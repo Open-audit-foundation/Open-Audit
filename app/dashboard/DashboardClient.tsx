@@ -33,6 +33,13 @@ export function DashboardClient(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
 
+  const { get: getParam, setParams } = useUrlSync();
+  // Captured once so the SearchBar input shows the deep-linked value on first
+  // paint, before the hydration effect fires the actual fetch.
+  const [initialContractParam] = useState(function () {
+    return getParam("contract");
+  });
+
   // Load previously uploaded ABIs from localStorage after mount. Doing this in
   // an effect (rather than during render) keeps the server and client output
   // identical and avoids a hydration mismatch.
@@ -80,11 +87,10 @@ export function DashboardClient(): React.JSX.Element {
       setRawEvents(MOCK_RAW_EVENTS);
       setSearchedContract(null);
       setError(null);
-      return;
-    }
 
-    setIsLoading(true);
-    setError(null);
+      try {
+        // Simulate fetching from Stellar network
+        await simulateNetworkDelay(800);
 
     try {
       // Simulate fetching from Stellar network.
@@ -117,7 +123,11 @@ export function DashboardClient(): React.JSX.Element {
     <div className="space-y-6">
       {/* Search */}
       <section aria-label="Contract search">
-        <SearchBar onSearch={handleSearch} isLoading={isLoading} />
+        <SearchBar
+          onSearch={handleSearch}
+          isLoading={isLoading}
+          defaultValue={initialContractParam}
+        />
       </section>
 
       {/* Error state */}
