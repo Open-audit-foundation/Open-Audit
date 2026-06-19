@@ -1,7 +1,17 @@
 import { describe, it, expect } from "vitest";
-import { translateEvent } from "./registry";
-import { interpolateTemplate } from "./decode";
-import type { RawEvent } from "./types";
+import { translateEvent, matchesEventCriteria } from "./registry";
+import {
+  interpolateTemplate,
+  isValidHex,
+  sanitizeHex,
+  escapeHtml,
+  detectScValType,
+  decodeMap,
+  decodeVec,
+  decodeEnum,
+  decodeScVal,
+} from "./decode";
+import type { RawEvent, TranslationBlueprint } from "./types";
 
 /**
  * Mock XDR data for testing Soroban event translation.
