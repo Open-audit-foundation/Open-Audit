@@ -2,7 +2,6 @@
 
 import { useState, useCallback, useMemo, useEffect } from "react";
 import {
-  AlertCircle,
   BookOpen,
   ArrowRight,
   Radio,
@@ -24,24 +23,15 @@ import {
   removeCustomAbi,
   saveCustomAbi,
 } from "@/lib/translator/custom-abi";
-import { getMockEventsForContract, MOCK_RAW_EVENTS } from "@/lib/mock-data";
+import { MOCK_RAW_EVENTS } from "@/lib/mock-data";
 import { useLiveFeed } from "@/lib/hooks/useLiveFeed";
 import type { TranslatedEvent, RawEvent, CustomAbi } from "@/lib/translator/types";
-
-/** Simulates a network delay for realistic UX. */
-function simulateNetworkDelay(ms: number): Promise<void> {
-  return new Promise(function (resolve) {
-    setTimeout(resolve, ms);
-  });
-}
 
 export function DashboardClient(): React.JSX.Element {
   const [rawEvents, setRawEvents] = useState<RawEvent[]>(MOCK_RAW_EVENTS);
   const [customAbis, setCustomAbis] = useState<CustomAbi[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [searchedContract, setSearchedContract] = useState<string | null>(null);
+  const [contractFilter, setContractFilter] = useState<string | null>(null);
   const [eventTopicFilter, setEventTopicFilter] = useState("");
-  const [error, setError] = useState<string | null>(null);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
 
   // Load previously uploaded ABIs from localStorage after mount. Doing this in
@@ -68,13 +58,20 @@ export function DashboardClient(): React.JSX.Element {
 
   const filteredEvents = useMemo(
     function () {
-      if (!eventTopicFilter.trim()) return events;
-      const filter = eventTopicFilter.trim().toLowerCase();
       return events.filter(function (e) {
-        return e.eventType?.toLowerCase().includes(filter);
+        if (contractFilter && e.raw.contractId !== contractFilter) {
+          return false;
+        }
+        if (eventTopicFilter.trim()) {
+          const filter = eventTopicFilter.trim().toLowerCase();
+          if (!e.eventType?.toLowerCase().includes(filter)) {
+            return false;
+          }
+        }
+        return true;
       });
     },
-    [events, eventTopicFilter]
+    [events, contractFilter, eventTopicFilter]
   );
 
   const handleNewEvent = useCallback((event: TranslatedEvent) => {
@@ -83,28 +80,8 @@ export function DashboardClient(): React.JSX.Element {
 
   const { isLive, isPaused, newEventIds, toggleLive, togglePause } = useLiveFeed(handleNewEvent);
 
-  const handleSearch = useCallback(async function (contractId: string): Promise<void> {
-    if (!contractId) {
-      setRawEvents(MOCK_RAW_EVENTS);
-      setSearchedContract(null);
-      setError(null);
-      return;
-    }
-
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      // Simulate fetching from Stellar network
-      await simulateNetworkDelay(800);
-
-      setRawEvents(getMockEventsForContract(contractId));
-      setSearchedContract(contractId);
-    } catch {
-      setError("Failed to fetch events. Please check the Contract ID and try again.");
-    } finally {
-      setIsLoading(false);
-    }
+  const handleContractFilter = useCallback(function (contractId: string): void {
+    setContractFilter(contractId || null);
   }, []);
 
   const handleAbiUpload = useCallback(function (abi: CustomAbi): void {
@@ -118,35 +95,23 @@ export function DashboardClient(): React.JSX.Element {
 
   return (
     <div className="space-y-6">
-      {/* Search */}
-      <section aria-label="Contract search">
+      {/* Filters */}
+      <section aria-label="Event filters">
         <SearchBar
-          onSearch={handleSearch}
-          isLoading={isLoading}
+          onSearch={handleContractFilter}
           topicFilter={eventTopicFilter}
           onTopicFilterChange={setEventTopicFilter}
         />
       </section>
 
-      {/* Error state */}
-      {error && (
-        <div
-          role="alert"
-          className="flex items-start gap-3 rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive"
-        >
-          <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
-          <p>{error}</p>
-        </div>
-      )}
-
       {/* Active filter indicator */}
-      {(searchedContract || eventTopicFilter) && !isLoading && (
+      {(contractFilter || eventTopicFilter) && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
-          {searchedContract && (
+          {contractFilter && (
             <>
               <span>Contract:</span>
               <code className="font-mono text-xs bg-muted px-2 py-1 rounded">
-                {searchedContract.slice(0, 10)}...{searchedContract.slice(-6)}
+                {contractFilter.slice(0, 10)}...{contractFilter.slice(-6)}
               </code>
             </>
           )}
@@ -161,7 +126,7 @@ export function DashboardClient(): React.JSX.Element {
           <button
             type="button"
             onClick={function () {
-              handleSearch("");
+              handleContractFilter("");
               setEventTopicFilter("");
             }}
             className="text-violet-600 dark:text-violet-400 hover:underline text-xs"
@@ -209,7 +174,7 @@ export function DashboardClient(): React.JSX.Element {
       </section>
 
       {/* Stats */}
-      {!isLoading && <StatsBar events={events} />}
+      <StatsBar events={events} />
 
       {/* Feed */}
       <section aria-label="Event feed">
@@ -249,13 +214,11 @@ export function DashboardClient(): React.JSX.Element {
               {isLive ? "Stop Live" : "Live Feed"}
             </Button>
             <span className="text-xs text-muted-foreground">
-              {isLoading
-                ? "Loading..."
-                : `${filteredEvents.length} event${filteredEvents.length !== 1 ? "s" : ""}`}
+              {`${filteredEvents.length} event${filteredEvents.length !== 1 ? "s" : ""}`}
             </span>
           </div>
         </div>
-        <EventFeedTable events={filteredEvents} isLoading={isLoading} newEventIds={newEventIds} />
+        <EventFeedTable events={filteredEvents} newEventIds={newEventIds} />
       </section>
 
       {/* Contributor CTA */}

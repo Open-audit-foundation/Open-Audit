@@ -1,13 +1,12 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { Search, X, Loader2, Filter } from "lucide-react";
+import { Search, X, Filter } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
 interface SearchBarProps {
   onSearch: (contractId: string) => void;
-  isLoading?: boolean;
   defaultValue?: string;
   topicFilter: string;
   onTopicFilterChange: (value: string) => void;
@@ -28,7 +27,6 @@ const STELLAR_CONTRACT_REGEX = /^C[A-Z2-7]{55}$/;
 
 export function SearchBar({
   onSearch,
-  isLoading = false,
   defaultValue = "",
   topicFilter,
   onTopicFilterChange,
@@ -79,7 +77,6 @@ export function SearchBar({
               placeholder="Enter a Soroban Contract ID (C...)"
               className="pl-9 pr-9 font-mono text-sm"
               aria-label="Contract ID filter"
-              disabled={isLoading}
             />
             {value && (
               <button
@@ -92,15 +89,8 @@ export function SearchBar({
               </button>
             )}
           </div>
-          <Button type="submit" disabled={isLoading || !value.trim()}>
-            {isLoading ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Loading...
-              </>
-            ) : (
-              "Search"
-            )}
+          <Button type="submit" disabled={!value.trim()}>
+            Filter
           </Button>
         </form>
         {validationError && <p className="text-xs text-destructive">{validationError}</p>}
