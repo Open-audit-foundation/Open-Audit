@@ -12,23 +12,9 @@
 
 import { startEventIndexer } from "./indexer";
 import { getNetworkConfig } from "./client";
+import { eventResponseToRawEvent } from "./events";
 import { translateEvents } from "@/lib/translator/registry";
-import type { SorobanRpc } from "stellar-sdk";
-import type { RawEvent, TranslatedEvent } from "@/lib/translator/types";
-
-/**
- * Convert a Stellar SDK event response to our RawEvent format.
- */
-function convertToRawEvent(
-  event: SorobanRpc.Api.EventResponse,
-  contractId: string
-): RawEvent {
-  return {
-    id: event.id,
-    contractId,
-
-  };
-}
+import type { TranslatedEvent } from "@/lib/translator/types";
 
 /**
  * Simple in-memory event store for demonstration.
@@ -61,7 +47,7 @@ class EventStore {
    */
   getAllEvents(): TranslatedEvent[] {
     const allEvents: TranslatedEvent[] = [];
-
+    this.events.forEach(function (events) {
       allEvents.push(...events);
     });
     // Sort by timestamp descending
@@ -116,7 +102,7 @@ export function startMonitoringContract(
 
       // Convert Stellar SDK events to RawEvents
       const rawEvents = events.map(function (event) {
-        return convertToRawEvent(event, contractId);
+        return eventResponseToRawEvent(event, contractId);
       });
 
       // Translate the events

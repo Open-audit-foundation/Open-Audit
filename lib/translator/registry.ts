@@ -15,7 +15,13 @@
 
 import { createAllSacBlueprints } from "./blueprints/sac-transfer";
 import { createSacMintBurnBlueprint } from "./blueprints/sac-mint-burn";
-import type { RawEvent, TranslatedEvent, TranslationBlueprint } from "./types";
+import { decodeEventName } from "./decode";
+import type {
+  EventMatchCriteria,
+  RawEvent,
+  TranslatedEvent,
+  TranslationBlueprint,
+} from "./types";
 
 /** The registry maps contract IDs to their blueprints. */
 type BlueprintRegistry = Map<string, TranslationBlueprint>;
@@ -120,6 +126,8 @@ export function translateEvent(
  * null when the blueprint cannot handle it.
  */
 function applyBlueprint(event: RawEvent, blueprint: TranslationBlueprint): TranslatedEvent | null {
+  if (blueprint.matches && !blueprint.matches(event)) return null;
+
   const result = blueprint.translate(event);
   if (!result) return null;
 
@@ -130,6 +138,44 @@ function applyBlueprint(event: RawEvent, blueprint: TranslationBlueprint): Trans
     blueprintName: blueprint.contractName,
     eventType: result.eventType,
   };
+}
+
+/**
+ * Returns true when an event satisfies every requested criterion.
+ * Useful for blueprints that must match more than the event signature topic.
+ */
+export function matchesEventCriteria(
+  event: RawEvent,
+  criteria: EventMatchCriteria
+): boolean {
+  if (criteria.contractId && event.contractId !== criteria.contractId) {
+    return false;
+  }
+
+  for (const topicCriteria of criteria.topics ?? []) {
+    const topic = event.topics[topicCriteria.index];
+    if (typeof topic !== "string") return false;
+
+    if (topicCriteria.equals && topic !== topicCriteria.equals) {
+      return false;
+    }
+
+    if (
+      topicCriteria.includes &&
+      !topic.toLowerCase().includes(topicCriteria.includes.toLowerCase())
+    ) {
+      return false;
+    }
+
+    if (
+      topicCriteria.decodedName &&
+      decodeEventName(topic) !== topicCriteria.decodedName
+    ) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 /**

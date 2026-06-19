@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { translateEvent } from "./registry";
+import { matchesEventCriteria, translateEvent } from "./registry";
 import {
   detectScValType,
   decodeMap,
@@ -10,7 +10,7 @@ import {
   isValidHex,
   escapeHtml,
 } from "./decode";
-import type { RawEvent } from "./types";
+import type { RawEvent, TranslationBlueprint } from "./types";
 
 /**
  * Mock XDR data for testing Soroban event translation.
@@ -93,6 +93,56 @@ describe("translateEvent", () => {
     expect(result.description).toContain("XLM");
     expect(result.eventType).toBe("Burn");
     expect(result.blueprintName).toContain("Stellar Asset Contract");
+  });
+
+  it("uses multi-topic blueprint criteria before translating", () => {
+    const statusTopic =
+      "0x000000000000000000000000000000000000000000000000000000006f70656e";
+    const closedStatusTopic =
+      "0x00000000000000000000000000000000000000000000000000000000636c6f736564";
+    const contractId = "CMULTITOPIC0000000000000000000000000000000000000000000";
+    const event: RawEvent = {
+      id: "0000002-0",
+      contractId,
+      topics: [
+        "0x00000000000000000000000000000000000000000000000000000000737461747573",
+        "0x01",
+        statusTopic,
+        "0x03",
+      ],
+      data: "0x00",
+      ledger: 52_341_007,
+      timestamp: Math.floor(Date.now() / 1000),
+      txHash: "abcd",
+    };
+    const blueprint: TranslationBlueprint = {
+      contractId,
+      contractName: "Multi Topic Contract",
+      matches: function (rawEvent) {
+        return matchesEventCriteria(rawEvent, {
+          contractId,
+          topics: [
+            { index: 0, includes: "737461747573" },
+            { index: 2, equals: statusTopic },
+          ],
+        });
+      },
+      translate: function () {
+        return {
+          description: "Status is open",
+          eventType: "Status",
+        };
+      },
+    };
+    const customBlueprints = new Map([[contractId, blueprint]]);
+
+    expect(translateEvent(event, customBlueprints).status).toBe("translated");
+
+    const nonMatching = {
+      ...event,
+      topics: [event.topics[0], event.topics[1], closedStatusTopic, event.topics[3]],
+    };
+    expect(translateEvent(nonMatching, customBlueprints).status).toBe("cryptic");
   });
 });
 

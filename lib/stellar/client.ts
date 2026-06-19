@@ -8,6 +8,9 @@
  * with real Stellar SDK calls to connect to the live network.
  */
 
+import { eventResponseToRawEvent } from "./events";
+import type { RawEvent } from "../translator/types";
+
 /** Stellar network configuration. */
 export interface StellarNetworkConfig {
   horizonUrl: string;
@@ -56,7 +59,7 @@ export async function fetchContractEvents(
   contractIds: string | string[],
   config: StellarNetworkConfig = TESTNET_CONFIG,
   startLedger?: number
-): Promise<unknown[]> {
+): Promise<RawEvent[]> {
   try {
     // Dynamically import stellar-sdk to avoid bundling issues
     const { SorobanRpc } = await import("stellar-sdk");
@@ -83,7 +86,11 @@ export async function fetchContractEvents(
 
     console.log(`[open-audit] Fetched ${result.events?.length || 0} events`);
 
-    return result.events || [];
+    return (result.events || []).map(function (event) {
+      const fallbackContractId =
+        typeof ids[0] === "string" && ids.length === 1 ? ids[0] : undefined;
+      return eventResponseToRawEvent(event, fallbackContractId);
+    });
   } catch (error) {
     console.error("[open-audit] Error fetching contract events:", error);
     throw error;

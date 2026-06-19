@@ -57,10 +57,36 @@ export interface TranslationBlueprint {
   /** Human-readable name for this contract. */
   contractName: string;
   /**
+   * Optional event-level matcher used by the registry before calling translate().
+   * This lets a blueprint declare multi-topic requirements such as:
+   * topics[0] is "transfer" AND topics[2] is a specific status flag.
+   */
+  matches?: (event: RawEvent) => boolean;
+  /**
    * Attempts to translate a raw event into a human-readable string.
    * Returns null if this blueprint cannot handle the given event.
    */
   translate: (event: RawEvent) => TranslationResult | null;
+}
+
+/** A single topic condition within a multi-topic match. */
+export interface TopicCriterion {
+  /** Ordered topic index to inspect. */
+  index: number;
+  /** Exact hex/string value expected at the topic index. */
+  equals?: string;
+  /** Case-insensitive fragment expected inside the topic value. */
+  includes?: string;
+  /** Event-name string expected after decoding a Symbol topic. */
+  decodedName?: string;
+}
+
+/** Declarative criteria for matching a raw event before translation. */
+export interface EventMatchCriteria {
+  /** Contract ID expected for the event. */
+  contractId?: string;
+  /** All topic criteria must match. */
+  topics?: TopicCriterion[];
 }
 
 /** The result returned by a blueprint's translate function. */

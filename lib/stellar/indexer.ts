@@ -379,10 +379,15 @@ export function startHorizonStreamingIndexer(options: StreamingIndexerOptions): 
                 const rawEvent: RawEvent = {
                   id: `${tx.id}-${events.indexOf(event)}`,
                   contractId,
-                  topics: event.body().v0().topics().map((t) => t.toXDR("hex")),
-                  data: event.body().v0().data().toXDR("base64"),
+                  topics: event
+                    .body()
+                    .v0()
+                    .topics()
+                    .map((topic) => `0x${topic.toXDR("hex")}`),
+                  data: `0x${event.body().v0().data().toXDR("hex")}`,
                   ledger: tx.ledger_attr,
                   timestamp: Math.floor(Date.now() / 1000), // Horizon tx doesn't have easy timestamp in stream?
+                  txHash: tx.hash,
                 };
 
                 await onEvent(rawEvent);
