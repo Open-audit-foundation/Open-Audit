@@ -1,27 +1,7 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef, useCallback } from "react";
-import {
-  CheckCircle2,
-  HelpCircle,
-  Clock,
-  Eye,
-  GitBranch,
-  Search,
-  Filter,
-  Calendar,
-  X,
-  SlidersHorizontal,
-} from "lucide-react";
-import {
-  useReactTable,
-  getCoreRowModel,
-  getPaginationRowModel,
-  getFilteredRowModel,
-  flexRender,
-  ColumnDef,
-  FilterFn,
-} from "@tanstack/react-table";
+import { useState } from "react";
+import { CheckCircle2, HelpCircle, Clock, Eye, GitBranch } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -32,92 +12,15 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import { RawDataDialog } from "./RawDataDialog";
 import { ContributeDialog } from "./ContributeDialog";
 import { formatRelativeTime, truncateHex } from "@/lib/translator/decode";
-import { useUrlSync } from "@/lib/hooks/useUrlSync";
 import type { TranslatedEvent, RawEvent } from "@/lib/translator/types";
-
-const STORAGE_KEY = "open-audit:filter-state";
-const PAGE_SIZE = 50;
-
-interface FilterState {
-  contractFilter: string;
-  dateFrom: string;
-  dateTo: string;
-  eventTypeFilter: string;
-}
-
-const DEFAULT_FILTER_STATE: FilterState = {
-  contractFilter: "",
-  dateFrom: "",
-  dateTo: "",
-  eventTypeFilter: "",
-};
-
-function loadFilterState(): FilterState {
-  if (typeof window === "undefined") return DEFAULT_FILTER_STATE;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_FILTER_STATE;
-    const parsed = JSON.parse(raw) as unknown;
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      "contractFilter" in parsed &&
-      "dateFrom" in parsed &&
-      "dateTo" in parsed &&
-      "eventTypeFilter" in parsed
-    ) {
-      return parsed as FilterState;
-    }
-    return DEFAULT_FILTER_STATE;
-  } catch {
-    return DEFAULT_FILTER_STATE;
-  }
-}
-
-function saveFilterState(state: FilterState): void {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch {
-    // ignore storage errors
-  }
-}
-
-function clearFilterState(): void {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    // ignore
-  }
-}
 
 interface EventFeedTableProps {
   events: TranslatedEvent[];
   isLoading?: boolean;
   newEventIds?: Set<string>;
-  currentPage: number;
-  totalPages: number;
-  pageSize: number;
-  totalItems: number;
-  onPageChange: (page: number) => void;
-  onPageSizeChange: (pageSize: number) => void;
-}
-
-const PAGE_SIZE_OPTIONS = [25, 50];
-
-function getVisiblePages(currentPage: number, totalPages: number): number[] {
-  const start = Math.max(1, currentPage - 1);
-  const end = Math.min(totalPages, start + 2);
-  const normalizedStart = Math.max(1, end - 2);
-
-  return Array.from({ length: end - normalizedStart + 1 }, function (_, index) {
-    return normalizedStart + index;
-  });
 }
 
 function StatusBadge({ status }: { status: TranslatedEvent["status"] }): React.JSX.Element {
@@ -149,460 +52,131 @@ function StatusBadge({ status }: { status: TranslatedEvent["status"] }): React.J
 
 function SkeletonRow(): React.JSX.Element {
   return (
-    <TableRow className="hover:bg-transparent">
-      <TableCell>
-        <div className="h-5 w-20 bg-muted animate-pulse rounded-full" />
-      </TableCell>
-      <TableCell>
-        <div className="h-3.5 w-14 bg-muted animate-pulse rounded" />
-      </TableCell>
-      <TableCell>
-        <div className="space-y-1.5">
-          <div className="h-3 w-16 bg-muted animate-pulse rounded" />
-          <div className="h-4 w-64 bg-muted animate-pulse rounded" />
-        </div>
-      </TableCell>
-      <TableCell className="hidden md:table-cell">
-        <div className="h-3.5 w-24 bg-muted animate-pulse rounded" />
-      </TableCell>
-      <TableCell>
-        <div className="flex justify-end">
-          <div className="h-7 w-20 bg-muted animate-pulse rounded-md" />
-        </div>
-      </TableCell>
+    <TableRow>
+      {[1, 2, 3, 4, 5].map(function (i) {
+        return (
+          <TableCell key={i}>
+            <div className="h-4 bg-muted animate-pulse rounded" />
+          </TableCell>
+        );
+      })}
     </TableRow>
   );
 }
-
-// eslint-disable-next-line func-style
-const dateRangeFilter: FilterFn<TranslatedEvent> = (row, _columnId, value) => {
-  const { dateFrom, dateTo } = value as { dateFrom: string; dateTo: string };
-  if (!dateFrom && !dateTo) return true;
-  const rowDate = new Date(row.original.raw.timestamp * 1000);
-  if (dateFrom) {
-    const from = new Date(dateFrom);
-    from.setUTCHours(0, 0, 0, 0);
-    if (rowDate < from) return false;
-  }
-  if (dateTo) {
-    const to = new Date(dateTo);
-    to.setUTCHours(23, 59, 59, 999);
-    if (rowDate > to) return false;
-  }
-  return true;
-};
 
 export function EventFeedTable({
   events,
   isLoading = false,
   newEventIds = new Set(),
-  currentPage,
-  totalPages,
-  pageSize,
-  totalItems,
-  onPageChange,
-  onPageSizeChange,
 }: EventFeedTableProps): React.JSX.Element {
-  const tableTopRef = useRef<HTMLDivElement>(null);
   const [rawDialogEvent, setRawDialogEvent] = useState<RawEvent | null>(null);
   const [contributeDialogEvent, setContributeDialogEvent] = useState<RawEvent | null>(null);
-  const visiblePages = getVisiblePages(currentPage, totalPages);
-  const rangeStart = totalItems === 0 ? 0 : (currentPage - 1) * pageSize + 1;
-  const rangeEnd = totalItems === 0 ? 0 : rangeStart + events.length - 1;
 
-  const { get: getParam, setParams } = useUrlSync();
-
-  const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTER_STATE);
-  const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: PAGE_SIZE });
-  const [hydrated, setHydrated] = useState(false);
-
-  // Hydrate from the URL first (so deep links rule), falling back to
-  // localStorage when no URL params are present.
-  useEffect(function () {
-    const urlFilters: FilterState = {
-      contractFilter: getParam("q"),
-      dateFrom: getParam("from"),
-      dateTo: getParam("to"),
-      eventTypeFilter: getParam("topic"),
-    };
-    const hasUrl =
-      urlFilters.contractFilter ||
-      urlFilters.dateFrom ||
-      urlFilters.dateTo ||
-      urlFilters.eventTypeFilter;
-    setFilters(hasUrl ? urlFilters : loadFilterState());
-
-    const pageParam = parseInt(getParam("page") || "1", 10);
-    const pageIndex = Number.isFinite(pageParam) ? Math.max(0, pageParam - 1) : 0;
-    setPagination({ pageIndex, pageSize: PAGE_SIZE });
-
-    setHydrated(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Mirror filters to both the URL and localStorage on change.
-  useEffect(
-    function () {
-      if (!hydrated) return;
-      setParams({
-        q: filters.contractFilter || null,
-        from: filters.dateFrom || null,
-        to: filters.dateTo || null,
-        topic: filters.eventTypeFilter || null,
-      });
-
-      const isEmpty =
-        !filters.contractFilter &&
-        !filters.dateFrom &&
-        !filters.dateTo &&
-        !filters.eventTypeFilter;
-      if (isEmpty) {
-        clearFilterState();
-      } else {
-        saveFilterState(filters);
-      }
-    },
-    [filters, hydrated, setParams]
-  );
-
-  // Mirror pagination to the URL (page 1 stays implicit).
-  useEffect(
-    function () {
-      if (!hydrated) return;
-      setParams({
-        page: pagination.pageIndex > 0 ? String(pagination.pageIndex + 1) : null,
-      });
-    },
-    [pagination.pageIndex, hydrated, setParams]
-  );
-
-  const dateRangeError =
-    filters.dateFrom && filters.dateTo && filters.dateFrom > filters.dateTo
-      ? "Start date must be before end date"
-      : null;
-
-  const updateFilter = useCallback(function <K extends keyof FilterState>(
-    key: K,
-    value: FilterState[K]
-  ): void {
-    setFilters((prev) => ({ ...prev, [key]: value }));
-  }, []);
-
-  const clearAllFilters = useCallback(function (): void {
-    setFilters(DEFAULT_FILTER_STATE);
-    clearFilterState();
-  }, []);
-
-  const activeFilterCount = [
-    filters.contractFilter,
-    filters.dateFrom,
-    filters.dateTo,
-    filters.eventTypeFilter,
-  ].filter(Boolean).length;
-
-  // Derive unique event types from the full dataset
-  const eventTypeOptions = useMemo(function () {
-    const seen = new Set<string>();
-    for (const e of events) {
-      if (e.eventType) seen.add(e.eventType.toLowerCase());
-    }
-    return Array.from(seen).sort();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [events]);
-
-  const columns = useMemo<ColumnDef<TranslatedEvent>[]>(
-    () => [
-      {
-        id: "status",
-        accessorFn: (row) => row.status,
-        header: "Status",
-        cell: (info) => <StatusBadge status={info.getValue() as TranslatedEvent["status"]} />,
-      },
-      {
-        id: "timestamp",
-        accessorFn: (row) => row.raw.timestamp,
-        header: "Time",
-        filterFn: dateRangeFilter,
-        cell: (info) => (
-          <span className="text-muted-foreground text-xs whitespace-nowrap">
-            {formatRelativeTime(info.getValue() as number)}
-          </span>
-        ),
-      },
-      {
-        id: "description",
-        accessorFn: (row) => row.eventType || "",
-        header: "Translated Description",
-        filterFn: "includesString",
-        cell: (info) => {
-          const event = info.row.original;
-          const isTranslated = event.status === "translated";
-          if (isTranslated) {
-            return (
-              <div className="space-y-0.5">
-                {event.eventType && (
-                  <span className="text-xs font-medium text-violet-600 dark:text-violet-400 uppercase tracking-wide">
-                    {event.eventType}
-                  </span>
-                )}
-                <p className="text-sm">{event.description}</p>
-              </div>
-            );
-          }
-          return (
-            <div className="space-y-0.5">
-              <p className="text-sm text-muted-foreground italic">
-                No translation available for this event.
-              </p>
-              <p className="font-mono text-xs text-muted-foreground/70">
-                {truncateHex(event.raw.data, 10)}
-              </p>
-            </div>
-          );
-        },
-      },
-      {
-        id: "contractId",
-        accessorFn: (row) => row.raw.contractId,
-        header: () => <div className="hidden md:block">Contract</div>,
-        filterFn: "includesString",
-        cell: (info) => {
-          const contractId = info.getValue() as string;
-          return (
-            <span className="font-mono text-xs text-muted-foreground hidden md:inline-block">
-              {contractId.slice(0, 6)}...{contractId.slice(-4)}
-            </span>
-          );
-        },
-      },
-      {
-        id: "actions",
-        header: () => <div className="text-right">Actions</div>,
-        cell: (info) => {
-          const event = info.row.original;
-          const isTranslated = event.status === "translated";
-          return (
-            <div className="flex items-center justify-end gap-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 px-2 text-xs"
-                onClick={() => setRawDialogEvent(event.raw)}
-              >
-                <Eye className="h-3.5 w-3.5 mr-1" />
-                View Raw
-              </Button>
-              {!isTranslated && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 px-2 text-xs border-violet-200 text-violet-700 hover:bg-violet-50 hover:text-violet-800 dark:border-violet-800 dark:text-violet-400 dark:hover:bg-violet-950"
-                  onClick={() => setContributeDialogEvent(event.raw)}
-                >
-                  <GitBranch className="h-3.5 w-3.5 mr-1" />
-                  Contribute
-                </Button>
-              )}
-            </div>
-          );
-        },
-      },
-    ],
-    []
-  );
-
-  const columnFilters = useMemo(() => {
-    const f = [];
-    if (filters.contractFilter) f.push({ id: "contractId", value: filters.contractFilter });
-    if (!dateRangeError && (filters.dateFrom || filters.dateTo)) {
-      f.push({ id: "timestamp", value: { dateFrom: filters.dateFrom, dateTo: filters.dateTo } });
-    }
-    if (filters.eventTypeFilter) f.push({ id: "description", value: filters.eventTypeFilter });
-    return f;
-  }, [filters, dateRangeError]);
-
-  const table = useReactTable({
-    data: dateRangeError ? [] : events,
-    columns,
-    getCoreRowModel: getCoreRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    state: { columnFilters, pagination },
-    onPaginationChange: setPagination,
-  });
-
-  // Reset to page 1 when filters change, but skip the run that follows
-  // hydration so a deep link like ?topic=Transfer&page=3 doesn't get clobbered.
-  const skipFilterReset = useRef(true);
-  useEffect(
-    function () {
-      if (skipFilterReset.current) {
-        skipFilterReset.current = false;
-        return;
-      }
-      setPagination(function (prev) {
-        return { ...prev, pageIndex: 0 };
-      });
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [filters]
-  );
-
-  function handlePageChange(action: "prev" | "next"): void {
-    if (action === "prev") table.previousPage();
-    else table.nextPage();
-    tableTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  function handleViewRaw(event: RawEvent): void {
+    setRawDialogEvent(event);
   }
 
-  const filteredCount = table.getFilteredRowModel().rows.length;
-  const visibleCount = table.getRowModel().rows.length;
+  function handleContribute(event: RawEvent): void {
+    setContributeDialogEvent(event);
+  }
 
   return (
     <>
-      <div className="space-y-4">
-        {/* Filter Toolbar */}
-        <div
-          className="flex flex-col gap-3 bg-card p-3 rounded-lg border"
-          role="search"
-          aria-label="Event filters"
-        >
-          <div className="flex flex-col sm:flex-row gap-3">
-            {/* Contract ID filter */}
-            <div className="relative flex-1">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Filter by Contract ID..."
-                value={filters.contractFilter}
-                onChange={(e) => updateFilter("contractFilter", e.target.value)}
-                className="pl-9 h-9 text-sm"
-                aria-label="Filter by Contract ID"
-              />
-            </div>
+      <div className="rounded-lg border bg-card overflow-hidden">
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-muted/30 hover:bg-muted/30">
+              <TableHead className="w-[130px]">Status</TableHead>
+              <TableHead className="w-[100px]">Time</TableHead>
+              <TableHead>Translated Description</TableHead>
+              <TableHead className="w-[160px] hidden md:table-cell">Contract</TableHead>
+              <TableHead className="w-[180px] text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {isLoading
+              ? Array.from({ length: 5 }).map(function (_, i) {
+                  return <SkeletonRow key={i} />;
+                })
+              : events.map(function (event) {
+                  const isTranslated = event.status === "translated";
 
-            {/* Date range */}
-            <div className="flex gap-2 flex-wrap">
-              <div className="relative">
-                <Calendar className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
-                <Input
-                  type="date"
-                  value={filters.dateFrom}
-                  onChange={(e) => updateFilter("dateFrom", e.target.value)}
-                  className="pl-9 h-9 text-sm w-[150px]"
-                  aria-label="Filter from date"
-                />
-              </div>
-              <div className="relative">
-                <Calendar className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
-                <Input
-                  type="date"
-                  value={filters.dateTo}
-                  onChange={(e) => updateFilter("dateTo", e.target.value)}
-                  className="pl-9 h-9 text-sm w-[150px]"
-                  aria-label="Filter to date"
-                />
-              </div>
-            </div>
-
-            {/* Event type dropdown */}
-            <div className="relative">
-              <Filter className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
-              <select
-                value={filters.eventTypeFilter}
-                onChange={(e) => updateFilter("eventTypeFilter", e.target.value)}
-                className="h-9 w-[160px] pl-9 pr-3 rounded-md border border-input bg-transparent text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 appearance-none"
-                aria-label="Filter by event type"
-              >
-                <option value="">All Event Types</option>
-                {eventTypeOptions.map((type) => (
-                  <option key={type} value={type}>
-                    {type.charAt(0).toUpperCase() + type.slice(1)}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Active filters row */}
-          {(activeFilterCount > 0 || dateRangeError) && (
-            <div className="flex items-center justify-between gap-2 pt-1 border-t">
-              <div className="flex items-center gap-2 flex-wrap">
-                {activeFilterCount > 0 && (
-                  <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <SlidersHorizontal className="h-3.5 w-3.5" />
-                    <span>
-                      {activeFilterCount} active filter{activeFilterCount !== 1 ? "s" : ""}
-                    </span>
-                  </span>
-                )}
-                {dateRangeError && (
-                  <span className="text-xs text-destructive" role="alert">
-                    {dateRangeError}
-                  </span>
-                )}
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-                onClick={clearAllFilters}
-                aria-label="Clear all filters"
-              >
-                <X className="h-3.5 w-3.5 mr-1" />
-                Clear all filters
-              </Button>
-            </div>
-          )}
-        </div>
-
-        {/* Table */}
-        <div ref={tableTopRef} className="rounded-lg border bg-card overflow-hidden">
-          <Table>
-            <TableHeader>
-              {table.getHeaderGroups().map((headerGroup) => (
-                <TableRow key={headerGroup.id} className="bg-muted/30 hover:bg-muted/30">
-                  {headerGroup.headers.map((header) => {
-                    let widthClass = "";
-                    if (header.id === "status") widthClass = "w-[130px]";
-                    if (header.id === "timestamp") widthClass = "w-[100px]";
-                    if (header.id === "contractId") widthClass = "w-[160px] hidden md:table-cell";
-                    if (header.id === "actions") widthClass = "w-[180px]";
-
-                    return (
-                      <TableHead key={header.id} className={widthClass}>
-                        {header.isPlaceholder
-                          ? null
-                          : flexRender(header.column.columnDef.header, header.getContext())}
-                      </TableHead>
-                    );
-                  })}
-                </TableRow>
-              ))}
-            </TableHeader>
-            <TableBody>
-              {isLoading ? (
-                Array.from({ length: 5 }).map((_, i) => <SkeletonRow key={i} />)
-              ) : table.getRowModel().rows?.length ? (
-                table.getRowModel().rows.map((row) => {
-                  const event = row.original;
                   return (
                     <TableRow
-                      key={row.id}
-                      className={`group transition-colors ${
-                        newEventIds.has(event.raw.id)
-                          ? "animate-slide-in bg-violet-50/60 dark:bg-violet-950/30"
-                          : ""
-                      }`}
+                      key={event.raw.id}
+                      className={`group transition-colors ${newEventIds.has(event.raw.id) ? "animate-slide-in bg-violet-50/60 dark:bg-violet-950/30" : ""}`}
                     >
-                      {row.getVisibleCells().map((cell) => {
-                        let hiddenClass = "";
-                        if (cell.column.id === "contractId") hiddenClass = "hidden md:table-cell";
+                      {/* Status */}
+                      <TableCell>
+                        <StatusBadge status={event.status} />
+                      </TableCell>
 
-                        return (
-                          <TableCell key={cell.id} className={hiddenClass}>
-                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                          </TableCell>
-                        );
-                      })}
+                      {/* Time */}
+                      <TableCell className="text-muted-foreground text-xs whitespace-nowrap">
+                        {formatRelativeTime(event.raw.timestamp)}
+                      </TableCell>
+
+                      {/* Description */}
+                      <TableCell>
+                        {isTranslated ? (
+                          <div className="space-y-0.5">
+                            {event.eventType && (
+                              <span className="text-xs font-medium text-violet-600 dark:text-violet-400 uppercase tracking-wide">
+                                {event.eventType}
+                              </span>
+                            )}
+                            <p className="text-sm">{event.description}</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-0.5">
+                            <p className="text-sm text-muted-foreground italic">
+                              No translation available for this event.
+                            </p>
+                            <p className="font-mono text-xs text-muted-foreground/70">
+                              {truncateHex(event.raw.data, 10)}
+                            </p>
+                          </div>
+                        )}
+                      </TableCell>
+
+                      {/* Contract ID */}
+                      <TableCell className="hidden md:table-cell">
+                        <span className="font-mono text-xs text-muted-foreground">
+                          {event.raw.contractId.slice(0, 6)}...
+                          {event.raw.contractId.slice(-4)}
+                        </span>
+                      </TableCell>
+
+                      {/* Actions */}
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 px-2 text-xs"
+                            onClick={function () {
+                              handleViewRaw(event.raw);
+                            }}
+                          >
+                            <Eye className="h-3.5 w-3.5 mr-1" />
+                            View Raw
+                          </Button>
+
+                          {!isTranslated && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 px-2 text-xs border-violet-200 text-violet-700 hover:bg-violet-50 hover:text-violet-800 dark:border-violet-800 dark:text-violet-400 dark:hover:bg-violet-950"
+                              onClick={function () {
+                                handleContribute(event.raw);
+                              }}
+                            >
+                              <GitBranch className="h-3.5 w-3.5 mr-1" />
+                              Contribute
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
                     </TableRow>
                   );
                 })}
@@ -616,84 +190,12 @@ export function EventFeedTable({
             )}
           </TableBody>
         </Table>
-
-        {!isLoading && totalItems > 0 && (
-          <div className="flex flex-col gap-3 border-t bg-muted/20 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex flex-col gap-2 text-sm text-muted-foreground sm:flex-row sm:items-center">
-              <span>
-                Showing {rangeStart}-{rangeEnd} of {totalItems} events
-              </span>
-              <label className="flex items-center gap-2">
-                <span>Rows</span>
-                <select
-                  value={pageSize}
-                  onChange={function (e) {
-                    onPageSizeChange(Number(e.target.value));
-                  }}
-                  className="h-8 rounded-md border bg-background px-2 text-foreground"
-                  aria-label="Records per page"
-                >
-                  {PAGE_SIZE_OPTIONS.map(function (option) {
-                    return (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    );
-                  })}
-                </select>
-              </label>
-            </div>
-
-            <div className="flex items-center gap-1 self-end sm:self-auto">
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 px-3"
-                onClick={function () {
-                  onPageChange(currentPage - 1);
-                }}
-                disabled={currentPage === 1}
-              >
-                Previous
-              </Button>
-
-              {visiblePages.map(function (page) {
-                return (
-                  <Button
-                    key={page}
-                    variant={page === currentPage ? "default" : "outline"}
-                    size="sm"
-                    className="h-8 min-w-8 px-2"
-                    onClick={function () {
-                      onPageChange(page);
-                    }}
-                    aria-current={page === currentPage ? "page" : undefined}
-                  >
-                    {page}
-                  </Button>
-                );
-              })}
-
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 px-3"
-                onClick={function () {
-                  onPageChange(currentPage + 1);
-                }}
-                disabled={currentPage === totalPages}
-              >
-                Next
-              </Button>
-            </div>
-          </div>
-        )}
       </div>
 
       <RawDataDialog
         event={rawDialogEvent}
         open={rawDialogEvent !== null}
-        onOpenChange={(open) => {
+        onOpenChange={function (open) {
           if (!open) setRawDialogEvent(null);
         }}
       />
@@ -701,7 +203,7 @@ export function EventFeedTable({
       <ContributeDialog
         event={contributeDialogEvent}
         open={contributeDialogEvent !== null}
-        onOpenChange={(open) => {
+        onOpenChange={function (open) {
           if (!open) setContributeDialogEvent(null);
         }}
       />

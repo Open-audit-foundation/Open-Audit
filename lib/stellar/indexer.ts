@@ -372,7 +372,7 @@ export function startHorizonStreamingIndexer(options: StreamingIndexerOptions): 
         .transactions()
         .cursor("now")
         .stream({
-          onmessage: async (tx) => {
+          onmessage: async (tx: any) => {
             if (!tx.result_meta_xdr) return;
 
             try {

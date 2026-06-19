@@ -2,35 +2,25 @@
 
 import { useState, useCallback, useMemo, useEffect } from "react";
 import {
-  BookOpen,
-  ArrowRight,
-  Radio,
-  PauseCircle,
-  PlayCircle,
-  Upload,
-  FileJson,
-  Trash2,
-} from "lucide-react";
-import { SearchBar } from "@/components/dashboard/SearchBar";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import {
   AlertCircle,
-  ArrowRight,
   BookOpen,
-  FileJson,
+  ArrowRight,
+  Radio,
   PauseCircle,
   PlayCircle,
-  Radio,
-  Trash2,
   Upload,
+  FileJson,
+  Trash2,
+  Download,
 } from "lucide-react";
-import { EventFeedTable } from "@/components/dashboard/EventFeedTable";
 import { SearchBar } from "@/components/dashboard/SearchBar";
+import { EventFeedTable } from "@/components/dashboard/EventFeedTable";
 import { StatsBar } from "@/components/dashboard/StatsBar";
 import { UploadAbiDialog } from "@/components/dashboard/UploadAbiDialog";
 import { ExportDataDialog } from "@/components/dashboard/ExportDataDialog";
 import { Button } from "@/components/ui/button";
 import { useLiveFeed } from "@/lib/hooks/useLiveFeed";
+import { useLanguage } from "@/lib/hooks/useLanguage";
 import { getMockEventsForContract, MOCK_RAW_EVENTS } from "@/lib/mock-data";
 import {
   buildCustomBlueprints,
@@ -38,13 +28,8 @@ import {
   removeCustomAbi,
   saveCustomAbi,
 } from "@/lib/translator/custom-abi";
-import { MOCK_RAW_EVENTS } from "@/lib/mock-data";
-import { useLiveFeed } from "@/lib/hooks/useLiveFeed";
-import type { TranslatedEvent, RawEvent, CustomAbi } from "@/lib/translator/types";
 import { translateEvents } from "@/lib/translator/registry";
-import type { CustomAbi, RawEvent, TranslatedEvent } from "@/lib/translator/types";
-
-const DEFAULT_PAGE_SIZE = 25;
+import type { TranslatedEvent, RawEvent, CustomAbi } from "@/lib/translator/types";
 
 /** Simulates a network delay for realistic UX. */
 function simulateNetworkDelay(ms: number): Promise<void> {
@@ -56,15 +41,14 @@ function simulateNetworkDelay(ms: number): Promise<void> {
 export function DashboardClient(): React.JSX.Element {
   const [rawEvents, setRawEvents] = useState<RawEvent[]>(MOCK_RAW_EVENTS);
   const [customAbis, setCustomAbis] = useState<CustomAbi[]>([]);
-  const [contractFilter, setContractFilter] = useState<string | null>(null);
-  const [eventTopicFilter, setEventTopicFilter] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [searchValue, setSearchValue] = useState("");
   const [searchedContract, setSearchedContract] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [isExportOpen, setIsExportOpen] = useState(false);
+  const { language } = useLanguage();
+  const [liveEvents, setLiveEvents] = useState<TranslatedEvent[]>([]);
 
   useEffect(function () {
     setCustomAbis(loadCustomAbis());
@@ -74,46 +58,43 @@ export function DashboardClient(): React.JSX.Element {
     function () {
       return buildCustomBlueprints(customAbis);
     },
-    [customAbis],
+    [customAbis]
   );
 
-  const events = useMemo(
+  const translatedEvents = useMemo(
     function () {
-      const translated = translateEvents(rawEvents, customBlueprints);
-      return [...liveEvents, ...translated];
+      return translateEvents(rawEvents, customBlueprints, language);
     },
-    [rawEvents, customBlueprints, liveEvents]
+    [rawEvents, customBlueprints, language]
+  );
+
+  const allEvents = useMemo(
+    function () {
+      return [...liveEvents, ...translatedEvents];
+    },
+    [liveEvents, translatedEvents]
   );
 
   const filteredEvents = useMemo(
     function () {
-      return events.filter(function (e) {
-        if (contractFilter && e.raw.contractId !== contractFilter) {
+      return allEvents.filter(function (e) {
+        if (searchedContract && e.raw.contractId !== searchedContract) {
           return false;
-        }
-        if (eventTopicFilter.trim()) {
-          const filter = eventTopicFilter.trim().toLowerCase();
-          if (!e.eventType?.toLowerCase().includes(filter)) {
-            return false;
-          }
         }
         return true;
       });
     },
-    [events, contractFilter, eventTopicFilter]
+    [allEvents, searchedContract]
   );
 
-  const handleNewEvent = useCallback((event: TranslatedEvent) => {
-    setRawEvents((prev) => [event.raw, ...prev]);
-  }, []);
   const handleNewEvent = useCallback(
     function (event: TranslatedEvent): void {
       if (searchedContract && event.raw.contractId !== searchedContract) {
         return;
       }
 
-      setRawEvents(function (prev) {
-        return [event.raw, ...prev];
+      setLiveEvents(function (prev) {
+        return [event, ...prev];
       });
     },
     [searchedContract]
@@ -122,47 +103,26 @@ export function DashboardClient(): React.JSX.Element {
   const { isLive, isPaused, newEventIds, toggleLive, togglePause } =
     useLiveFeed(handleNewEvent);
 
-  const totalPages = Math.max(1, Math.ceil(events.length / pageSize));
-
-  useEffect(
-    function () {
-      setCurrentPage(function (prev) {
-        return Math.min(prev, totalPages);
-      });
-    },
-    [totalPages]
-  );
-
-  const paginatedEvents = useMemo(
-    function () {
-      const startIndex = (currentPage - 1) * pageSize;
-      return events.slice(startIndex, startIndex + pageSize);
-    },
-    [currentPage, events, pageSize]
-  );
-
-  const handleContractFilter = useCallback(function (contractId: string): void {
-    setContractFilter(contractId || null);
   const handleSearch = useCallback(async function (contractId: string): Promise<void> {
     const trimmed = contractId.trim();
-    setCurrentPage(1);
 
     if (!trimmed) {
       setRawEvents(MOCK_RAW_EVENTS);
       setSearchedContract(null);
       setError(null);
+      return;
+    }
 
-      try {
-        // Simulate fetching from Stellar network
-        await simulateNetworkDelay(800);
+    setIsLoading(true);
 
     try {
       await simulateNetworkDelay(800);
       setRawEvents(getMockEventsForContract(trimmed));
       setSearchedContract(trimmed);
+      setError(null);
     } catch {
       setError(
-        "Failed to fetch events. Please check the Contract ID and try again.",
+        "Failed to fetch events. Please check the Contract ID and try again."
       );
     } finally {
       setIsLoading(false);
@@ -178,59 +138,18 @@ export function DashboardClient(): React.JSX.Element {
     setCustomAbis(removeCustomAbi(contractId));
   }, []);
 
-  const handlePageChange = useCallback(function (page: number): void {
-    setCurrentPage(page);
-  }, []);
-
-  const handlePageSizeChange = useCallback(function (nextPageSize: number): void {
-    setPageSize(nextPageSize);
-    setCurrentPage(1);
-  }, []);
-
   return (
     <div className="space-y-6">
       {/* Filters */}
       <section aria-label="Event filters">
         <SearchBar
-          onSearch={handleContractFilter}
-          topicFilter={eventTopicFilter}
-          onTopicFilterChange={setEventTopicFilter}
-        />
-      </section>
-
-      {/* Active filter indicator */}
-      {(contractFilter || eventTopicFilter) && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
-          {contractFilter && (
-            <>
-              <span>Contract:</span>
-              <code className="font-mono text-xs bg-muted px-2 py-1 rounded">
-                {contractFilter.slice(0, 10)}...{contractFilter.slice(-6)}
-              </code>
-            </>
-          )}
-          {eventTopicFilter && (
-            <>
-              <span>Event:</span>
-              <code className="font-mono text-xs bg-muted px-2 py-1 rounded">
-                {eventTopicFilter}
-              </code>
-            </>
-          )}
-          <button
-            type="button"
-            onClick={function () {
-              handleContractFilter("");
-              setEventTopicFilter("");
-      <section aria-label="Contract search">
-        <SearchBar
           onSearch={handleSearch}
           isLoading={isLoading}
-          value={searchValue}
-          onValueChange={setSearchValue}
+          defaultValue={searchValue}
         />
       </section>
 
+      {/* Error state */}
       {error && (
         <div
           role="alert"
@@ -241,10 +160,11 @@ export function DashboardClient(): React.JSX.Element {
         </div>
       )}
 
-      {searchedContract && !isLoading && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      {/* Active filter indicator */}
+      {searchedContract && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
           <span>Showing events for:</span>
-          <code className="rounded bg-muted px-2 py-1 font-mono text-xs">
+          <code className="font-mono text-xs bg-muted px-2 py-1 rounded">
             {searchedContract.slice(0, 10)}...{searchedContract.slice(-6)}
           </code>
           <button
@@ -297,8 +217,7 @@ export function DashboardClient(): React.JSX.Element {
       </section>
 
       {/* Stats */}
-      <StatsBar events={events} />
-      {!isLoading && <StatsBar events={events} />}
+      {!isLoading && <StatsBar events={allEvents} />}
 
       <section aria-label="Event feed">
         <div className="mb-3 flex items-center justify-between">
@@ -315,7 +234,7 @@ export function DashboardClient(): React.JSX.Element {
               onClick={function () {
                 setIsExportOpen(true);
               }}
-              disabled={isLoading || events.length === 0}
+              disabled={isLoading || allEvents.length === 0}
               aria-label="Export filtered event data"
             >
               <Download className="h-3.5 w-3.5 mr-1.5" />
@@ -360,22 +279,10 @@ export function DashboardClient(): React.JSX.Element {
             </span>
           </div>
         </div>
-        <EventFeedTable events={filteredEvents} newEventIds={newEventIds} />
-              {isBusy ? "Loading..." : `${events.length} events`}
-            </span>
-          </div>
-        </div>
-
         <EventFeedTable
-          events={paginatedEvents}
+          events={filteredEvents}
           isLoading={isLoading}
           newEventIds={newEventIds}
-          currentPage={currentPage}
-          totalPages={totalPages}
-          pageSize={pageSize}
-          totalItems={events.length}
-          onPageChange={handlePageChange}
-          onPageSizeChange={handlePageSizeChange}
         />
       </section>
 
@@ -416,7 +323,7 @@ export function DashboardClient(): React.JSX.Element {
       <ExportDataDialog
         open={isExportOpen}
         onOpenChange={setIsExportOpen}
-        events={events}
+        events={allEvents}
       />
     </div>
   );

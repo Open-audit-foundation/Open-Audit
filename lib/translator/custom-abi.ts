@@ -16,7 +16,7 @@
  * so custom translations render in the same style as registry translations.
  */
 
-import { decodeAddress, decodeAmount, decodeEventName, truncateHex, escapeHtml } from "./decode";
+import { decodeAddress, decodeAmount, decodeEventName, truncateHex } from "./decode";
 import type {
   CustomAbi,
   CustomAbiEvent,
@@ -24,6 +24,7 @@ import type {
   RawEvent,
   TranslationBlueprint,
   TranslationResult,
+  Language,
 } from "./types";
 
 /** localStorage key under which uploaded ABIs are stored. */
@@ -137,8 +138,8 @@ export function customAbiToBlueprint(abi: CustomAbi): TranslationBlueprint {
   return {
     contractId: abi.contractId,
     contractName: `${abi.contractName} (Custom ABI)`,
-    translate: function (event: RawEvent): TranslationResult | null {
-      return translateWithAbi(abi, event);
+    translate: function (event: RawEvent, lang: Language): TranslationResult | null {
+      return translateWithAbi(abi, event, lang);
     },
   };
 }
@@ -153,7 +154,7 @@ export function buildCustomBlueprints(abis: CustomAbi[]): Map<string, Translatio
 }
 
 /** Attempts to translate an event using a custom ABI. */
-function translateWithAbi(abi: CustomAbi, event: RawEvent): TranslationResult | null {
+function translateWithAbi(abi: CustomAbi, event: RawEvent, lang: Language): TranslationResult | null {
   const topic0 = event.topics[0] ?? "";
   const decodedName = decodeEventName(topic0);
 
@@ -284,11 +285,9 @@ function firstArray(...candidates: unknown[]): unknown[] {
 }
 
 function asciiToHex(text: string): string {
-  // Escape HTML entities before converting to hex to prevent XSS
-  const sanitizedText = escapeHtml(text);
   let hex = "";
-  for (let i = 0; i < sanitizedText.length; i++) {
-    hex += sanitizedText.charCodeAt(i).toString(16).padStart(2, "0");
+  for (let i = 0; i < text.length; i++) {
+    hex += text.charCodeAt(i).toString(16).padStart(2, "0");
   }
   return hex;
 }

@@ -14,7 +14,8 @@
  */
 
 import { decodeAddress, decodeAmount, interpolateTemplate } from "../decode";
-import type { TranslationBlueprint, TranslationResult, RawEvent } from "../types";
+import type { TranslationBlueprint, TranslationResult, RawEvent, Language } from "../types";
+import { getTranslation } from "../translations";
 
 const KNOWN_SYMBOLS: Record<string, string> = {
   CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC: "USDC",
@@ -26,39 +27,35 @@ const KNOWN_SYMBOLS: Record<string, string> = {
 /**
  * Attempts to translate a SAC mint event.
  */
-function translateMint(event: RawEvent): TranslationResult | null {
+function translateMint(event: RawEvent, lang: Language): TranslationResult | null {
   if (!event.topics[0]?.includes("6d696e74")) return null;
 
+  const t = getTranslation(lang);
   const symbol = KNOWN_SYMBOLS[event.contractId] ?? "TOKEN";
   const admin = decodeAddress(event.topics[1] ?? "0x00");
   const to = decodeAddress(event.topics[2] ?? "0x00");
   const amount = decodeAmount(event.data, symbol);
 
   return {
-    description: interpolateTemplate(
-      "Admin [{admin}] minted {amount} {symbol} to [{to}]",
-      { admin: admin.short, to: to.short, amount: amount.formatted, symbol }
-    ),
-    eventType: "Mint",
+    description: t.sac.mint(admin.short, amount.formatted, symbol, to.short),
+    eventType: t.sac.eventTypes.Mint,
   };
 }
 
 /**
  * Attempts to translate a SAC burn event.
  */
-function translateBurn(event: RawEvent): TranslationResult | null {
+function translateBurn(event: RawEvent, lang: Language): TranslationResult | null {
   if (!event.topics[0]?.includes("6275726e")) return null;
 
+  const t = getTranslation(lang);
   const symbol = KNOWN_SYMBOLS[event.contractId] ?? "TOKEN";
   const from = decodeAddress(event.topics[1] ?? "0x00");
   const amount = decodeAmount(event.data, symbol);
 
   return {
-    description: interpolateTemplate(
-      "Public Key [{from}] burned {amount} {symbol}",
-      { from: from.short, amount: amount.formatted, symbol }
-    ),
-    eventType: "Burn",
+    description: t.sac.burn(from.short, amount.formatted, symbol),
+    eventType: t.sac.eventTypes.Burn,
   };
 }
 
@@ -71,8 +68,8 @@ export function createSacMintBurnBlueprint(contractId: string): TranslationBluep
   return {
     contractId,
     contractName: `Stellar Asset Contract — Mint/Burn (${symbol})`,
-    translate: function (event: RawEvent): TranslationResult | null {
-      return translateMint(event) ?? translateBurn(event);
+    translate: function (event: RawEvent, lang: Language): TranslationResult | null {
+      return translateMint(event, lang) ?? translateBurn(event, lang);
     },
   };
 }
