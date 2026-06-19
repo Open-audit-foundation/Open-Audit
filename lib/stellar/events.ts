@@ -29,7 +29,7 @@ export function eventResponseToRawEvent(
 
   return {
     id: String(source.id ?? source.pagingToken ?? `${ledger}-0`),
-    contractId: source.contractId ?? source.contract_id ?? fallbackContractId ?? "unknown",
+    contractId: normalizeContractId(source.contractId) ?? source.contract_id ?? fallbackContractId ?? "unknown",
     topics: normalizeTopics(source.topics ?? source.topic),
     data: normalizeScVal(source.data ?? source.value),
     ledger,
@@ -42,6 +42,18 @@ export function eventResponseToRawEvent(
 export function normalizeTopics(topics: unknown): string[] {
   if (!Array.isArray(topics)) return [];
   return topics.map(normalizeScVal);
+}
+
+/**
+ * Normalizes a contractId that may be a string or a stellar-sdk `Contract`
+ * object (which exposes a `.contractId()` method returning the Strkey string).
+ */
+function normalizeContractId(value: unknown): string | undefined {
+  if (typeof value === "string" && value.length > 0) return value;
+  if (value && typeof value === "object" && typeof (value as any).contractId === "function") {
+    return (value as any).contractId() as string;
+  }
+  return undefined;
 }
 
 function normalizeScVal(value: unknown): string {

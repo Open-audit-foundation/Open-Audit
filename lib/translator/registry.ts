@@ -101,11 +101,12 @@ export function translateEvent(
   const blueprint = REGISTRY.get(event.contractId);
 
   if (!blueprint) {
+    console.warn(`[open-audit] No blueprint for contract ${event.contractId}`);
+    const hexData = typeof event.data === "string" ? event.data : String(event.data);
     return {
       raw: event,
-      description: null,
+      description: `[Unknown Event: contract ${event.contractId}] Hex Data: ${hexData}`,
       status: "cryptic",
-      // Surface the custom contract name (if any) so the UI still has context.
       blueprintName: custom?.contractName ?? null,
       eventType: null,
     };
@@ -114,9 +115,11 @@ export function translateEvent(
   const translated = applyBlueprint(event, blueprint, lang);
   if (translated) return translated;
 
+  console.warn(`[open-audit] Blueprint could not translate event for contract ${event.contractId}`);
+  const hexData = typeof event.data === "string" ? event.data : String(event.data);
   return {
     raw: event,
-    description: null,
+    description: `[Unknown Event: contract ${event.contractId}] Hex Data: ${hexData}`,
     status: "cryptic",
     blueprintName: blueprint.contractName,
     eventType: null,

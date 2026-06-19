@@ -1,6 +1,31 @@
 import { beforeAll, afterEach, afterAll } from "vitest";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
+import {
+  isValidHex,
+  sanitizeHex,
+  escapeHtml,
+  detectScValType,
+  decodeMap,
+  decodeVec,
+  decodeEnum,
+  decodeScVal,
+} from "./lib/translator/decode";
+import { matchesEventCriteria } from "./lib/translator/registry";
+
+// Expose as implicit globals so existing test files that reference these
+// functions without explicit imports continue to work.
+Object.assign(globalThis, {
+  isValidHex,
+  sanitizeHex,
+  escapeHtml,
+  detectScValType,
+  decodeMap,
+  decodeVec,
+  decodeEnum,
+  decodeScVal,
+  matchesEventCriteria,
+});
 
 export const handlers = [
   // Intercept Soroban RPC POST requests
