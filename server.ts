@@ -11,7 +11,7 @@ import next from "next";
 import { WebSocketServer, WebSocket } from "ws";
 import { MOCK_RAW_EVENTS } from "./lib/mock-data";
 import { translateEvent } from "./lib/translator/registry";
-import { startHorizonStreamingIndexer } from "./lib/stellar/indexer";
+import { createFileIngestionStateStore, startHorizonStreamingIndexer } from "./lib/stellar/indexer";
 import { getNetworkConfig } from "./lib/stellar/client";
 
 const dev = process.env.NODE_ENV !== "production";
@@ -22,7 +22,10 @@ const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
   const httpServer = createServer((req, res) => {
-    res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss://* https://horizon-testnet.stellar.org https://soroban-testnet.stellar.org https://horizon.stellar.org https://mainnet.stellar.validationcloud.io; img-src 'self' data:; font-src 'self' data:;");
+    res.setHeader(
+      "Content-Security-Policy",
+      "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss://* https://horizon-testnet.stellar.org https://soroban-testnet.stellar.org https://horizon.stellar.org https://mainnet.stellar.validationcloud.io; img-src 'self' data:; font-src 'self' data:;"
+    );
     const parsedUrl = parse(req.url ?? "/", true);
     handle(req, res, parsedUrl);
   });
@@ -47,6 +50,10 @@ app.prepare().then(() => {
   // Start the real-time streaming indexer
   const indexer = startHorizonStreamingIndexer({
     networkConfig: getNetworkConfig(),
+    stateStore: createFileIngestionStateStore(
+      process.env.INGESTION_STATE_FILE ?? ".open-audit/ingestion-state.json"
+    ),
+    coldStartLookbackLedgers: Number(process.env.INGESTION_COLD_START_LOOKBACK_LEDGERS ?? "100"),
     onEvent: (rawEvent) => {
       console.log(`[Indexer] New event: ${rawEvent.id} from contract ${rawEvent.contractId}`);
       const translated = translateEvent(rawEvent);

@@ -7,6 +7,8 @@ import { SorobanRpc } from "stellar-sdk";
 import {
   fetchEventsWithRetry,
   startEventIndexer,
+  startHorizonStreamingIndexer,
+  createMemoryIngestionStateStore,
   calculateRetryDelay,
   DEFAULT_RETRY_CONFIG,
   type IndexerCursor,
@@ -20,6 +22,12 @@ vi.mock("stellar-sdk", function () {
     SorobanRpc: {
       Server: vi.fn(),
     },
+    Horizon: {
+      Server: vi.fn(),
+    },
+    xdr: {},
+    scValToNative: vi.fn(),
+    StrKey: { encodeContract: vi.fn() },
   };
 });
 
@@ -104,8 +112,34 @@ describe("fetchEventsWithRetry", function () {
     expect(mockServer.getEvents).toHaveBeenCalledTimes(3);
   });
 
+  it("should retry timeout errors and eventually succeed", async function () {
+    const mockResponse = {
+      events: [{ id: "event-1" }],
+      latestLedger: 2000,
+    };
+
+    mockServer.getEvents
+      .mockRejectedValueOnce(new Error("Network timeout while connecting to RPC"))
+      .mockResolvedValueOnce(mockResponse);
+
+    const result = await fetchEventsWithRetry(
+      mockServer as unknown as SorobanRpc.Server,
+      ["contract-1"],
+      1000,
+      {
+        initialDelayMs: 10,
+        maxDelayMs: 100,
+        maxRetries: 2,
+        backoffMultiplier: 2,
+      }
+    );
+
+    expect(result).toEqual(mockResponse);
+    expect(mockServer.getEvents).toHaveBeenCalledTimes(2);
+  });
+
   it("should throw immediately on non-rate-limit errors", async function () {
-    mockServer.getEvents.mockRejectedValue(new Error("Network connection failed"));
+    mockServer.getEvents.mockRejectedValue(new Error("Invalid contract filter"));
 
     await expect(
       fetchEventsWithRetry(
@@ -114,7 +148,7 @@ describe("fetchEventsWithRetry", function () {
         1000,
         DEFAULT_RETRY_CONFIG
       )
-    ).rejects.toThrow("Network connection failed");
+    ).rejects.toThrow("Invalid contract filter");
 
     expect(mockServer.getEvents).toHaveBeenCalledTimes(1);
   });
@@ -123,17 +157,12 @@ describe("fetchEventsWithRetry", function () {
     mockServer.getEvents.mockRejectedValue(new Error("429 Too Many Requests"));
 
     await expect(
-      fetchEventsWithRetry(
-        mockServer as unknown as SorobanRpc.Server,
-        ["contract-1"],
-        1000,
-        {
-          initialDelayMs: 10,
-          maxDelayMs: 100,
-          maxRetries: 2,
-          backoffMultiplier: 2,
-        }
-      )
+      fetchEventsWithRetry(mockServer as unknown as SorobanRpc.Server, ["contract-1"], 1000, {
+        initialDelayMs: 10,
+        maxDelayMs: 100,
+        maxRetries: 2,
+        backoffMultiplier: 2,
+      })
     ).rejects.toThrow("Failed to fetch events after 2 retries");
 
     expect(mockServer.getEvents).toHaveBeenCalledTimes(3); // Initial + 2 retries
@@ -245,6 +274,53 @@ describe("startEventIndexer", function () {
     indexer.stop();
   });
 
+  it("should resume from and persist durable ingestion state", async function () {
+    const mockResponse = {
+      events: [{ id: "event-1" }],
+      latestLedger: 3000,
+      cursor: "cursor-3000",
+    };
+
+    mockServer.getEvents.mockResolvedValue(mockResponse);
+    const stateStore = createMemoryIngestionStateStore({
+      lastLedger: 2500,
+      pagingToken: "cursor-2500",
+      updatedAt: "2026-06-19T00:00:00.000Z",
+    });
+
+    const indexer = startEventIndexer({
+      networkConfig: {
+        horizonUrl: "https://horizon-testnet.stellar.org",
+        sorobanRpcUrl: "https://soroban-testnet.stellar.org",
+        networkPassphrase: "Test SDF Network ; September 2015",
+      },
+      contractIds: ["contract-1"],
+      startLedger: 1000,
+      pollIntervalMs: 5000,
+      onEvents: jest.fn(),
+      stateStore,
+      retryConfig: {
+        initialDelayMs: 10,
+        maxDelayMs: 100,
+        maxRetries: 1,
+        backoffMultiplier: 2,
+      },
+    });
+
+    await jest.advanceTimersByTimeAsync(100);
+
+    expect(mockServer.getEvents).toHaveBeenCalledWith({
+      startLedger: 2500,
+      filters: [{ type: "contract", contractIds: ["contract-1"] }],
+    });
+    await expect(stateStore.load()).resolves.toMatchObject({
+      lastLedger: 3000,
+      pagingToken: "cursor-3000",
+    });
+
+    indexer.stop();
+  });
+
   it("should handle rate limit errors with retry", async function () {
     const mockResponse = {
       events: [{ id: "event-1" }],
@@ -283,6 +359,45 @@ describe("startEventIndexer", function () {
 
     expect(mockServer.getEvents).toHaveBeenCalledTimes(2);
     expect(onEvents).toHaveBeenCalledWith(mockResponse.events, expect.any(Object));
+
+    indexer.stop();
+  });
+});
+
+describe("startHorizonStreamingIndexer", function () {
+  it("should open Horizon stream from stored paging token", async function () {
+    const { Horizon } = await import("stellar-sdk");
+    const stream = vi.fn();
+    const cursor = vi.fn(function () {
+      return { stream };
+    });
+    const transactions = vi.fn(function () {
+      return { cursor };
+    });
+
+    vi.mocked(Horizon.Server).mockImplementation(function () {
+      return { transactions } as any;
+    });
+
+    const stateStore = createMemoryIngestionStateStore({
+      lastLedger: 1234,
+      pagingToken: "stored-token",
+      updatedAt: "2026-06-19T00:00:00.000Z",
+    });
+
+    const indexer = startHorizonStreamingIndexer({
+      networkConfig: {
+        horizonUrl: "https://horizon-testnet.stellar.org",
+        sorobanRpcUrl: "https://soroban-testnet.stellar.org",
+        networkPassphrase: "Test SDF Network ; September 2015",
+      },
+      onEvent: vi.fn(),
+      stateStore,
+    });
+
+    await vi.waitFor(function () {
+      expect(cursor).toHaveBeenCalledWith("stored-token");
+    });
 
     indexer.stop();
   });
