@@ -7,6 +7,200 @@
 
 import type { DecodedAddress, DecodedAmount } from "./types";
 
+// ─── Template interpolation ──────────────────────────────────────────────────
+
+/**
+ * Replaces `{key}` placeholders in a template string with values from params.
+ * Unknown placeholders are left intact.
+ */
+export function interpolateTemplate(
+  template: string,
+  params: Record<string, string>
+): string {
+  return template.replace(/\{(\w+)\}/g, function (match, key) {
+    return Object.prototype.hasOwnProperty.call(params, key) ? params[key] : match;
+  });
+}
+
+// ─── Hex validation & sanitization ───────────────────────────────────────────
+
+/** Returns true if the string is a valid hex value (with or without 0x prefix). */
+export function isValidHex(value: unknown): boolean {
+  if (typeof value !== "string" || value.length === 0) return false;
+  const stripped = value.startsWith("0x") || value.startsWith("0X") ? value.slice(2) : value;
+  return stripped.length > 0 && /^[0-9a-fA-F]+$/.test(stripped);
+}
+
+/** Removes non-hex characters from a string, preserving an optional 0x prefix. */
+export function sanitizeHex(value: string): string {
+  if (value.length === 0) return "";
+  const hasPrefix = value.startsWith("0x") || value.startsWith("0X");
+  const stripped = hasPrefix ? value.slice(2) : value;
+  const clean = stripped.replace(/[^0-9a-fA-F]/g, "");
+  if (clean.length === 0) return "";
+  return `0x${clean}`;
+}
+
+/** Escapes HTML special characters to prevent XSS when rendering hex in HTML. */
+export function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// ─── ScVal type detection ─────────────────────────────────────────────────────
+
+type ScValTypeName = "Vec" | "Map" | "Address" | "String" | "Bytes" | "U128" | "Void";
+
+/** Detects the ScVal type from a hex prefix or byte length heuristic. */
+export function detectScValType(hex: string): ScValTypeName {
+  if (!isValidHex(hex)) return "Void";
+  const stripped = hex.startsWith("0x") ? hex.slice(2) : hex;
+  if (stripped.length === 0) return "Void";
+
+  const prefix = stripped.slice(0, 8).toLowerCase();
+  if (prefix === "00000010") return "Vec";
+  if (prefix === "00000011") return "Map";
+  if (prefix === "0000000e" || prefix === "0000000f") return "String";
+
+  // 32-byte (64 hex chars) with no known XDR prefix → treat as Address
+  if (stripped.length === 64) return "Address";
+  // 16-byte (32 hex chars) → treat as U128
+  if (stripped.length === 32) return "U128";
+
+  return "Bytes";
+}
+
+// ─── Complex ScVal decoders ───────────────────────────────────────────────────
+
+export interface MapDecodeResult {
+  type: "Map";
+  entries: Array<{ key: string; value: string }>;
+  summary: string;
+}
+
+export interface VecDecodeResult {
+  type: "Vec";
+  elements: string[];
+  summary: string;
+}
+
+export interface EnumDecodeResult {
+  type: "Enum";
+  variant: string;
+  value?: string;
+  summary: string;
+}
+
+export type ScValDecodeResult =
+  | MapDecodeResult
+  | VecDecodeResult
+  | EnumDecodeResult
+  | { type: "Address"; value: string }
+  | { type: "U128"; value: string }
+  | { type: "Void"; value: string };
+
+/** Decodes a hex-encoded XDR map into key/value entries. */
+export function decodeMap(hex: string): MapDecodeResult {
+  if (!hex || !isValidHex(hex)) {
+    return { type: "Map", entries: [], summary: "Invalid map data" };
+  }
+  const stripped = hex.startsWith("0x") ? hex.slice(2) : hex;
+  if (stripped.length === 0) {
+    return { type: "Map", entries: [], summary: "" };
+  }
+  // Simplified heuristic: chunk payload into key/value pairs of 32 hex chars each
+  const payload = stripped.slice(8); // skip 4-byte prefix
+  const entries: Array<{ key: string; value: string }> = [];
+  for (let i = 0; i + 64 <= payload.length; i += 64) {
+    entries.push({
+      key: `0x${payload.slice(i, i + 32)}`,
+      value: `0x${payload.slice(i + 32, i + 64)}`,
+    });
+  }
+  return {
+    type: "Map",
+    entries,
+    summary: `Map(${entries.length} entries)`,
+  };
+}
+
+/** Decodes a hex-encoded XDR vector into an array of elements. */
+export function decodeVec(hex: string): VecDecodeResult {
+  if (!hex || !isValidHex(hex)) {
+    return { type: "Vec", elements: [], summary: "Invalid vector data" };
+  }
+  const stripped = hex.startsWith("0x") ? hex.slice(2) : hex;
+  if (stripped.length === 0) {
+    return { type: "Vec", elements: [], summary: "" };
+  }
+  const payload = stripped.slice(8);
+  const elements: string[] = [];
+  for (let i = 0; i + 32 <= payload.length; i += 32) {
+    elements.push(`0x${payload.slice(i, i + 32)}`);
+  }
+  return {
+    type: "Vec",
+    elements,
+    summary: `Vec(${elements.length} elements)`,
+  };
+}
+
+/**
+ * Decodes a hex-encoded XDR enum variant.
+ * @param knownVariants Optional map from 8-hex-char discriminant to variant name.
+ */
+export function decodeEnum(
+  hex: string,
+  knownVariants?: Record<string, string>
+): EnumDecodeResult {
+  if (!hex || !isValidHex(hex)) {
+    return { type: "Enum", variant: "unknown", summary: "Invalid enum data" };
+  }
+  const stripped = hex.startsWith("0x") ? hex.slice(2) : hex;
+  if (stripped.length < 8) {
+    return { type: "Enum", variant: "unknown", summary: "Invalid enum data" };
+  }
+  const discriminant = stripped.slice(0, 8).toLowerCase();
+  const variantName = knownVariants?.[discriminant] ?? `variant_${discriminant}`;
+  const payload = stripped.slice(8);
+  if (payload.length === 0) {
+    return { type: "Enum", variant: variantName, summary: `Enum::${variantName}` };
+  }
+  const value = `0x${payload}`;
+  return {
+    type: "Enum",
+    variant: variantName,
+    value,
+    summary: `Enum::${variantName}(${value.slice(0, 10)}...)`,
+  };
+}
+
+/**
+ * Top-level dispatcher: detects the ScVal type and delegates to the
+ * appropriate decoder.
+ */
+export function decodeScVal(hex: string): ScValDecodeResult {
+  const type = detectScValType(hex);
+  switch (type) {
+    case "Map":
+      return decodeMap(hex);
+    case "Vec":
+      return decodeVec(hex);
+    case "Address":
+      return { type: "Address", value: hex };
+    case "U128":
+      return { type: "U128", value: hex };
+    case "Void":
+      return { type: "Void", value: hex };
+    default:
+      return decodeEnum(hex);
+  }
+}
+
 const STROOP_DIVISOR = BigInt(10_000_000);
 
 /**
