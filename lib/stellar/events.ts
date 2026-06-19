@@ -29,13 +29,25 @@ export function eventResponseToRawEvent(
 
   return {
     id: String(source.id ?? source.pagingToken ?? `${ledger}-0`),
-    contractId: source.contractId ?? source.contract_id ?? fallbackContractId ?? "unknown",
+    contractId: extractContractId(source.contractId ?? source.contract_id) ?? fallbackContractId ?? "unknown",
     topics: normalizeTopics(source.topics ?? source.topic),
     data: normalizeScVal(source.data ?? source.value),
     ledger,
     timestamp: normalizeTimestamp(source.timestamp, source.ledgerClosedAt),
     txHash: source.txHash ?? source.transactionHash ?? "",
   };
+}
+
+/**
+ * Extracts a contract ID string from either a string or an SDK Contract object.
+ * The stellar-sdk sometimes returns a Contract instance with a .contractId() method.
+ */
+function extractContractId(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object" && "contractId" in value && typeof (value as { contractId: unknown }).contractId === "function") {
+    return (value as { contractId: () => string }).contractId();
+  }
+  return undefined;
 }
 
 /** Normalizes the full ordered topic vector without dropping secondary topics. */

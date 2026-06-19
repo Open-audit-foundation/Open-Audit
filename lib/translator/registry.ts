@@ -101,11 +101,12 @@ export function translateEvent(
   const blueprint = REGISTRY.get(event.contractId);
 
   if (!blueprint) {
+    const placeholder = `[Unknown Event: contract ${event.contractId}] Hex Data: ${event.data}`;
+    console.warn(`[open-audit] No blueprint for contract: ${event.contractId}`);
     return {
       raw: event,
-      description: null,
+      description: placeholder,
       status: "cryptic",
-      // Surface the custom contract name (if any) so the UI still has context.
       blueprintName: custom?.contractName ?? null,
       eventType: null,
     };
