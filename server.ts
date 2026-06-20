@@ -14,6 +14,7 @@ import { translateEvent } from "./lib/translator/registry";
 import { startHorizonStreamingIndexer } from "./lib/stellar/indexer";
 import { getNetworkConfig } from "./lib/stellar/client";
 import { captureExceptionSync } from "./lib/telemetry";
+import { schedulePruner } from "./lib/retention/pruner";
 
 const dev = process.env.NODE_ENV !== "production";
 const port = parseInt(process.env.PORT ?? "3000", 10);
@@ -57,6 +58,9 @@ app.prepare().then(() => {
       captureExceptionSync(err, { context: { operation: "horizonStreamingIndexer" } });
     },
   });
+
+  // Start the retention pruner cron (no-op if RETENTION_ENABLED=false)
+  schedulePruner();
 
   httpServer.listen(port, () => {
     console.log(`> Ready on http://localhost:${port}`);
