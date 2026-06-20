@@ -5,12 +5,16 @@
  * translation blueprints. When a raw event arrives, the registry:
  *
  *   1. Looks up the contract ID in the blueprint map.
- *   2. Calls the blueprint's translate() function.
- *   3. Returns a TranslatedEvent with a human-readable description,
+ *   2. Selects the most recent versioned schema whose validFromLedger ≤ event.ledger.
+ *   3. Calls the blueprint's translate() function.
+ *   4. Returns a TranslatedEvent with a human-readable description,
  *      or marks the event as "cryptic" if no blueprint matches.
  *
  * To add support for a new contract, create a blueprint in ./blueprints/
  * and register it in buildRegistry() below.
+ *
+ * To support a contract upgrade, register an additional VersionedTranslationBlueprint
+ * with a `validFromLedger` set to the first ledger of the upgraded contract.
  */
 
 import { createAllSacBlueprints } from "./blueprints/sac-transfer";
@@ -24,8 +28,11 @@ import type {
   Language,
 } from "./types";
 
-/** The registry maps contract IDs to their blueprints. */
-type BlueprintRegistry = Map<string, TranslationBlueprint>;
+/**
+ * The registry maps contract IDs to an array of versioned blueprints,
+ * sorted descending by validFromLedger so the newest schema is tried first.
+ */
+type BlueprintRegistry = Map<string, VersionedTranslationBlueprint[]>;
 
 /**
  * Builds the global blueprint registry by collecting all known blueprints.
@@ -75,6 +82,25 @@ function buildRegistry(): BlueprintRegistry {
 const REGISTRY: BlueprintRegistry = buildRegistry();
 
 /**
+ * Selects the correct versioned blueprint for an event by finding the newest
+ * schema whose validFromLedger is less than or equal to the event's ledger.
+ *
+ * Blueprints are pre-sorted descending by validFromLedger, so the first match
+ * is always the most recent applicable version.
+ */
+function resolveBlueprint(
+  blueprints: VersionedTranslationBlueprint[],
+  ledger: number
+): VersionedTranslationBlueprint | null {
+  for (const blueprint of blueprints) {
+    if ((blueprint.validFromLedger ?? 0) <= ledger) {
+      return blueprint;
+    }
+  }
+  return null;
+}
+
+/**
  * Translates a single raw Soroban event into a human-readable TranslatedEvent.
  *
  * Lookup order:
@@ -108,6 +134,7 @@ export function translateEvent(
       // Surface the custom contract name (if any) so the UI still has context.
       blueprintName: custom?.contractName ?? null,
       eventType: null,
+      schemaVersion: null,
     };
   }
 
@@ -139,6 +166,7 @@ function applyBlueprint(event: RawEvent, blueprint: TranslationBlueprint, lang: 
     status: "translated",
     blueprintName: blueprint.contractName,
     eventType: result.eventType,
+    schemaVersion: blueprint.version ?? null,
   };
 }
 
@@ -202,6 +230,7 @@ export function translateEvents(
         status: "cryptic",
         blueprintName: null,
         eventType: null,
+        schemaVersion: null,
       };
     }
   });
@@ -226,4 +255,21 @@ export function getRegisteredContracts(): string[] {
  */
 export function getBlueprintCount(): number {
   return REGISTRY.size;
+}
+
+/**
+ * Registers one or more versioned blueprints for a contract at runtime.
+ *
+ * Call this to add or upgrade a contract's translation schemas without
+ * rebuilding the singleton. The blueprint list is re-sorted after insertion.
+ */
+export function registerBlueprint(...blueprints: VersionedTranslationBlueprint[]): void {
+  for (const blueprint of blueprints) {
+    const existing = REGISTRY.get(blueprint.contractId) ?? [];
+    existing.push(blueprint);
+    REGISTRY.set(
+      blueprint.contractId,
+      existing.sort((a, b) => (b.validFromLedger ?? 0) - (a.validFromLedger ?? 0))
+    );
+  }
 }

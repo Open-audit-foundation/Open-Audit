@@ -48,6 +48,11 @@ export interface TranslatedEvent {
   blueprintName: string | null;
   /** Short label for the event type, e.g. "Transfer", "Swap". */
   eventType: string | null;
+  /**
+   * The schema version label that was applied, if the blueprint is versioned.
+   * e.g. "v2". Null when the blueprint has no version label.
+   */
+  schemaVersion: string | null;
 }
 
 /**
@@ -90,6 +95,30 @@ export interface EventMatchCriteria {
   contractId?: string;
   /** All topic criteria must match. */
   topics?: TopicCriterion[];
+}
+
+/**
+ * A versioned translation blueprint that is only active for events emitted
+ * at or after a specific ledger sequence number.
+ *
+ * Use this when a contract upgrade changes its event schema. Register multiple
+ * versioned blueprints for the same contract — the engine will automatically
+ * select the most recent schema whose `validFromLedger` is ≤ the event ledger.
+ *
+ * If `validFromLedger` is omitted (or 0), the schema applies to all ledgers
+ * (i.e. it is the original/baseline version).
+ */
+export interface VersionedTranslationBlueprint extends TranslationBlueprint {
+  /**
+   * The first ledger sequence number for which this schema is valid.
+   * Defaults to 0 (applies from genesis).
+   */
+  validFromLedger?: number;
+  /**
+   * Optional human-readable version label, e.g. "v1", "v2.1".
+   * Used for display and debugging only.
+   */
+  version?: string;
 }
 
 /** The result returned by a blueprint's translate function. */
