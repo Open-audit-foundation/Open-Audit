@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import {
   AlertCircle,
   BookOpen,
@@ -19,7 +19,7 @@ import { StatsBar } from "@/components/dashboard/StatsBar";
 import { UploadAbiDialog } from "@/components/dashboard/UploadAbiDialog";
 import { ExportDataDialog } from "@/components/dashboard/ExportDataDialog";
 import { Button } from "@/components/ui/button";
-import { useLiveFeed } from "@/lib/hooks/useLiveFeed";
+import { useSSEFeed } from "@/lib/hooks/useSSEFeed";
 import { useLanguage } from "@/lib/hooks/useLanguage";
 import { getMockEventsForContract, MOCK_RAW_EVENTS } from "@/lib/mock-data";
 import {
@@ -87,21 +87,56 @@ export function DashboardClient(): React.JSX.Element {
     [allEvents, searchedContract]
   );
 
-  const handleNewEvent = useCallback(
+  const [isPaused, setIsPaused] = useState(false);
+  const [newEventIds, setNewEventIds] = useState<Set<string>>(new Set());
+  const pauseBufferRef = useRef<TranslatedEvent[]>([]);
+  const isPausedRef = useRef(false);
+
+  const handleSSEEvent = useCallback(
     function (event: TranslatedEvent): void {
-      if (searchedContract && event.raw.contractId !== searchedContract) {
+      if (searchedContract && event.raw.contractId !== searchedContract) return;
+
+      if (isPausedRef.current) {
+        pauseBufferRef.current.push(event);
         return;
       }
 
-      setLiveEvents(function (prev) {
-        return [event, ...prev];
-      });
+      setLiveEvents(function (prev) { return [event, ...prev]; });
+      setNewEventIds(function (prev) { return new Set(prev).add(event.raw.id); });
+      setTimeout(function () {
+        setNewEventIds(function (prev) {
+          const next = new Set(prev);
+          next.delete(event.raw.id);
+          return next;
+        });
+      }, 600);
     },
     [searchedContract]
   );
 
-  const { isLive, isPaused, newEventIds, toggleLive, togglePause } =
-    useLiveFeed(handleNewEvent);
+  const { isLive, toggleLive } = useSSEFeed(handleSSEEvent, {
+    contractId: searchedContract ?? undefined,
+  });
+
+  const togglePause = useCallback(function () {
+    setIsPaused(function (prev) {
+      isPausedRef.current = !prev;
+      if (prev) {
+        for (const event of pauseBufferRef.current.splice(0)) {
+          setLiveEvents(function (p) { return [event, ...p]; });
+          setNewEventIds(function (ids) { return new Set(ids).add(event.raw.id); });
+          setTimeout(function () {
+            setNewEventIds(function (ids) {
+              const next = new Set(ids);
+              next.delete(event.raw.id);
+              return next;
+            });
+          }, 600);
+        }
+      }
+      return !prev;
+    });
+  }, []);
 
   const handleSearch = useCallback(async function (contractId: string): Promise<void> {
     const trimmed = contractId.trim();
