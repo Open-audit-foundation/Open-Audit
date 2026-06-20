@@ -1,0 +1,109 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Event {
+  id              String   @id @unique
+  contractId      String   @index
+  ledger          Int      @index
+  timestamp       Int
+  txHash          String   @index
+  topics          Json     // Store as JSON array
+  data            String
+  description     String?  // Translated human-readable text
+  status          String   // "translated" | "cryptic"
+  blueprintName   String?  // Contract name from blueprint
+  eventType       String?  // Event type (transfer, mint, burn, etc.)
+
+  // Reconciliation fields
+  rpcVerified     Boolean  @default(false)
+  lastRpcCheck    DateTime?
+  discrepancies   String?  // JSON array of issues
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([contractId, ledger])
+  @@index([timestamp])
+}
+
+// Tracks the indexer's progress through ledgers
+model IndexerCursor {
+  id              String   @id @default("current")
+  lastLedger      Int      @default(0)
+  lastProcessed   DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// Records reconciliation job executions
+model ReconciliationJob {
+  id              String   @id @default(cuid())
+  status          String   // "pending" | "processing" | "completed" | "failed"
+  startLedger     Int
+  endLedger       Int
+
+  eventsProcessed Int      @default(0)
+  eventsMatched   Int      @default(0)
+  eventsSkipped   Int      @default(0)
+  eventsError     Int      @default(0)
+
+  // Discrepancies found during reconciliation
+  discrepancies   Json?    // Array of { ledger, eventId, issue, action }
+
+  // Job metadata
+  triggeredBy     String?  // "cron" | "manual" | admin user ID
+  errorMessage    String?
+  completedAt     DateTime?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+// Audit trail for reconciliation actions
+model AuditLog {
+  id              String   @id @default(cuid())
+  jobId           String   @index
+  action          String   // "detected" | "fixed" | "flagged" | "verified"
+  eventId         String?  @index
+  ledger          Int?
+  details         Json     // Additional context
+  metadata        Json?    // Request headers, IP, etc.
+
+  createdAt       DateTime @default(now())
+}
+
+// Configuration for reconciliation
+model ReconciliationConfig {
+  id              String   @id @default("current")
+  
+  // Cron schedule (e.g., "0 2 * * *" for daily at 2 AM)
+  cronSchedule    String   @default("0 2 * * *")
+  
+  // Batch size for processing
+  batchSize       Int      @default(1000)
+  
+  // Number of days to look back for reconciliation
+  lookbackDays    Int      @default(7)
+  
+  // Whether to auto-fix detected issues
+  autoFix         Boolean  @default(false)
+  
+  // Alert threshold (percentage of discrepancies)
+  alertThreshold  Float    @default(0.1) // 0.1% = 1 in 1000
+  
+  // Enable/disable reconciliation
+  enabled         Boolean  @default(true)
+  
+  updatedAt       DateTime @updatedAt
+}

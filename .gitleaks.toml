@@ -1,0 +1,38 @@
+# Gitleaks configuration for Open-Audit
+# Docs: https://github.com/gitleaks/gitleaks
+
+title = "Open-Audit Gitleaks Configuration"
+
+[allowlist]
+  description = "Allowlisted files and patterns for Open-Audit"
+  paths = [
+    # Test fixtures and mock data may contain example secrets
+    "(?i)__mocks__/",
+    "(?i)mock",
+    "(?i)test",
+    "(?i)spec",
+    # Node modules (scanned separately)
+    "node_modules/",
+    # Build output
+    ".next/",
+    "build/",
+    "out/",
+  ]
+
+  # Allowlist regex patterns for legitimate example/placeholder values
+  regexes = [
+    # .env.example contains placeholder values, not real secrets
+    "(?i).env.example",
+    # Test tokens/example values in documentation
+    "(?i)example",
+    "(?i)placeholder",
+    "(?i)your-",
+    "(?i)changeme",
+    # Stellar testnet values are public and non-sensitive
+    "horizon-testnet\\.stellar\\.org",
+    "soroban-testnet\\.stellar\\.org",
+    "Test SDF Network ; September 2015",
+  ]
+
+  # Allowlist specific commit SHAs (e.g., for historic false positives)
+  commits = []

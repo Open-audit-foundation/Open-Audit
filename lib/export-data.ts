@@ -117,7 +117,23 @@ export function triggerDownload(
  * Generates a filename with the current UTC date, e.g.
  * "open-audit-events-2024-06-17.csv"
  */
-export function buildFilename(format: "csv" | "json"): string {
+export function buildFilename(format: "csv" | "json" | "ndjson"): string {
   const date = new Date().toISOString().slice(0, 10);
   return `open-audit-events-${date}.${format}`;
+}
+
+/**
+ * Builds a URL to the streaming export endpoint.
+ * Used for large datasets that should bypass in-browser blob creation.
+ */
+export function buildExportUrl(
+  format: "csv" | "json" | "ndjson",
+  options: { contractId?: string; startLedger?: number; endLedger?: number; limit?: number } = {}
+): string {
+  const params = new URLSearchParams({ format });
+  if (options.contractId) params.set("contractId", options.contractId);
+  if (options.startLedger) params.set("startLedger", String(options.startLedger));
+  if (options.endLedger) params.set("endLedger", String(options.endLedger));
+  if (options.limit) params.set("limit", String(options.limit));
+  return `/api/v1/events/export?${params.toString()}`;
 }

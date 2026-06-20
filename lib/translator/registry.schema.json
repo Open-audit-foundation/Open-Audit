@@ -140,6 +140,26 @@
           "type": "string",
           "description": "Human-readable template describing the event, using {field} placeholders",
           "minLength": 1
+        },
+        "test_vectors": {
+          "type": "array",
+          "description": "Sample payloads used by CI to render preview translations in PRs",
+          "items": {
+            "type": "object",
+            "required": ["params"],
+            "additionalProperties": false,
+            "properties": {
+              "hex_payload": {
+                "type": "string",
+                "description": "Optional raw hex event payload for display purposes"
+              },
+              "params": {
+                "type": "object",
+                "description": "Resolved template parameter values, e.g. { from: 'GABC...', amount: 50000000 }",
+                "additionalProperties": { "type": ["string", "number", "boolean"] }
+              }
+            }
+          }
         }
       }
     }

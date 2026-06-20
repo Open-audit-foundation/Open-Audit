@@ -14,6 +14,7 @@ import { toErrorResponse, validationErrorResponse } from "@/lib/api/error-respon
 import { ingestHistoricalRange } from "@/lib/stellar/historical-ingester";
 import { getNetworkConfig } from "@/lib/stellar/client";
 import { NextRequest, NextResponse } from "next/server";
+import { authenticateAndRateLimit } from "@/lib/api/middleware";
 
 // OpenAPI documentation metadata
 export const routeDoc = {
@@ -54,6 +55,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   let contractId: string | undefined;
 
   try {
+    const authError = await authenticateAndRateLimit(request);
+    if (authError) return authError;
+
     const body: IngestRequest = await request.json();
     contractId = body.contractId;
 
