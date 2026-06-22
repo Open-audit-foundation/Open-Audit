@@ -1,0 +1,39 @@
+{
+  "name": "@open-audit/soroban-xdr-decode",
+  "version": "0.1.0",
+  "description": "Native N-API addon: zero-copy Stellar Soroban XDR decoding in Rust",
+  "license": "MIT",
+  "main": "index.node",
+  "types": "index.d.ts",
+  "files": [
+    "index.node",
+    "index.d.ts"
+  ],
+  "scripts": {
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "build:docker": "napi build --platform --release --target x86_64-unknown-linux-gnu",
+    "build:arm64": "napi build --platform --release --target aarch64-unknown-linux-gnu",
+    "artifacts": "napi artifacts",
+    "prepublishOnly": "napi prepublish -t npm",
+    "clean": "rimraf *.node dist"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.4",
+    "rimraf": "^5.0.5"
+  },
+  "napi": {
+    "name": "soroban-xdr-decode",
+    "triples": {
+      "defaults": true,
+      "additional": [
+        "x86_64-unknown-linux-musl",
+        "aarch64-unknown-linux-gnu",
+        "aarch64-unknown-linux-musl"
+      ]
+    }
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

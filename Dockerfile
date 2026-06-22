@@ -2,8 +2,51 @@
 # Multi-stage build — targets linux/amd64 and linux/arm64 via Docker Buildx.
 # Each stage is pinned to a digest-stable tag to keep security scans clean.
 
-# ── Stage 1: deps ──────────────────────────────────────────────────────────────
-# Install production + dev deps in a throw-away layer so the final image
+# ── Stage 1: rust-builder ──────────────────────────────────────────────────────
+# Compiles the soroban-xdr-decode native N-API addon.
+# Kept in its own stage so Rust toolchain artefacts never bleed into the
+# final image (saves ~1 GB).
+FROM node:20-bookworm-slim AS rust-builder
+
+# build-essential:  gcc / g++ / make (required by napi-build linker).
+# libssl-dev:       Rust crates that use openssl-sys.
+# pkg-config:       Helps Rust find system libraries.
+# curl:             Used by rustup installer.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        libssl-dev \
+        pkg-config \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install the latest stable Rust toolchain via rustup (non-interactive).
+# RUSTUP_HOME / CARGO_HOME are set so the toolchain lands in /usr/local,
+# making it easy to reference from later stages if needed.
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | sh -s -- -y --default-toolchain stable --profile minimal \
+    && rustup target add x86_64-unknown-linux-gnu
+
+WORKDIR /addon
+
+# Copy only what is needed to compile the Rust crate — leverages layer cache.
+COPY native/soroban-xdr-decode/Cargo.toml  ./Cargo.toml
+COPY native/soroban-xdr-decode/build.rs    ./build.rs
+COPY native/soroban-xdr-decode/src        ./src
+COPY native/soroban-xdr-decode/package.json ./package.json
+
+# Install @napi-rs/cli (napi-cli) just for this stage.
+RUN npm install --save-dev @napi-rs/cli@2.18.4 --ignore-scripts
+
+# Build the release .node binary for linux/amd64.
+# NODE_AUTH_TOKEN is intentionally NOT set — this is a public build.
+RUN npx napi build --platform --release --target x86_64-unknown-linux-gnu
+
+# ── Stage 2: deps ──────────────────────────────────────────────────────────────
+# Install production + dev Node deps in a throw-away layer so the final image
 # never carries the npm cache or build tooling.
 FROM node:20-alpine AS deps
 
@@ -18,7 +61,7 @@ COPY package.json package-lock.json ./
 # --ignore-scripts prevents post-install scripts from running as root.
 RUN npm ci --ignore-scripts
 
-# ── Stage 2: builder ───────────────────────────────────────────────────────────
+# ── Stage 3: builder ───────────────────────────────────────────────────────────
 FROM node:20-alpine AS builder
 
 RUN apk add --no-cache libc6-compat
@@ -29,6 +72,10 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
+# Copy the prebuilt native .node binary from the rust-builder stage.
+# napi-rs places it at <package-root>/index.node by default.
+COPY --from=rust-builder /addon/*.node ./native/soroban-xdr-decode/
+
 # Disable Next.js telemetry during CI/CD builds.
 ENV NEXT_TELEMETRY_DISABLED=1
 
@@ -36,11 +83,14 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build && \
     npx tsc --project tsconfig.server.json
 
-# ── Stage 3: runner ────────────────────────────────────────────────────────────
+# ── Stage 4: runner ────────────────────────────────────────────────────────────
 # Minimal runtime image — no build tooling, no dev deps, no npm cache.
 FROM node:20-alpine AS runner
 
-RUN apk add --no-cache libc6-compat
+# gcompat provides GNU libc compatibility shim required by the musl-based
+# Alpine image to load the .so symbols from the napi .node binary when
+# it was compiled against glibc (linux/amd64 gnu target).
+RUN apk add --no-cache libc6-compat gcompat
 
 WORKDIR /app
 
@@ -53,11 +103,14 @@ RUN addgroup --system --gid 1001 nodejs && \
     adduser  --system --uid 1001 --ingroup nodejs nextjs
 
 # Copy only the artefacts required at runtime.
-COPY --from=builder --chown=nextjs:nodejs /app/.next        ./.next
-COPY --from=builder --chown=nextjs:nodejs /app/.server-dist ./.server-dist
-COPY --from=builder --chown=nextjs:nodejs /app/public       ./public
-COPY --from=builder --chown=nextjs:nodejs /app/package.json ./package.json
-COPY --from=builder --chown=nextjs:nodejs /app/package-lock.json ./package-lock.json
+COPY --from=builder --chown=nextjs:nodejs /app/.next                          ./.next
+COPY --from=builder --chown=nextjs:nodejs /app/.server-dist                   ./.server-dist
+COPY --from=builder --chown=nextjs:nodejs /app/public                         ./public
+COPY --from=builder --chown=nextjs:nodejs /app/package.json                   ./package.json
+COPY --from=builder --chown=nextjs:nodejs /app/package-lock.json              ./package-lock.json
+# Native addon binary — must be at the path that xdr-binding.ts resolves.
+COPY --from=builder --chown=nextjs:nodejs /app/native/soroban-xdr-decode/*.node \
+                                                      ./native/soroban-xdr-decode/
 
 # Install production-only deps (no devDependencies, no scripts).
 RUN npm ci --omit=dev --ignore-scripts && \
