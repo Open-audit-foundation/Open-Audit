@@ -47,7 +47,8 @@ function StatusBadge({ status }: { status: TranslatedEvent["status"] }): React.J
   if (status === "translated") {
     return (
       <Badge variant="success" className="gap-1 whitespace-nowrap">
-        <CheckCircle2 className="h-3 w-3" />
+        <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+        <span className="sr-only">Status: </span>
         Translated
       </Badge>
     );
@@ -55,14 +56,16 @@ function StatusBadge({ status }: { status: TranslatedEvent["status"] }): React.J
   if (status === "pending") {
     return (
       <Badge variant="secondary" className="gap-1 whitespace-nowrap">
-        <Clock className="h-3 w-3" />
+        <Clock className="h-3 w-3" aria-hidden="true" />
+        <span className="sr-only">Status: </span>
         Pending
       </Badge>
     );
   }
   return (
     <Badge variant="warning" className="gap-1 whitespace-nowrap">
-      <HelpCircle className="h-3 w-3" />
+      <HelpCircle className="h-3 w-3" aria-hidden="true" />
+      <span className="sr-only">Status: </span>
       Cryptic
     </Badge>
   );
@@ -96,6 +99,22 @@ export function EventFeedTable({
   const [showColMenu, setShowColMenu] = useState(false);
   /** txHash of the event whose execution DAG is being viewed, or null. */
   const [dagTxHash, setDagTxHash] = useState<string | null>(null);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTableSectionElement>) => {
+    if (e.target instanceof HTMLElement && e.target.tagName === "TR") {
+      const currentRow = e.target as HTMLTableRowElement;
+      
+      if (e.key === "ArrowDown" || e.key === "j" || e.key === "J") {
+        e.preventDefault();
+        const nextRow = currentRow.nextElementSibling as HTMLTableRowElement;
+        if (nextRow) nextRow.focus();
+      } else if (e.key === "ArrowUp" || e.key === "k" || e.key === "K") {
+        e.preventDefault();
+        const prevRow = currentRow.previousElementSibling as HTMLTableRowElement;
+        if (prevRow) prevRow.focus();
+      }
+    }
+  };
 
   const cellPadding = density === "compact" ? "py-1.5" : "py-3";
   const visibleColCount = Object.values(columns).filter(Boolean).length;
@@ -173,7 +192,7 @@ export function EventFeedTable({
               )}
             </TableRow>
           </TableHeader>
-          <TableBody>
+          <TableBody onKeyDown={handleKeyDown}>
             {isLoading
               ? Array.from({ length: 5 }).map(function (_, i) {
                   return <SkeletonRow key={i} colCount={visibleColCount} />;
@@ -184,7 +203,9 @@ export function EventFeedTable({
                   return (
                     <TableRow
                       key={event.raw.id}
-                      className={`group transition-colors ${
+                      tabIndex={0}
+                      role="row"
+                      className={`group transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-violet-500 ${
                         newEventIds.has(event.raw.id)
                           ? "animate-slide-in bg-violet-50/60 dark:bg-violet-950/30"
                           : ""

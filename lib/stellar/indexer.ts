@@ -14,7 +14,7 @@ import {
   isRedisEnabled,
 } from "../cache/redisCache";
 import { StellarNetworkException, XdrParsingException } from "../errors";
-import { captureExceptionSync } from "../telemetry";
+import { captureExceptionSync } from "../telemetry/index";
 import { createIngestionPool, DEFAULT_WORKER_COUNT, type IngestionPoolMetrics } from "./ingestion-pool";
 import type { StellarNetworkConfig } from "./client";
 import type { RawEvent } from "../translator/types";
@@ -288,6 +288,8 @@ export interface IndexerOptions {
   onEvents: EventBatchHandler;
   /** Callback for handling errors. */
   onError?: ErrorHandler;
+  /** Optional durable state store for resuming from the last processed ledger. */
+  stateStore?: IngestionStateStore;
 }
 
 /**
@@ -338,6 +340,7 @@ export function startEventIndexer(options: IndexerOptions): IndexerControls {
     retryConfig = DEFAULT_RETRY_CONFIG,
     onEvents,
     onError,
+    stateStore,
   } = options;
 
   // Initialize the Soroban RPC server
@@ -348,6 +351,20 @@ export function startEventIndexer(options: IndexerOptions): IndexerControls {
     lastLedger: startLedger,
   };
 
+  const initialStatePromise = (async () => {
+    const saved = await stateStore?.load();
+    if (saved?.lastLedger) {
+      cursor = {
+        lastLedger: saved.lastLedger,
+        paginationCursor: saved.pagingToken,
+      };
+      console.log(
+        `[indexer] Restored cursor from state store at ledger ${cursor.lastLedger}` +
+          (cursor.paginationCursor ? ` (${cursor.paginationCursor})` : "")
+      );
+    }
+  })();
+
   // Control flag for stopping the indexer
   let isRunning = true;
 
@@ -355,6 +372,8 @@ export function startEventIndexer(options: IndexerOptions): IndexerControls {
    * Main polling loop.
    */
   async function poll(): Promise<void> {
+    await initialStatePromise;
+
     while (isRunning) {
       try {
         console.log(`[indexer] Fetching events from ledger ${cursor.lastLedger}...`);
@@ -383,6 +402,12 @@ export function startEventIndexer(options: IndexerOptions): IndexerControls {
             lastLedger: response.latestLedger,
             paginationCursor: (response as unknown as Record<string, unknown>).cursor as string | undefined,
           };
+          await stateStore?.save({
+            lastLedger: cursor.lastLedger,
+            pagingToken: cursor.paginationCursor,
+            updatedAt: new Date().toISOString(),
+            source: "rpc",
+          });
           console.log(
             `[indexer] Cursor updated to ledger ${cursor.lastLedger}` +
               (cursor.paginationCursor ? `, cursor ${cursor.paginationCursor}` : "")
@@ -562,26 +587,34 @@ export function startHorizonStreamingIndexer(options: StreamingIndexerOptions): 
   async function startStream() {
     if (!isRunning) return;
 
+    const savedState = await stateStore?.load();
+    const streamCursor =
+      savedState?.pagingToken ??
+      (savedState?.lastLedger ? String(savedState.lastLedger) : "now");
+
     console.log(
-      `[streaming-indexer] Starting Horizon transaction stream (${workerCount ?? DEFAULT_WORKER_COUNT} consumers)...`
+      `[streaming-indexer] Starting Horizon transaction stream from cursor ${streamCursor} ` +
+        `(${workerCount ?? DEFAULT_WORKER_COUNT} consumers)` +
+        (coldStartLookbackLedgers ? `, lookback hint ${coldStartLookbackLedgers} ledgers` : "") +
+        "..."
     );
 
     try {
       closeStream = server
         .transactions()
-        .cursor("now")
+        .cursor(streamCursor)
         .stream({
           // Producer: parse the envelope, route events, return fast.
           onmessage: async (tx: any) => {
             if (!tx.result_meta_xdr) return;
 
             try {
-              const meta = xdr.TransactionMeta.fromXDR(tx.result_meta_xdr, "base64");
+              const meta = xdr.TransactionMeta.fromXDR(tx.result_meta_xdr, "base64") as any;
               let events: xdr.ContractEvent[] = [];
 
               // Extract events from meta (v3 or v4)
-              if (meta.switch() === xdr.TransactionMeta.v3().switch()) {
-                events = meta.v3().sorobanMeta().events();
+              if (typeof meta?.v3 === "function") {
+                events = meta.v3()?.sorobanMeta?.()?.events?.() ?? [];
               } else if (meta.switch() === 4) {
                 // @ts-ignore - v4 might not be in all types yet
                 events = meta.v4().sorobanMeta().events();
@@ -610,8 +643,9 @@ export function startHorizonStreamingIndexer(options: StreamingIndexerOptions): 
 
               for (let eventIndex = 0; eventIndex < events.length; eventIndex++) {
                 const event = events[eventIndex];
-                const contractId = event.contractId()
-                  ? StrKey.encodeContract(event.contractId())
+                const contractAddress = event.contractId();
+                const contractId = contractAddress
+                  ? StrKey.encodeContract(contractAddress as Parameters<typeof StrKey.encodeContract>[0])
                   : "unknown";
 
                 // Filter by contract ID if provided
@@ -629,6 +663,13 @@ export function startHorizonStreamingIndexer(options: StreamingIndexerOptions): 
                   eventIndex,
                 });
               }
+
+              await stateStore?.save({
+                lastLedger: Number(tx.ledger_attr ?? savedState?.lastLedger ?? 0),
+                pagingToken: String(tx.paging_token ?? tx.pagingToken ?? tx.id ?? streamCursor),
+                updatedAt: new Date().toISOString(),
+                source: "horizon",
+              });
             } catch (err) {
               const xdrError = new XdrParsingException(
                 err instanceof Error ? err.message : "Failed to decode transaction meta",
@@ -687,5 +728,120 @@ export function startHorizonStreamingIndexer(options: StreamingIndexerOptions): 
       console.log("[streaming-indexer] Stopped");
     },
     getMetrics: () => pool.metrics(),
+  };
+}
+
+export interface ResilientStreamingOptions extends StreamingIndexerOptions {
+  captiveCore?: Omit<
+    CaptiveCoreSupervisorOptions,
+    "stateStore" | "contractIds" | "onEvent" | "onError"
+  >;
+  fallbackMode?: "horizon" | "rpc";
+  fallbackPollIntervalMs?: number;
+  retryConfig?: IndexerRetryConfig;
+}
+
+export interface ResilientStreamingControls {
+  stop: () => Promise<void>;
+  getMode: () => "captive-core" | "horizon" | "rpc" | "stopped";
+  getMetrics: () => IngestionPoolMetrics | null;
+}
+
+export function startResilientEventIngestion(
+  options: ResilientStreamingOptions
+): ResilientStreamingControls {
+  const {
+    captiveCore,
+    fallbackMode = options.contractIds && options.contractIds.length > 0 ? "rpc" : "horizon",
+    fallbackPollIntervalMs = 5000,
+    onEvent,
+    onError,
+    contractIds,
+    stateStore,
+  } = options;
+
+  let mode: "captive-core" | "horizon" | "rpc" | "stopped" = captiveCore ? "captive-core" : fallbackMode;
+  let fallbackStarted = false;
+  let fallbackControls:
+    | ReturnType<typeof startHorizonStreamingIndexer>
+    | IndexerControls
+    | null = null;
+  let captiveControls: CaptiveCoreControls | null = null;
+
+  const startFallback = () => {
+    if (fallbackStarted) {
+      return;
+    }
+    fallbackStarted = true;
+    mode = fallbackMode;
+
+    if (fallbackMode === "rpc" && contractIds && contractIds.length > 0) {
+      fallbackControls = startEventIndexer({
+        networkConfig: options.networkConfig,
+        contractIds,
+        startLedger: 0,
+        pollIntervalMs: fallbackPollIntervalMs,
+        retryConfig: options.retryConfig,
+        stateStore,
+        onEvents: async (events) => {
+          for (const event of events) {
+            await onEvent(eventResponseToRawEvent(event, contractIds[0]));
+          }
+        },
+        onError: (error) => onError?.(error),
+      });
+      return;
+    }
+
+    fallbackControls = startHorizonStreamingIndexer({
+      networkConfig: options.networkConfig,
+      contractIds,
+      onEvent,
+      onError,
+      workerCount: options.workerCount,
+      maxQueueSize: options.maxQueueSize,
+      stateStore,
+      coldStartLookbackLedgers: options.coldStartLookbackLedgers,
+    });
+  };
+
+  if (!captiveCore) {
+    startFallback();
+  } else {
+    void startCaptiveCoreIndexer({
+      ...captiveCore,
+      contractIds,
+      stateStore,
+      onEvent,
+      onError,
+      onExhausted: (error) => {
+        onError?.(error);
+        startFallback();
+      },
+    }).then((controls) => {
+      captiveControls = controls;
+    }).catch((error) => {
+      onError?.(error instanceof Error ? error : new Error(String(error)));
+      startFallback();
+    });
+  }
+
+  return {
+    stop: async () => {
+      mode = "stopped";
+      await captiveControls?.stop();
+      if (fallbackControls) {
+        if ("stop" in fallbackControls) {
+          await Promise.resolve(fallbackControls.stop());
+        }
+      }
+    },
+    getMode: () => mode,
+    getMetrics: () => {
+      if (fallbackControls && "getMetrics" in fallbackControls) {
+        return fallbackControls.getMetrics();
+      }
+      return null;
+    },
   };
 }

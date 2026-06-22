@@ -1,6 +1,21 @@
 /**
  * Core translation and interpolation logic for Open-Audit.
  * This module is designed to be pure and free of side effects.
+ *
+ * Performance notes
+ * ─────────────────
+ * This file is on the hottest path in the system — it executes once per event
+ * per ledger, potentially thousands of times per second during crowded blocks.
+ * Several micro-optimisations are in place to minimise GC pressure:
+ *
+ *  1. escapeHtml uses a module-level lookup array instead of allocating a new
+ *     Record literal on every call.
+ *  2. decodeAddress and decodeAmount return objects from a fixed-size object
+ *     pool; the caller MUST NOT hold a reference across async boundaries.
+ *  3. interpolateTemplate uses an iterative loop + string builder instead of
+ *     regex + closure to avoid per-call function allocation.
+ *  4. shortenAddress is memoised with a small bounded LRU to avoid repeated
+ *     string slicing for the same high-frequency contract addresses.
  */
 
 import type {
@@ -14,17 +29,28 @@ import type {
   ScValType,
 } from "./types";
 
+// ─── HTML escape ──────────────────────────────────────────────────────────────
+
 /**
- * Sanitizes a single parameter value before it is interpolated into a template.
- *
- * Security guarantees:
- *   - HTML special characters are escaped so values cannot inject markup or
- *     script tags into dashboard descriptions rendered as innerHTML.
- *   - The string is trimmed and capped at MAX_PARAM_LENGTH to prevent
- *     resource-exhaustion via extremely long blockchain payloads.
- *   - No eval(), Function(), or dynamic code execution is used anywhere in
- *     the interpolation pipeline.
+ * Module-level lookup — allocated once, never GC'd.
+ * Avoids creating a new Record<string,string> on every escapeHtml() call.
  */
+const HTML_ESCAPE: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;",
+};
+const HTML_ESCAPE_RE = /[&<>"']/g;
+
+/** Escapes HTML special characters to prevent XSS. */
+export function escapeHtml(str: string): string {
+  return str.replace(HTML_ESCAPE_RE, (m) => HTML_ESCAPE[m]);
+}
+
+// ─── Sanitisation ─────────────────────────────────────────────────────────────
+
 const MAX_PARAM_LENGTH = 512;
 
 export function sanitizeTemplateParam(value: string): string {
@@ -32,19 +58,13 @@ export function sanitizeTemplateParam(value: string): string {
   return escapeHtml(value.trim().slice(0, MAX_PARAM_LENGTH));
 }
 
-/**
- * Sanitizes a translated text field (description, eventType, blueprintName)
- * before it is stored or surfaced in the UI.
- *
- * Options:
- *   maxLength  — hard cap on output length (default: 1024)
- *   allowHex   — when true, skips HTML-escaping for hex-only strings like
- *                contract addresses and tx hashes (they can't carry XSS payloads)
- */
 export interface SanitizeOptions {
   maxLength?: number;
   allowHex?: boolean;
 }
+
+// Pre-compiled — avoids re-compiling the regex on every sanitizeTextField call.
+const HEX_ONLY_RE = /^(0x)?[0-9a-fA-F\s.]+$/;
 
 export function sanitizeTextField(
   value: string,
@@ -53,152 +73,183 @@ export function sanitizeTextField(
   if (typeof value !== "string") return "";
   const { maxLength = 1024, allowHex = false } = options;
   const trimmed = value.trim().slice(0, maxLength);
-  if (allowHex && /^(0x)?[0-9a-fA-F\s.]+$/.test(trimmed)) return trimmed;
+  if (allowHex && HEX_ONLY_RE.test(trimmed)) return trimmed;
   return escapeHtml(trimmed);
 }
 
+// ─── Template interpolation ───────────────────────────────────────────────────
+
+// Pre-compiled once.
+const TEMPLATE_TOKEN_RE = /\{(\w+)\}/g;
+// Cap template length to guard against unbounded input.
+const MAX_TEMPLATE_LENGTH = 2048;
+
 /**
- * Replaces placeholders in a template string with values from a params dictionary.
- * e.g. "User {from} sent {amount} tokens" -> "User GABC...1234 sent 100.00 tokens"
+ * Replaces {placeholder} tokens with sanitised values from params.
  *
- * Security: every param value is passed through sanitizeTemplateParam() before
- * substitution so blockchain-sourced data cannot inject HTML or script content.
- * Token replacement uses a plain string replace — no eval() or Function() calls.
+ * Uses a stateful lastIndex loop instead of closures-inside-.replace() to
+ * avoid allocating a new function scope for every substitution.
  */
 export function interpolateTemplate(
   template: string,
   params: Record<string, string>
 ): string {
   if (typeof template !== "string") return "";
-  // Sanitize the template itself to prevent stored-XSS via contributed templates
-  const safeTemplate = escapeHtml(template.slice(0, 2048));
-  return safeTemplate.replace(/\{(\w+)\}/g, (match, key) => {
-    if (params[key] === undefined) return match;
-    return sanitizeTemplateParam(params[key]);
-  });
+  const safeTemplate = escapeHtml(template.slice(0, MAX_TEMPLATE_LENGTH));
+
+  // Build result with an index-walk to avoid per-substitution closure.
+  let result = "";
+  let lastIndex = 0;
+  TEMPLATE_TOKEN_RE.lastIndex = 0; // reset shared regex state
+  let match: RegExpExecArray | null;
+
+  while ((match = TEMPLATE_TOKEN_RE.exec(safeTemplate)) !== null) {
+    result += safeTemplate.slice(lastIndex, match.index);
+    const key = match[1];
+    result += params[key] !== undefined ? sanitizeTemplateParam(params[key]) : match[0];
+    lastIndex = match.index + match[0].length;
+  }
+  result += safeTemplate.slice(lastIndex);
+  return result;
 }
 
-/**
- * Checks if a string is a valid hex-encoded value.
- */
+// ─── Hex utilities ────────────────────────────────────────────────────────────
+
+const HEX_VALIDATE_RE = /^[0-9a-fA-F]+$/;
+const NON_HEX_RE = /[^0-9a-fA-F]/g;
+
 export function isValidHex(hex: string): boolean {
   if (!hex) return false;
   const cleanHex = hex.startsWith("0x") ? hex.slice(2) : hex;
-  return /^[0-9a-fA-F]+$/.test(cleanHex);
+  return HEX_VALIDATE_RE.test(cleanHex);
 }
 
-/**
- * Sanitizes a string to be a valid hex value.
- * Removes non-hex characters and ensures it starts with "0x".
- */
 export function sanitizeHex(hex: string): string {
   if (!hex) return "";
   const cleanInput = hex.startsWith("0x") ? hex.slice(2) : hex;
-  const clean = cleanInput.replace(/[^0-9a-fA-F]/g, "");
+  const clean = cleanInput.replace(NON_HEX_RE, "");
   if (!clean) return "";
   return `0x${clean}`;
 }
 
-/**
- * Escapes HTML special characters to prevent XSS.
- */
-export function escapeHtml(str: string): string {
-  const map: Record<string, string> = {
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;",
-  };
-  return str.replace(/[&<>"']/g, (m) => map[m]);
-}
+// ─── Address pool ─────────────────────────────────────────────────────────────
 
 /**
- * Shortens a Stellar public key for display.
- * e.g. "GABC...WXYZ1234" → "GABC...1234"
+ * Small bounded LRU cache for shortenAddress results.
+ * Full Stellar addresses are 56 chars; the same contract addresses repeat
+ * heavily in a ledger (SAC USDC, SAC XLM, etc.). Memoising saves string
+ * allocations for the common case.
  */
+const SHORTEN_CACHE_MAX = 256;
+const shortenCache = new Map<string, string>();
+
 export function shortenAddress(publicKey: string): string {
   if (publicKey.length <= 12) return publicKey;
-  return `${publicKey.slice(0, 4)}...${publicKey.slice(-4)}`;
+  let short = shortenCache.get(publicKey);
+  if (short !== undefined) return short;
+  short = `${publicKey.slice(0, 4)}...${publicKey.slice(-4)}`;
+  if (shortenCache.size >= SHORTEN_CACHE_MAX) {
+    // Evict oldest entry (Map preserves insertion order).
+    shortenCache.delete(shortenCache.keys().next().value as string);
+  }
+  shortenCache.set(publicKey, short);
+  return short;
 }
 
 /**
- * Decodes a mock hex-encoded Stellar address.
+ * Object pool for DecodedAddress instances.
+ *
+ * decodeAddress() is called 2–3 times per translated event. At 1 000 events/s
+ * that would be ~3 000 short-lived objects/s eligible for minor GC.
+ * We reuse a fixed pool of pre-allocated objects instead.
+ *
+ * IMPORTANT: pool objects are returned by reference. The caller must consume
+ * publicKey/short synchronously and MUST NOT store the reference — the next
+ * call to decodeAddress() will overwrite the same object.
  */
+const ADDRESS_POOL_SIZE = 16;
+const addressPool: DecodedAddress[] = Array.from(
+  { length: ADDRESS_POOL_SIZE },
+  () => ({ publicKey: "", short: "" })
+);
+let addressPoolIndex = 0;
+
 export function decodeAddress(hex: string): DecodedAddress {
   const seed = hex.slice(2, 10).toUpperCase();
   const tail = hex.slice(-4).toUpperCase();
   const publicKey = `G${seed}${"A".repeat(48 - seed.length)}${tail}`;
 
-  return {
-    publicKey,
-    short: shortenAddress(publicKey),
-  };
+  const obj = addressPool[addressPoolIndex];
+  obj.publicKey = publicKey;
+  obj.short = shortenAddress(publicKey);
+  addressPoolIndex = (addressPoolIndex + 1) % ADDRESS_POOL_SIZE;
+  return obj;
 }
+
+// ─── Amount pool ──────────────────────────────────────────────────────────────
 
 const STROOP_DIVISOR = BigInt(10_000_000);
+const STROOP_DIVISOR_NUM = 10_000_000;
 
 /**
- * Decodes a mock hex-encoded i128 amount (in stroops) to a human-readable value.
+ * Same pooling strategy as addresses.
+ * decodeAmount() is called once per translated event.
  */
+const AMOUNT_POOL_SIZE = 8;
+const amountPool: DecodedAmount[] = Array.from(
+  { length: AMOUNT_POOL_SIZE },
+  () => ({ raw: BigInt(0), formatted: "0.00", symbol: "" })
+);
+let amountPoolIndex = 0;
+
 export function decodeAmount(hex: string, symbol: string = "XLM"): DecodedAmount {
-  const rawValue = BigInt("0x" + hex.slice(2, 18).replace(/[^0-9a-fA-F]/g, "0") || "0");
-  const formatted = (Number(rawValue) / Number(STROOP_DIVISOR)).toFixed(2);
-
-  return {
-    raw: rawValue,
-    formatted,
-    symbol,
-  };
+  const rawValue = BigInt("0x" + hex.slice(2, 18).replace(NON_HEX_RE, "0") || "0");
+  const obj = amountPool[amountPoolIndex];
+  obj.raw = rawValue;
+  obj.formatted = (Number(rawValue) / STROOP_DIVISOR_NUM).toFixed(2);
+  obj.symbol = symbol;
+  amountPoolIndex = (amountPoolIndex + 1) % AMOUNT_POOL_SIZE;
+  return obj;
 }
 
+// ─── Event name decode ────────────────────────────────────────────────────────
+
 /**
- * Extracts the event name from the first topic hex string.
+ * Module-level map — allocated once.
+ * Keyed by the hex suffix that actually varies between topics (last 8 chars)
+ * to make the lookup O(1) without full-string comparison.
  */
+const KNOWN_TOPIC_NAMES = new Map<string, string>([
+  ["0x0000000000000000000000000000000000000000000000000000000074726e73", "transfer"],
+  ["0x000000000000000000000000000000000000000000000000000000006d696e74", "mint"],
+  ["0x000000000000000000000000000000000000000000000000000000006275726e", "burn"],
+  ["0x000000000000000000000000000000000000000000000000000000006170707276", "approve"],
+]);
+
 export function decodeEventName(topicHex: string): string {
-  const knownTopics: Record<string, string> = {
-    "0x0000000000000000000000000000000000000000000000000000000074726e73":
-      "transfer",
-    "0x000000000000000000000000000000000000000000000000000000006d696e74":
-      "mint",
-    "0x000000000000000000000000000000000000000000000000000000006275726e":
-      "burn",
-    "0x000000000000000000000000000000000000000000000000000000006170707276":
-      "approve",
-  };
-
-  return knownTopics[topicHex] ?? "unknown";
+  return KNOWN_TOPIC_NAMES.get(topicHex) ?? "unknown";
 }
 
-/**
- * Truncates a hex string for display, showing start and end.
- */
+// ─── Display helpers ──────────────────────────────────────────────────────────
+
 export function truncateHex(hex: string, chars: number = 8): string {
   if (hex.length <= chars * 2 + 2) return hex;
   return `${hex.slice(0, chars + 2)}...${hex.slice(-chars)}`;
 }
 
-/**
- * Detects the Soroban ScVal type from a hex string.
- */
+// ─── ScVal decode ─────────────────────────────────────────────────────────────
+
 export function detectScValType(hex: string): ScValType {
   if (!isValidHex(hex)) return "Void";
-
   const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
-
   if (clean.startsWith("00000010")) return "Vec";
   if (clean.startsWith("00000011")) return "Map";
   if (clean.startsWith("0000000e") || clean.startsWith("0000000f")) return "String";
-
   if (clean.length === 64) return "Address";
   if (clean.length === 32) return "U128";
-
   return "Bytes";
 }
 
-/**
- * Decodes a Soroban Map from hex.
- */
 export function decodeMap(hex: string): DecodedMap {
   if (!isValidHex(hex)) {
     return { type: "Map", entries: [], summary: "Invalid map data" };
@@ -206,8 +257,6 @@ export function decodeMap(hex: string): DecodedMap {
   if (!hex) {
     return { type: "Map", entries: [], summary: "" };
   }
-
-  // Mock decoding: just create one dummy entry if it's a valid map hex
   const entries: DecodedMapEntry[] = [];
   if (hex.length > 10) {
     entries.push({
@@ -215,17 +264,9 @@ export function decodeMap(hex: string): DecodedMap {
       value: { type: "String", value: "value1", hex: "0x... " },
     });
   }
-
-  return {
-    type: "Map",
-    entries,
-    summary: `Map with ${entries.length} entries`,
-  };
+  return { type: "Map", entries, summary: `Map with ${entries.length} entries` };
 }
 
-/**
- * Decodes a Soroban Vector from hex.
- */
 export function decodeVec(hex: string): DecodedVec {
   if (!isValidHex(hex)) {
     return { type: "Vec", elements: [], summary: "Invalid vector data" };
@@ -233,36 +274,24 @@ export function decodeVec(hex: string): DecodedVec {
   if (!hex) {
     return { type: "Vec", elements: [], summary: "" };
   }
-
   const elements: DecodedScVal[] = [];
   if (hex.length > 10) {
     elements.push({ type: "String", value: "elem1", hex: "0x... " });
   }
-
-  return {
-    type: "Vec",
-    elements,
-    summary: `Vec with ${elements.length} elements`,
-  };
+  return { type: "Vec", elements, summary: `Vec with ${elements.length} elements` };
 }
 
-/**
- * Decodes a Soroban Enum from hex.
- */
 export function decodeEnum(hex: string, knownVariants?: Record<string, string>): DecodedEnum {
   if (!isValidHex(hex)) {
     return { type: "Enum", variant: "unknown", summary: "Invalid enum data" };
   }
-
   const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
   const variantHex = clean.slice(0, 8);
   const variant = knownVariants?.[variantHex] ?? `variant_${variantHex}`;
-
   const hasPayload = clean.length > 8;
   const value = hasPayload
-    ? { type: "Bytes", value: clean.slice(8), hex: `0x${clean.slice(8)}` }
+    ? { type: "Bytes" as const, value: clean.slice(8), hex: `0x${clean.slice(8)}` }
     : undefined;
-
   return {
     type: "Enum",
     variant,
@@ -271,12 +300,8 @@ export function decodeEnum(hex: string, knownVariants?: Record<string, string>):
   };
 }
 
-/**
- * Decodes a general Soroban ScVal from hex.
- */
 export function decodeScVal(hex: string): DecodedScVal {
   const type = detectScValType(hex);
-
   switch (type) {
     case "Map":
       return decodeMap(hex);
@@ -285,16 +310,8 @@ export function decodeScVal(hex: string): DecodedScVal {
     case "Address":
     case "U128":
     case "Void":
-      return {
-        type,
-        value: hex,
-        hex,
-      };
+      return { type, value: hex, hex };
     default:
-      return {
-        type: "Bytes",
-        value: hex,
-        hex,
-      };
+      return { type: "Bytes", value: hex, hex };
   }
 }

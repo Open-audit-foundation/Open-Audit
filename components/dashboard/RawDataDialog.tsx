@@ -1,7 +1,7 @@
 "use client";
 
-import { Code, ExternalLink, Copy, Check, Loader2, AlertCircle } from "lucide-react";
-import { useState } from "react";
+import { Code, ExternalLink, Copy, Check } from "lucide-react";
+import React, { useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -46,10 +46,14 @@ function CopyButton({ text }: { text: string }): React.JSX.Element {
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7"
+            className="h-7 w-7 relative"
             onClick={handleCopy}
+            aria-label="Copy to clipboard"
           >
-            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+            <span aria-live="polite" className="sr-only">
+              {copied ? "Copied" : ""}
+            </span>
+            {copied ? <Check className="h-3.5 w-3.5" aria-hidden="true" /> : <Copy className="h-3.5 w-3.5" aria-hidden="true" />}
           </Button>
         </TooltipTrigger>
         <TooltipContent>Copy to clipboard</TooltipContent>

@@ -1,6 +1,10 @@
-import { beforeAll, afterEach, afterAll } from "vitest";
+import { beforeAll, afterEach, afterAll, expect } from "vitest";
+import "@testing-library/jest-dom/vitest";
+import * as matchers from "vitest-axe/matchers";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
+
+expect.extend(matchers);
 
 export const handlers = [
   // Intercept Soroban RPC POST requests
