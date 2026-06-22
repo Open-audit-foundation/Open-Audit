@@ -28,7 +28,7 @@ napi-derive = { version = "2.16" }
 # stellar-xdr only needs openssl when the "cli" feature is enabled;
 # that feature is not listed here so the cross-compile to aarch64 does not
 # require aarch64 OpenSSL headers on the build host.
-stellar-xdr    = { version = "0.0.18", default-features = false, features = ["curr", "std", "base64", "serde"] }
+stellar-xdr    = { version = "27.0.0", default-features = false, features = ["curr", "std", "base64", "serde"] }
 
 # ── Stellar StrKey encoding ───────────────────────────────────────────────────
 stellar-strkey = { version = "0.0.8", default-features = false }
