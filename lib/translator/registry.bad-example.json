@@ -1,0 +1,160 @@
+[
+  {
+    "comment": "ERROR 1: Missing required field 'contract_id'",
+    "topics": ["transfer"],
+    "event_structure": {
+      "topics": [
+        { "name": "from", "type": "address" },
+        { "name": "to", "type": "address" }
+      ],
+      "data": { "name": "amount", "type": "i128" }
+    },
+    "english_template": "Transfer from {from} to {to} of {amount}"
+  },
+  {
+    "comment": "ERROR 2: Template variable 'value' doesn't exist in event_structure (should be 'amount')",
+    "contract_id": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+    "topics": ["transfer"],
+    "event_structure": {
+      "topics": [
+        { "name": "from", "type": "address" },
+        { "name": "to", "type": "address" }
+      ],
+      "data": { "name": "amount", "type": "i128" }
+    },
+    "english_template": "Transfer of {value} tokens from {from} to {to}"
+  },
+  {
+    "comment": "ERROR 3: Invalid contract_id format (too short)",
+    "contract_id": "INVALID",
+    "topics": ["mint"],
+    "event_structure": {
+      "topics": [
+        { "name": "admin", "type": "address" },
+        { "name": "to", "type": "address" }
+      ],
+      "data": { "name": "amount", "type": "i128" }
+    },
+    "english_template": "Admin {admin} minted {amount} to {to}"
+  },
+  {
+    "comment": "ERROR 4: Topics array length mismatch (topics array has 2 items but event_structure.topics has 2 fields, should have 3 total)",
+    "contract_id": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+    "topics": ["burn"],
+    "event_structure": {
+      "topics": [
+        { "name": "from", "type": "address" },
+        { "name": "to", "type": "address" }
+      ],
+      "data": { "name": "amount", "type": "i128" }
+    },
+    "english_template": "Burned {amount} from {from}"
+  },
+  {
+    "comment": "ERROR 5: Multiple template variables missing from event_structure",
+    "contract_id": "CAZAQB3D7KSLSNOSQKYD2V4JP5V2Y3B4RDJZRLBFCCIXDCTE3WHSY3UE",
+    "topics": ["swap"],
+    "event_structure": {
+      "topics": [
+        { "name": "user", "type": "address" }
+      ],
+      "data": { "name": "amount_in", "type": "i128" }
+    },
+    "english_template": "User {user} swapped {amount_in} for {amount_out} via {pool_id}"
+  },
+  {
+    "comment": "ERROR 6: Invalid type in event_structure (should be from enum)",
+    "contract_id": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+    "topics": ["approval"],
+    "event_structure": {
+      "topics": [
+        { "name": "owner", "type": "address" },
+        { "name": "spender", "type": "invalid_type" }
+      ],
+      "data": { "name": "amount", "type": "i128" }
+    },
+    "english_template": "Owner {owner} approved {spender} for {amount}"
+  },
+  {
+    "comment": "ERROR 7: Duplicate entry (same contract_id and topics as next entry)",
+    "contract_id": "CBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+    "topics": ["transfer", "from", "to"],
+    "event_structure": {
+      "topics": [
+        { "name": "from", "type": "address" },
+        { "name": "to", "type": "address" }
+      ],
+      "data": { "name": "amount", "type": "i128" }
+    },
+    "english_template": "Transfer from {from} to {to} of {amount}"
+  },
+  {
+    "comment": "ERROR 8: Duplicate of previous entry",
+    "contract_id": "CBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+    "topics": ["transfer", "from", "to"],
+    "event_structure": {
+      "topics": [
+        { "name": "from", "type": "address" },
+        { "name": "to", "type": "address" }
+      ],
+      "data": { "name": "amount", "type": "i128" }
+    },
+    "english_template": "Different template but duplicate entry"
+  },
+  {
+    "comment": "ERROR 9: test_vectors param not in event_structure",
+    "contract_id": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+    "topics": ["mint", "admin", "to"],
+    "event_structure": {
+      "topics": [
+        { "name": "admin", "type": "address" },
+        { "name": "to", "type": "address" }
+      ],
+      "data": { "name": "amount", "type": "i128" }
+    },
+    "english_template": "Admin {admin} minted {amount} to {to}",
+    "test_vectors": [
+      {
+        "params": {
+          "admin": "GABC123...",
+          "to": "GXYZ789...",
+          "amount": 1000000,
+          "invalid_param": "should not be here"
+        }
+      }
+    ]
+  },
+  {
+    "comment": "ERROR 10: Empty topics array",
+    "contract_id": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+    "topics": [],
+    "event_structure": {
+      "topics": [],
+      "data": { "name": "value", "type": "i128" }
+    },
+    "english_template": "Event with {value}"
+  },
+  {
+    "comment": "VALID ENTRY - This one should pass all validation",
+    "contract_id": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+    "topics": ["transfer", "from", "to"],
+    "event_structure": {
+      "topics": [
+        { "name": "from", "type": "address" },
+        { "name": "to", "type": "address" }
+      ],
+      "data": { "name": "amount", "type": "i128" }
+    },
+    "english_template": "Public Key [{from.short}] transferred {amount.formatted} USDC to [{to.short}]",
+    "test_vectors": [
+      {
+        "hex_payload": "0000000a",
+        "params": {
+          "from": "GABC123...",
+          "to": "GXYZ789...",
+          "amount": 1000000
+        }
+      }
+    ]
+  }
+]

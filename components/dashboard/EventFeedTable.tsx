@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle2, HelpCircle, Clock, Eye, GitBranch, Settings2 } from "lucide-react";
+import { CheckCircle2, HelpCircle, Clock, Eye, GitBranch, Settings2, Network } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -12,8 +12,15 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { RawDataDialog } from "./RawDataDialog";
 import { ContributeDialog } from "./ContributeDialog";
+import { DagPanel } from "@/components/dag/DagPanel";
 import { formatRelativeTime, truncateHex } from "@/lib/translator/decode";
 import type { TranslatedEvent, RawEvent } from "@/lib/translator/types";
 import type { ColumnVisibility, Density } from "@/lib/hooks/useDashboardPrefs";
@@ -40,7 +47,8 @@ function StatusBadge({ status }: { status: TranslatedEvent["status"] }): React.J
   if (status === "translated") {
     return (
       <Badge variant="success" className="gap-1 whitespace-nowrap">
-        <CheckCircle2 className="h-3 w-3" />
+        <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+        <span className="sr-only">Status: </span>
         Translated
       </Badge>
     );
@@ -48,14 +56,16 @@ function StatusBadge({ status }: { status: TranslatedEvent["status"] }): React.J
   if (status === "pending") {
     return (
       <Badge variant="secondary" className="gap-1 whitespace-nowrap">
-        <Clock className="h-3 w-3" />
+        <Clock className="h-3 w-3" aria-hidden="true" />
+        <span className="sr-only">Status: </span>
         Pending
       </Badge>
     );
   }
   return (
     <Badge variant="warning" className="gap-1 whitespace-nowrap">
-      <HelpCircle className="h-3 w-3" />
+      <HelpCircle className="h-3 w-3" aria-hidden="true" />
+      <span className="sr-only">Status: </span>
       Cryptic
     </Badge>
   );
@@ -87,6 +97,24 @@ export function EventFeedTable({
   const [rawDialogEvent, setRawDialogEvent] = useState<RawEvent | null>(null);
   const [contributeDialogEvent, setContributeDialogEvent] = useState<RawEvent | null>(null);
   const [showColMenu, setShowColMenu] = useState(false);
+  /** txHash of the event whose execution DAG is being viewed, or null. */
+  const [dagTxHash, setDagTxHash] = useState<string | null>(null);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTableSectionElement>) => {
+    if (e.target instanceof HTMLElement && e.target.tagName === "TR") {
+      const currentRow = e.target as HTMLTableRowElement;
+      
+      if (e.key === "ArrowDown" || e.key === "j" || e.key === "J") {
+        e.preventDefault();
+        const nextRow = currentRow.nextElementSibling as HTMLTableRowElement;
+        if (nextRow) nextRow.focus();
+      } else if (e.key === "ArrowUp" || e.key === "k" || e.key === "K") {
+        e.preventDefault();
+        const prevRow = currentRow.previousElementSibling as HTMLTableRowElement;
+        if (prevRow) prevRow.focus();
+      }
+    }
+  };
 
   const cellPadding = density === "compact" ? "py-1.5" : "py-3";
   const visibleColCount = Object.values(columns).filter(Boolean).length;
@@ -164,7 +192,7 @@ export function EventFeedTable({
               )}
             </TableRow>
           </TableHeader>
-          <TableBody>
+          <TableBody onKeyDown={handleKeyDown}>
             {isLoading
               ? Array.from({ length: 5 }).map(function (_, i) {
                   return <SkeletonRow key={i} colCount={visibleColCount} />;
@@ -175,7 +203,9 @@ export function EventFeedTable({
                   return (
                     <TableRow
                       key={event.raw.id}
-                      className={`group transition-colors ${
+                      tabIndex={0}
+                      role="row"
+                      className={`group transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-violet-500 ${
                         newEventIds.has(event.raw.id)
                           ? "animate-slide-in bg-violet-50/60 dark:bg-violet-950/30"
                           : ""
@@ -240,6 +270,20 @@ export function EventFeedTable({
                               View Raw
                             </Button>
 
+                            {/* Execution DAG — only available when txHash is present */}
+                            {event.raw.txHash && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 px-2 text-xs text-violet-700 hover:text-violet-900 hover:bg-violet-50 dark:text-violet-400 dark:hover:bg-violet-950"
+                                aria-label={`View execution call tree for tx ${event.raw.txHash}`}
+                                onClick={() => setDagTxHash(event.raw.txHash)}
+                              >
+                                <Network className="h-3.5 w-3.5 mr-1" />
+                                Call Tree
+                              </Button>
+                            )}
+
                             {!isTranslated && (
                               <Button
                                 variant="outline"
@@ -283,6 +327,24 @@ export function EventFeedTable({
         open={contributeDialogEvent !== null}
         onOpenChange={(open) => { if (!open) setContributeDialogEvent(null); }}
       />
+
+      {/* ── Execution DAG dialog ─────────────────────────────────────────── */}
+      <Dialog
+        open={dagTxHash !== null}
+        onOpenChange={(open) => { if (!open) setDagTxHash(null); }}
+      >
+        <DialogContent className="max-w-3xl w-full p-0 overflow-hidden">
+          <DialogHeader className="px-4 pt-4 pb-0">
+            <DialogTitle className="flex items-center gap-2 text-sm font-semibold">
+              <Network className="h-4 w-4 text-primary" />
+              Execution Call Tree
+            </DialogTitle>
+          </DialogHeader>
+          <div className="px-4 pb-4 pt-2">
+            <DagPanel txHash={dagTxHash} maxTreeHeight={480} />
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

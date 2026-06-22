@@ -1,66 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/grant-fox/Open-Audit/lib/translator/registry.schema.json",
-  "title": "Open-Audit Translation Registry Entry",
-  "description": "Schema for a single translation registry entry.",
-  "type": "object",
-  "required": ["contract_id", "topics", "event_structure", "english_template"],
-  "properties": {
-    "contract_id": {
-      "type": "string",
-      "description": "The Soroban contract address this entry applies to"
-    },
-    "topics": {
-      "type": "array",
-      "description": "Ordered list of event topic names (the first is the event discriminant)",
-      "minItems": 1,
-      "items": {
-        "type": "string"
-      }
-    },
-    "event_structure": {
-      "type": "object",
-      "description": "Describes how the raw event's topics and data map to named, typed fields",
-      "required": ["topics"],
-      "properties": {
-        "topics": {
-          "type": "array",
-          "description": "Fields extracted from event topics[1..] (topic[0] is the event name)",
-          "items": {
-            "type": "object",
-            "required": ["name", "type"],
-            "properties": {
-              "name": {
-                "type": "string",
-                "description": "The field name used in the english_template"
-              },
-              "type": {
-                "type": "string",
-                "description": "The Soroban type (address, i128, u32, symbol, bool, bytes)"
-              }
-            }
-          }
-        },
-        "data": {
-          "type": "object",
-          "description": "The field extracted from the event data payload (if any)",
-          "required": ["name", "type"],
-          "properties": {
-            "name": {
-              "type": "string",
-              "description": "The field name used in the english_template"
-            },
-            "type": {
-              "type": "string",
-              "description": "The Soroban type (address, i128, u32, symbol, bool, bytes)"
-            }
-          }
-        }
-      }
-    },
-    "english_template": {
-      "type": "string",
-      "description": "Human-readable template describing the event, using {field} placeholders"
   "title": "Open-Audit Translation Registry",
   "description": "Schema for the Open-Audit translation registry mapping. Validates an array of registry entries submitted via community PRs.",
   "type": "array",
@@ -72,7 +12,7 @@
   "$defs": {
     "registryEntry": {
       "type": "object",
-      "required": ["contract_id", "topics", "event_structure", "english_template"],
+      "required": ["contract_id", "topics", "event_structure", "templates"],
       "additionalProperties": false,
       "properties": {
         "contract_id": {
@@ -105,12 +45,12 @@
                 "properties": {
                   "name": {
                     "type": "string",
-                    "description": "The field name used in the english_template",
+                    "description": "The field name used in the templates",
                     "minLength": 1
                   },
                   "type": {
                     "type": "string",
-                    "description": "The Soroban type (address, i128, u32, symbol, bool, bytes)",
+                    "description": "The Soroban type (address, i128, u32, u64, i64, symbol, bool, bytes)",
                     "enum": ["address", "i128", "u32", "u64", "i64", "symbol", "bool", "bytes"]
                   }
                 }
@@ -124,22 +64,48 @@
               "properties": {
                 "name": {
                   "type": "string",
-                  "description": "The field name used in the english_template",
+                  "description": "The field name used in the templates",
                   "minLength": 1
                 },
                 "type": {
                   "type": "string",
-                  "description": "The Soroban type (address, i128, u32, symbol, bool, bytes)",
+                  "description": "The Soroban type (address, i128, u32, u64, i64, symbol, bool, bytes)",
                   "enum": ["address", "i128", "u32", "u64", "i64", "symbol", "bool", "bytes"]
                 }
               }
             }
           }
         },
-        "english_template": {
-          "type": "string",
-          "description": "Human-readable template describing the event, using {field} placeholders",
-          "minLength": 1
+        "templates": {
+          "type": "object",
+          "description": "Human-readable templates describing the event in different languages, using {field} placeholders",
+          "required": ["en"],
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          },
+          "properties": {
+            "en": {
+              "type": "string",
+              "description": "English template",
+              "minLength": 1
+            },
+            "es": {
+              "type": "string",
+              "description": "Spanish template",
+              "minLength": 1
+            },
+            "fr": {
+              "type": "string",
+              "description": "French template",
+              "minLength": 1
+            },
+            "zh": {
+              "type": "string",
+              "description": "Chinese template",
+              "minLength": 1
+            }
+          }
         },
         "test_vectors": {
           "type": "array",

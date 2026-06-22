@@ -26,7 +26,7 @@ const CHUNK_SIZE = 500; // rows yielded per tick
 const MAX_LIMIT = 1_000_000;
 const DEFAULT_LIMIT = 100_000;
 
-const CSV_HEADER = "timestamp,ledger_id,contract_id,tx_hash,event_name,status,plain_english_translation\r\n";
+const CSV_HEADER = "timestamp,ledger_id,contract_id,tx_hash,event_name,status,plain_english_translation,proof_url\r\n";
 
 function escapeCSV(val: string | number): string {
   const s = String(val);
@@ -51,6 +51,9 @@ function toRow(event: TranslatedEvent) {
     event_name: eventName,
     status: event.status,
     plain_english_translation: translation,
+    proof_url: event.raw.txHash
+      ? `/api/v1/events/proof?txHash=${event.raw.txHash}&ledger=${event.raw.ledger}`
+      : "",
   };
 }
 
@@ -63,6 +66,7 @@ function rowToCSVLine(row: ReturnType<typeof toRow>): string {
     escapeCSV(row.event_name),
     row.status,
     escapeCSV(row.plain_english_translation),
+    escapeCSV(row.proof_url),
   ].join(",") + "\r\n";
 }
 

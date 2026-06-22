@@ -1,0 +1,18 @@
+[package]
+name    = "soroban-dsl"
+version = "0.1.0"
+edition = "2021"
+authors = ["Open-Audit Contributors"]
+description = "Lexer, parser, and evaluation engine for the Soroban translation DSL"
+license = "MIT"
+
+[lib]
+name = "soroban_dsl"
+path = "src/lib.rs"
+
+[dependencies]
+# Arbitrary-precision integer arithmetic for i128 / u128 ScVal amounts.
+# Using the stdlib i128/u128 primitives directly; no extra deps needed.
+
+[dev-dependencies]
+# Nothing beyond std — keeps the test harness dependency-free.

@@ -1,0 +1,15 @@
+# .trivyignore — Trivy CVE suppression list for Open-Audit
+#
+# Format: one CVE ID per line, optionally followed by a comment.
+# Only suppress CVEs that have been reviewed and confirmed to be either:
+#   (a) not reachable via the code paths in this project, or
+#   (b) fixed upstream but the fix has not yet propagated to a release.
+#
+# ── Node.js / npm ────────────────────────────────────────────────────────────
+# None currently suppressed.
+#
+# ── Rust / Cargo ─────────────────────────────────────────────────────────────
+# None currently suppressed.
+#
+# Add entries below as needed, e.g.:
+# CVE-2024-XXXXX  # crate: foo, not reachable — we never call foo::bar()

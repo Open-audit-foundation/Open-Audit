@@ -17,6 +17,7 @@
  */
 
 import { decodeAddress, decodeAmount, decodeEventName, truncateHex } from "./decode";
+import { sanitizeTextField, sanitizeTemplateParam } from "./core";
 import { RegistryTemplateException } from "../errors";
 import type {
   CustomAbi,
@@ -188,7 +189,8 @@ function matchesEvent(topicHex: string, decodedName: string, eventName: string):
 
 /** Renders a matched event into a human-readable sentence. */
 function renderEvent(eventDef: CustomAbiEvent, event: RawEvent): string {
-  const label = capitalize(eventDef.name);
+  // Sanitize the event label — it comes from user-uploaded ABI name field
+  const label = sanitizeTextField(capitalize(eventDef.name), { maxLength: 64 });
 
   if (eventDef.fields.length === 0) {
     return `${label} event emitted (${truncateHex(event.data, 8)})`;
@@ -199,7 +201,9 @@ function renderEvent(eventDef: CustomAbiEvent, event: RawEvent): string {
 
   const parts = eventDef.fields.map(function (field: CustomAbiField, index: number): string {
     const hex = positions[index] ?? "0x00";
-    return `${field.name}: ${renderField(field, hex)}`;
+    // Sanitize field name from ABI and the rendered value from blockchain data
+    const safeName = sanitizeTextField(field.name, { maxLength: 64 });
+    return `${safeName}: ${renderField(field, hex)}`;
   });
 
   return `${label} — ${parts.join(", ")}`;
@@ -209,12 +213,15 @@ function renderEvent(eventDef: CustomAbiEvent, event: RawEvent): string {
 function renderField(field: CustomAbiField, hex: string): string {
   const type = field.type.toLowerCase();
   if (ADDRESS_TYPES.has(type)) {
+    // Address values are hex-only — safe to render without HTML escaping
     return `[${decodeAddress(hex).short}]`;
   }
   if (AMOUNT_TYPES.has(type)) {
+    // Numeric formatted values are safe
     return decodeAmount(hex).formatted;
   }
-  return truncateHex(hex, 6);
+  // Raw hex truncated — sanitize in case a future decoder emits human-readable text
+  return sanitizeTemplateParam(truncateHex(hex, 6));
 }
 
 // ── Persistence (localStorage) ───────────────────────────────────────────────

@@ -12,16 +12,17 @@ datasource db {
 
 model Event {
   id              String   @id @unique
-  contractId      String   @index
-  ledger          Int      @index
+  contractId      String
+  ledger          Int
   timestamp       Int
-  txHash          String   @index
-  topics          Json     // Store as JSON array
-  data            String
+  txHash          String
+  topics          Json     // Store as JSON array (may contain "ipfs:<cid>" pointers)
+  data            String   // Hex data (may contain "ipfs:<cid>" pointer if >2KB)
   description     String?  // Translated human-readable text
   status          String   // "translated" | "cryptic"
   blueprintName   String?  // Contract name from blueprint
   eventType       String?  // Event type (transfer, mint, burn, etc.)
+  ipfsCids        Json?    // Array of IPFS CIDs offloaded for this event
 
   // Reconciliation fields
   rpcVerified     Boolean  @default(false)
@@ -31,6 +32,9 @@ model Event {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  @@index([contractId])
+  @@index([ledger])
+  @@index([txHash])
   @@index([contractId, ledger])
   @@index([timestamp])
 }
@@ -73,14 +77,42 @@ model ReconciliationJob {
 // Audit trail for reconciliation actions
 model AuditLog {
   id              String   @id @default(cuid())
-  jobId           String   @index
+  jobId           String
   action          String   // "detected" | "fixed" | "flagged" | "verified"
-  eventId         String?  @index
+  eventId         String?
   ledger          Int?
   details         Json     // Additional context
   metadata        Json?    // Request headers, IP, etc.
 
   createdAt       DateTime @default(now())
+
+  @@index([jobId])
+  @@index([eventId])
+}
+
+// Records every data-retention archive run for observability and audit
+model ArchiveLog {
+  id            String   @id @default(cuid())
+  /// ISO cutoff date used for this run
+  cutoffDate    DateTime
+  /// Number of rows written to the archive flat file
+  rowsArchived  Int      @default(0)
+  /// Number of rows deleted from Event (should equal rowsArchived on success)
+  rowsDeleted   Int      @default(0)
+  /// Absolute path of the produced .csv.gz file (empty if no data / failure)
+  archiveFile   String   @default("")
+  /// Wall-clock duration in milliseconds
+  durationMs    Int      @default(0)
+  /// "success" | "failed" | "skipped"
+  status        String   @default("success")
+  /// Error message populated on failure
+  errorMessage  String?
+  /// "cron" | "manual"
+  triggeredBy   String   @default("cron")
+
+  createdAt     DateTime @default(now())
+
+  @@index([createdAt])
 }
 
 // Configuration for reconciliation
@@ -106,4 +138,44 @@ model ReconciliationConfig {
   enabled         Boolean  @default(true)
   
   updatedAt       DateTime @updatedAt
+}
+
+// Webhook subscriptions
+model WebhookSubscription {
+  id              String   @id @default(cuid())
+  name            String?
+  url             String
+  secret          String
+  contractId      String
+  eventTypes      Json?
+  enabled         Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  webhookDeliveries WebhookDelivery[]
+  
+  @@index([contractId])
+  @@index([enabled])
+}
+
+// Webhook delivery attempts
+model WebhookDelivery {
+  id              String   @id @default(cuid())
+  webhookId       String
+  eventId         String
+  contractId      String
+  payload         Json
+  status          String   // "pending" | "delivered" | "failed"
+  attempts        Int      @default(0)
+  maxAttempts     Int      @default(3)
+  lastError       String?
+  deliveredAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  webhook         WebhookSubscription @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  
+  @@index([webhookId])
+  @@index([eventId])
+  @@index([status])
 }

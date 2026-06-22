@@ -1,0 +1,57 @@
+[package]
+name = "soroban-xdr-decode"
+version = "0.1.0"
+edition = "2021"
+authors = ["Open-Audit Contributors"]
+description = "Native N-API addon for zero-copy Stellar Soroban XDR decoding"
+license = "MIT"
+
+# napi-rs requires the output to be a C-compatible dynamic library.
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# ── N-API bridge ──────────────────────────────────────────────────────────────
+# napi4  → Node-API version 4 ABI (Node.js 10+; well within the 18+ target).
+# serde-json → #[napi] functions can return serde_json::Value directly,
+#              serialised into V8 objects without intermediate JsObject steps.
+napi        = { version = "2.16", default-features = false, features = ["napi4", "serde-json"] }
+napi-derive = { version = "2.16" }
+
+# ── Stellar XDR types ─────────────────────────────────────────────────────────
+# "curr"   → current-generation Soroban XDR schema (Protocol 20+).
+# "std"    → enables Read/WriteXdr on all types (requires alloc + io::Read).
+# "base64" → adds base64 encode/decode helpers.
+# "serde"  → derives Serialize/Deserialize on all XDR types.
+#
+# Deliberately NOT enabling any feature that pulls in openssl-sys.
+# stellar-xdr only needs openssl when the "cli" feature is enabled;
+# that feature is not listed here so the cross-compile to aarch64 does not
+# require aarch64 OpenSSL headers on the build host.
+stellar-xdr    = { version = "0.0.18", default-features = false, features = ["curr", "std", "base64", "serde"] }
+
+# ── Stellar StrKey encoding ───────────────────────────────────────────────────
+stellar-strkey = { version = "0.0.8", default-features = false }
+
+# ── Byte encoding helpers ─────────────────────────────────────────────────────
+# base64 — RFC 4648 codec, alloc-only (no std required).
+base64 = { version = "0.22", default-features = false, features = ["alloc"] }
+# hex   — hex ↔ bytes codec, no_std compatible.
+hex    = { version = "0.4",  default-features = false, features = ["alloc"] }
+
+# ── Serialisation ─────────────────────────────────────────────────────────────
+serde      = { version = "1",   features = ["derive"] }
+serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
+
+[build-dependencies]
+# napi-build emits the linker flags that make the .node file resolve the
+# Node-API symbols at runtime rather than link time.
+napi-build = "2.1"
+
+# ── Release profile ───────────────────────────────────────────────────────────
+[profile.release]
+lto           = "thin"       # cross-crate inlining without full LTO build time
+codegen-units = 1            # maximise optimiser visibility
+opt-level     = 3
+strip         = "symbols"    # remove debug symbols → smaller .node binary
+panic         = "abort"      # no unwind tables → smaller binary, faster panics

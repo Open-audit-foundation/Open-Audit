@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { GitBranch, Star, ExternalLink, Code2 } from "lucide-react";
 import {
   Dialog,
@@ -40,7 +41,7 @@ export function ContributeDialog({
 
         <div className="space-y-5 mt-2">
           {/* Issue label */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2" role="group" aria-label="Issue properties">
             <Badge variant="warning">High Complexity Issue</Badge>
             <Badge variant="outline">Stellar Drips Eligible</Badge>
           </div>

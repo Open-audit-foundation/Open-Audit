@@ -9,7 +9,12 @@ export default defineConfig({
   },
   test: {
     globals: true,
-    environment: "node",
+    environment: "happy-dom",
+    server: {
+      deps: {
+        inline: [/@asamuzakjp\/css-color/, /@csstools\/css-calc/],
+      },
+    },
     include: ["**/*.test.ts", "**/*.test.tsx"],
     exclude: ["node_modules", ".next"],
     setupFiles: ["./vitest.setup.ts"],

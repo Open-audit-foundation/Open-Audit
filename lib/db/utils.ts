@@ -1,5 +1,6 @@
 import { db } from "./client";
-import { RawEvent } from "@/lib/stellar/types";
+import { RawEvent } from "@/lib/translator/types";
+import { processEventForIpfs } from "@/lib/ipfs/offloader";
 
 /**
  * Initialize database connection and run migrations
@@ -15,7 +16,7 @@ export async function initializeDatabase(): Promise<void> {
 }
 
 /**
- * Create or update an event in the database
+ * Create or update an event in the database with IPFS offloading
  */
 export async function upsertEvent(
   event: RawEvent & {
@@ -25,6 +26,8 @@ export async function upsertEvent(
     eventType?: string;
   }
 ): Promise<void> {
+  const processed = await processEventForIpfs(event);
+
   await db.event.upsert({
     where: { id: event.id },
     update: {
@@ -32,6 +35,9 @@ export async function upsertEvent(
       status: event.status,
       blueprintName: event.blueprintName,
       eventType: event.eventType,
+      data: processed.data,
+      topics: processed.topics,
+      ipfsCids: processed.cids.length > 0 ? processed.cids : undefined,
       updatedAt: new Date(),
     },
     create: {
@@ -40,18 +46,19 @@ export async function upsertEvent(
       ledger: event.ledger,
       timestamp: event.timestamp,
       txHash: event.txHash,
-      topics: event.topics,
-      data: event.data,
+      topics: processed.topics,
+      data: processed.data,
       description: event.description,
       status: event.status,
       blueprintName: event.blueprintName,
       eventType: event.eventType,
+      ipfsCids: processed.cids.length > 0 ? processed.cids : undefined,
     },
   });
 }
 
 /**
- * Batch insert events for better performance
+ * Batch insert events for better performance with IPFS offloading
  */
 export async function batchUpsertEvents(
   events: Array<
@@ -60,14 +67,14 @@ export async function batchUpsertEvents(
 ): Promise<number> {
   let upsertedCount = 0;
 
-  // Process in chunks to avoid overwhelming the database
   const chunkSize = 100;
   for (let i = 0; i < events.length; i += chunkSize) {
     const chunk = events.slice(i, i + chunkSize);
 
     const results = await Promise.all(
-      chunk.map((event) =>
-        db.event
+      chunk.map(async (event) => {
+        const processed = await processEventForIpfs(event);
+        return db.event
           .upsert({
             where: { id: event.id },
             update: {
@@ -75,6 +82,9 @@ export async function batchUpsertEvents(
               status: event.status,
               blueprintName: event.blueprintName,
               eventType: event.eventType,
+              data: processed.data,
+              topics: processed.topics,
+              ipfsCids: processed.cids.length > 0 ? processed.cids : undefined,
               updatedAt: new Date(),
             },
             create: {
@@ -83,19 +93,20 @@ export async function batchUpsertEvents(
               ledger: event.ledger,
               timestamp: event.timestamp,
               txHash: event.txHash,
-              topics: event.topics,
-              data: event.data,
+              topics: processed.topics,
+              data: processed.data,
               description: event.description,
               status: event.status,
               blueprintName: event.blueprintName,
               eventType: event.eventType,
+              ipfsCids: processed.cids.length > 0 ? processed.cids : undefined,
             },
           })
           .catch((err) => {
             console.error(`Failed to upsert event ${event.id}:`, err);
             return null;
-          })
-      )
+          });
+      })
     );
 
     upsertedCount += results.filter((r) => r !== null).length;

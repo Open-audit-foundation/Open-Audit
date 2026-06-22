@@ -7,9 +7,9 @@
 
 import { SorobanRpc } from "stellar-sdk";
 import { isOpenAuditError, normalizeError } from "../errors";
-import { captureExceptionSync } from "../telemetry";
 import type { StellarNetworkConfig } from "./client";
 import { fetchEventsWithRetry, DEFAULT_RETRY_CONFIG, type IndexerRetryConfig } from "./indexer";
+import { captureExceptionSync, eventsIngestedTotal } from "../telemetry";
 
 /** Configuration for historical ingestion. */
 export interface HistoricalIngestionConfig {
@@ -116,6 +116,7 @@ export async function ingestHistoricalRange(
     onChunkComplete,
     onComplete,
     onError,
+    continueOnFailure = false,
   } = options;
 
   // Validate parameters
@@ -164,6 +165,7 @@ export async function ingestHistoricalRange(
 
       const events = response.events || [];
       totalEvents += events.length;
+      eventsIngestedTotal.labels(contractId, "success").inc(events.length);
 
       // Create chunk result
       const chunkResult: ChunkResult = {
@@ -193,8 +195,9 @@ export async function ingestHistoricalRange(
           });
 
       captureExceptionSync(err, {
-        context: { contractId, ledgerSequence: chunkStart, chunkIndex },
+        context: { contractId, ledgerSequence: chunkStart, chunkIndex, operation: "ingestHistoricalRange" },
       });
+      eventsIngestedTotal.labels(contractId, "failed").inc();
 
       if (onError) {
         onError(err, chunkIndex);
@@ -202,8 +205,7 @@ export async function ingestHistoricalRange(
         console.error(`[historical-ingester] Error in chunk ${chunkIndex}: ${err.message}`);
       }
 
-      // Stop or continue based on configuration
-      if (options.continueOnFailure) {
+      if (continueOnFailure) {
         console.warn(
           `[historical-ingester] Skipping chunk ${chunkIndex} due to error and continuing as requested.`
         );

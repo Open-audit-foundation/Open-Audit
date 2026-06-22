@@ -1,6 +1,31 @@
+# Version control
 .git
+.gitignore
+.gitattributes
+
+# Build outputs (rebuilt inside Docker)
 .next
 .server-dist
 node_modules
-*.md
+
+# Environment files — never bake secrets into images
 .env*
+!.env.example
+
+# CI / tooling
+.github
+.kiro
+
+# Documentation
+*.md
+docs/
+
+# Test artefacts
+coverage/
+*.test.*
+__tests__/
+
+# Editor / OS noise
+.DS_Store
+*.log
+Thumbs.db
