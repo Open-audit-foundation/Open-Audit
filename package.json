@@ -23,7 +23,7 @@
   },
   "dependencies": {
     "@opentelemetry/api": "^1.2.0",
-    "@opentelemetry/exporter-jaeger": "^1.0.0",
+    "@opentelemetry/exporter-jaeger": "^2.8.0",
     "@opentelemetry/instrumentation-http": "^0.39.0",
     "@opentelemetry/sdk-node": "^0.219.0",
     "@prisma/client": "^5.22.0",
