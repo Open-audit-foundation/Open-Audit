@@ -12,6 +12,36 @@ import { translateEvent } from "./registry";
 import { db } from "@/lib/db/client";
 import { processEventForIpfs } from "@/lib/ipfs/offloader";
 import { triggerWebhooksForEvent } from "@/lib/jobs/queue";
+import { OpenAuditError } from "@/lib/errors";
+
+interface DeadLetterPayload {
+  errorCode: string;
+  errorMessage: string;
+  errorStack?: string | null;
+  errorContext?: Record<string, unknown> | null;
+}
+
+async function saveDeadLetterEvent(rawEvent: RawEvent, payload: DeadLetterPayload): Promise<void> {
+  try {
+    await db.deadLetterEvent.create({
+      data: {
+        eventId: rawEvent.id,
+        contractId: rawEvent.contractId,
+        ledger: rawEvent.ledger,
+        timestamp: rawEvent.timestamp,
+        txHash: rawEvent.txHash,
+        topics: rawEvent.topics,
+        data: rawEvent.data,
+        errorCode: payload.errorCode,
+        errorMessage: payload.errorMessage,
+        errorStack: payload.errorStack ?? undefined,
+        errorContext: payload.errorContext ?? undefined,
+      },
+    });
+  } catch (dbError) {
+    console.error("[dlq] Failed to save dead letter event:", dbError);
+  }
+}
 
 /**
  * Translates and persists a single event, offloading bloated data to IPFS.
@@ -19,54 +49,74 @@ import { triggerWebhooksForEvent } from "@/lib/jobs/queue";
 export async function translateAndPersistEvent(
   rawEvent: RawEvent
 ): Promise<TranslatedEvent | null> {
+  let translated: TranslatedEvent;
+
   try {
-    const translated = await translateEvent(rawEvent);
+    translated = await translateEvent(rawEvent);
+  } catch (error) {
+    const errorCode = error instanceof OpenAuditError ? error.code : "INTERNAL_ERROR";
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack ?? null : null;
+    const errorContext = error instanceof OpenAuditError ? error.context : null;
 
-    if (translated) {
-      const processed = await processEventForIpfs(rawEvent);
+    await saveDeadLetterEvent(rawEvent, {
+      errorCode,
+      errorMessage,
+      errorStack,
+      errorContext,
+    });
 
-      const savedEvent = await db.event.upsert({
-        where: { id: rawEvent.id },
-        update: {
-          description: translated.description,
-          status: translated.status,
-          blueprintName: translated.blueprintName,
-          eventType: translated.eventType,
-          data: processed.data,
-          topics: processed.topics,
-          ipfsCids: processed.cids.length > 0 ? processed.cids : undefined,
-          updatedAt: new Date(),
-        },
-        create: {
-          id: rawEvent.id,
-          contractId: rawEvent.contractId,
-          ledger: rawEvent.ledger,
-          timestamp: rawEvent.timestamp,
-          txHash: rawEvent.txHash,
-          topics: processed.topics,
-          data: processed.data,
-          description: translated.description,
-          status: translated.status,
-          blueprintName: translated.blueprintName,
-          eventType: translated.eventType,
-          ipfsCids: processed.cids.length > 0 ? processed.cids : undefined,
-        },
-      });
+    console.error(
+      `[dlq] Unparseable event ${rawEvent.id} persisted to DeadLetterEvent with code=${errorCode}`
+    );
 
-      // Trigger webhooks for the saved event
-      try {
-        await triggerWebhooksForEvent(savedEvent);
-      } catch (webhookError) {
-        console.error("[webhooks] Failed to trigger webhooks:", webhookError);
-      }
+    return null;
+  }
 
-      translated.raw.data = processed.data;
-      translated.raw.topics = processed.topics;
+  try {
+    const processed = await processEventForIpfs(rawEvent);
+
+    const savedEvent = await db.event.upsert({
+      where: { id: rawEvent.id },
+      update: {
+        description: translated.description,
+        status: translated.status,
+        blueprintName: translated.blueprintName,
+        eventType: translated.eventType,
+        data: processed.data,
+        topics: processed.topics,
+        ipfsCids: processed.cids.length > 0 ? processed.cids : undefined,
+        updatedAt: new Date(),
+      },
+      create: {
+        id: rawEvent.id,
+        contractId: rawEvent.contractId,
+        ledger: rawEvent.ledger,
+        timestamp: rawEvent.timestamp,
+        txHash: rawEvent.txHash,
+        topics: processed.topics,
+        data: processed.data,
+        description: translated.description,
+        status: translated.status,
+        blueprintName: translated.blueprintName,
+        eventType: translated.eventType,
+        ipfsCids: processed.cids.length > 0 ? processed.cids : undefined,
+      },
+    });
+
+    // Trigger webhooks for the saved event
+    try {
+      await triggerWebhooksForEvent(savedEvent);
+    } catch (webhookError) {
+      console.error("[webhooks] Failed to trigger webhooks:", webhookError);
     }
+
+    translated.raw.data = processed.data;
+    translated.raw.topics = processed.topics;
 
     return translated;
   } catch (error) {
-    console.error(`Failed to translate/persist event ${rawEvent.id}:`, error);
+    console.error(`Failed to persist event ${rawEvent.id}:`, error);
     return null;
   }
 }

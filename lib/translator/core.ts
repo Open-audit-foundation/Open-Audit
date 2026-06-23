@@ -73,8 +73,17 @@ export function sanitizeTextField(
   if (typeof value !== "string") return "";
   const { maxLength = 1024, allowHex = false } = options;
   const trimmed = value.trim().slice(0, maxLength);
-  if (allowHex && HEX_ONLY_RE.test(trimmed)) return trimmed;
-  return escapeHtml(trimmed);
+  // Remove control characters and non-printable ASCII characters
+  const stripped = trimmed.replace(/[\x00-\x1F\x7F]/g, "");
+  if (allowHex && HEX_ONLY_RE.test(stripped)) return stripped;
+  return escapeHtml(stripped);
+}
+
+export function validateTextField(value: string, maxLength: number = 256): boolean {
+  if (typeof value !== "string") return false;
+  if (value.length === 0 || value.length > maxLength) return false;
+  // Allow alphanumeric, spaces, hyphen, underscore, parentheses
+  return /^[A-Za-z0-9\s\-_'()]+$/.test(value);
 }
 
 // ─── Template interpolation ───────────────────────────────────────────────────

@@ -39,6 +39,26 @@ model Event {
   @@index([timestamp])
 }
 
+model DeadLetterEvent {
+  id            String   @id @default(cuid()) @unique
+  eventId       String
+  contractId    String
+  ledger        Int
+  timestamp     Int
+  txHash        String
+  topics        Json
+  data          String
+  errorCode     String
+  errorMessage  String
+  errorStack    String?
+  errorContext  Json?
+  createdAt     DateTime @default(now())
+
+  @@index([contractId])
+  @@index([eventId])
+  @@index([createdAt])
+}
+
 // Tracks the indexer's progress through ledgers
 model IndexerCursor {
   id              String   @id @default("current")

@@ -3,7 +3,7 @@ import { context, diag, DiagConsoleLogger, DiagLogLevel, trace } from "@opentele
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import { JaegerExporter } from "@opentelemetry/exporter-jaeger";
 import { HttpInstrumentation } from "@opentelemetry/instrumentation-http";
-import { Resource } from "@opentelemetry/resources";
+import { resourceFromAttributes } from "@opentelemetry/resources";
 import { SemanticResourceAttributes } from "@opentelemetry/semantic-conventions";
 
 export const metricsRegistry = new Registry();
@@ -46,7 +46,7 @@ const sdk = new NodeSDK({
     serviceName,
   }),
   instrumentations: [new HttpInstrumentation()],
-  resource: new Resource({
+  resource: resourceFromAttributes({
     [SemanticResourceAttributes.SERVICE_NAME]: serviceName,
   }),
 });
