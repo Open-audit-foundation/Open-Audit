@@ -160,6 +160,79 @@ model ReconciliationConfig {
   updatedAt       DateTime @updatedAt
 }
 
+// ============================================================================
+// Cross-Chain Bridge Tracking
+// ============================================================================
+
+// A single raw bridge event captured from either Stellar/Soroban or EVM
+model BridgeEvent {
+  id              String   @id @default(cuid())
+  chain           String   // "stellar" | "ethereum" | "optimism" | "arbitrum" | "base"
+  eventType       String   // "burn" | "mint"
+  txHash          String
+  blockNumber     BigInt
+  timestamp       Int      // Unix timestamp (seconds)
+  contractAddress String   // Bridge contract on the source chain
+  sender          String?  // Original sender address
+  recipient       String?  // Destination address
+  token           String?  // Token symbol or address
+  amount          String   // Amount as string (supports large numbers)
+  destinationChain String? // Intended target chain declared in the event
+  destinationProof String? // On-chain proof / nonce / message ID linking both sides
+  rawPayload      Json     // Original raw log / event data
+
+  matchId         String?  // FK → CrossChainMatch (nullable until matched)
+  match           CrossChainMatch? @relation(fields: [matchId], references: [id])
+
+  createdAt       DateTime @default(now())
+
+  @@index([chain])
+  @@index([eventType])
+  @@index([txHash])
+  @@index([timestamp])
+  @@index([destinationProof])
+  @@index([matchId])
+}
+
+// A confirmed cross-chain transfer: one Stellar Burn paired with one EVM Mint
+model CrossChainMatch {
+  id              String   @id @default(cuid())
+  status          String   // "pending" | "matched" | "unmatched" | "disputed"
+
+  // Scalar references so the match is self-contained even if events are pruned
+  burnTxHash      String
+  mintTxHash      String?  // null while waiting for the EVM mint to arrive
+  burnChain       String   @default("stellar")
+  mintChain       String   // "ethereum" | "optimism" | "arbitrum" | "base"
+
+  token           String?
+  amount          String
+  sender          String?
+  recipient       String?
+
+  burnTimestamp   Int      // Unix seconds
+  mintTimestamp   Int?     // null until matched
+  latencySeconds  Int?     // mintTimestamp - burnTimestamp
+
+  // The proof / nonce that deterministically links both sides
+  destinationProof String?
+
+  // Confidence score 0-100 (100 = proof-matched, lower = heuristic)
+  matchConfidence Int      @default(0)
+  matchMethod     String?  // "proof" | "amount+timestamp" | "amount+recipient"
+
+  // Child bridge events
+  events          BridgeEvent[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([status])
+  @@index([burnTxHash])
+  @@index([destinationProof])
+  @@index([createdAt])
+}
+
 // Webhook subscriptions
 model WebhookSubscription {
   id              String   @id @default(cuid())

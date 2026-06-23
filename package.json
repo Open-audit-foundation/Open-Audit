@@ -49,7 +49,8 @@
     "db:seed": "ts-node prisma/seed.ts",
     "db:studio": "prisma studio",
     "retention": "ts-node --project tsconfig.server.json scripts/retention.ts",
-    "retention:dry-run": "ts-node --project tsconfig.server.json scripts/retention.ts --dry-run"
+    "retention:dry-run": "ts-node --project tsconfig.server.json scripts/retention.ts --dry-run",
+    "worker:evm-bridge": "ts-node --project tsconfig.server.json src/worker/evm-bridge-indexer.ts"
   },
   "dependencies": {
     "@clickhouse/client": "^1.0.0",
