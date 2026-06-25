@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo } from "react";
+import { AlertCircle, BookOpen, ArrowRight, Radio, PauseCircle, PlayCircle, Upload, FileJson, Trash2 } from "lucide-react";
+import { SearchBar } from "@/components/dashboard/SearchBar";
 import {
   AlertCircle,
   BookOpen,
@@ -33,6 +35,10 @@ import {
   removeCustomAbi,
   saveCustomAbi,
 } from "@/lib/translator/custom-abi";
+import { getMockEventsForContract, MOCK_RAW_EVENTS } from "@/lib/mock-data";
+import { useLiveFeed } from "@/lib/hooks/useLiveFeed";
+import type { TranslatedEvent } from "@/lib/translator/types";
+import type { RawEvent, CustomAbi } from "@/lib/translator/types";
 import { translateEvents } from "@/lib/translator/registry";
 import type { TranslatedEvent, RawEvent, CustomAbi } from "@/lib/translator/types";
 
@@ -42,6 +48,7 @@ function simulateNetworkDelay(ms: number): Promise<void> {
 
 export function DashboardClient(): React.JSX.Element {
   const [rawEvents, setRawEvents] = useState<RawEvent[]>(MOCK_RAW_EVENTS);
+  const [liveEvents, setLiveEvents] = useState<TranslatedEvent[]>([]);
   const [customAbis, setCustomAbis] = useState<CustomAbi[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,6 +70,26 @@ export function DashboardClient(): React.JSX.Element {
     [customAbis]
   );
 
+  // Derive translations from the raw events + current custom blueprints so the
+  // feed re-translates instantly when an ABI is uploaded or removed.
+  const translatedRawEvents = useMemo(
+    function () {
+      return translateEvents(rawEvents, customBlueprints);
+    },
+    [rawEvents, customBlueprints]
+  );
+
+  // Merge live-streamed events (prepended) with the translated batch.
+  const events = useMemo(
+    function () {
+      return [...liveEvents, ...translatedRawEvents];
+    },
+    [liveEvents, translatedRawEvents]
+  );
+
+  const handleNewEvent = useCallback((event: TranslatedEvent) => {
+    setLiveEvents((prev) => [event, ...prev]);
+  }, []);
   const translatedEvents = useMemo(
     () => translateEvents(rawEvents, customBlueprints, language),
     [rawEvents, customBlueprints, language]

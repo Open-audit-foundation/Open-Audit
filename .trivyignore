@@ -1,3 +1,43 @@
+# .trivyignore — Trivy vulnerability suppression file
+#
+# This file documents intentional suppressions for vulnerabilities that cannot
+# be remediated without a breaking major-version upgrade.  Each entry is
+# accompanied by a justification and a re-evaluation date.
+#
+# Process: re-evaluate every suppression when the project upgrades Next.js to
+# a major version that resolves the underlying issue (currently next@15+).
+
+# ---------------------------------------------------------------------------
+# CVE-2026-41305  (GHSA-qx2v-qp2m-jg93)
+# PostCSS < 8.5.10 — XSS via unescaped </style> in CSS Stringify Output
+#
+# Root cause: next@14.2.35 (the latest 14.x release) bundles postcss@8.4.31
+# as a private dependency inside node_modules/next/node_modules/postcss.  npm
+# overrides cannot reach bundled deps; the fix is only available in next@15+.
+#
+# Impact assessment: the vulnerability requires an attacker to control CSS
+# that is processed by PostCSS stringify at build time — not a runtime attack
+# surface for this project.  No end-user data passes through PostCSS stringify
+# in production.
+#
+# Re-evaluate: when upgrading to next@15.x
+# ---------------------------------------------------------------------------
+CVE-2026-41305
+
+# ---------------------------------------------------------------------------
+# CVE-2025-59471  (GHSA-9g9p-9gw9-jx7f)
+# Next.js < 15.5.10 — DoS via Image Optimizer remotePatterns configuration
+#
+# Root cause: advisory range covers all 14.x versions.  next@14.2.35 is the
+# final patch release for the 14.x line; Vercel does not backport this fix.
+#
+# Impact assessment: this project does not configure remotePatterns in
+# next.config.mjs and does not expose the /_next/image endpoint to untrusted
+# external image URLs.  The attack surface is therefore not present.
+#
+# Re-evaluate: when upgrading to next@15.x
+# ---------------------------------------------------------------------------
+CVE-2025-59471
 # .trivyignore — Trivy CVE suppression list for Open-Audit
 #
 # Format: one CVE ID per line, optionally followed by a comment.

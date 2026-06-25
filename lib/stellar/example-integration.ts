@@ -27,6 +27,8 @@ function convertToRawEvent(
   return {
     id: event.id,
     contractId,
+    topics: event.topic.map((t) => t.toXDR("base64")), // Convert ScVal[] to string[]
+    data: event.value.toXDR("base64"), // Convert ScVal to string
     topics: event.topic.map((t) => t.toString()), // Array of hex-encoded topics
     data: event.value.toString(), // XDR-encoded data
     ledger: event.ledger,
@@ -66,6 +68,9 @@ class EventStore {
    */
   getAllEvents(): TranslatedEvent[] {
     const allEvents: TranslatedEvent[] = [];
+    Array.from(this.events.values()).forEach(function (events) {
+      allEvents.push(...events);
+    });
     this.events.forEach((events) => allEvents.push(...events));
     // Sort by timestamp descending
     return allEvents.sort(function (a, b) {

@@ -400,6 +400,9 @@ export function startEventIndexer(options: IndexerOptions): IndexerControls {
         if (response.latestLedger) {
           cursor = {
             lastLedger: response.latestLedger,
+            // stellar-sdk v12 does not expose a pagination cursor on GetEventsResponse;
+            // retain the previous cursor value until a newer SDK version adds it.
+            paginationCursor: (response as unknown as Record<string, unknown>).cursor as string | undefined ?? cursor.paginationCursor,
             paginationCursor: (response as unknown as Record<string, unknown>).cursor as string | undefined,
           };
           await stateStore?.save({
