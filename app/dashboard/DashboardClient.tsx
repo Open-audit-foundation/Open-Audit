@@ -1,20 +1,19 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo } from "react";
-import { AlertCircle, BookOpen, ArrowRight, Radio, PauseCircle, PlayCircle, Upload, FileJson, Trash2 } from "lucide-react";
-import { SearchBar } from "@/components/dashboard/SearchBar";
+import * as React from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
-  BookOpen,
   ArrowRight,
-  Radio,
+  BookOpen,
+  Download,
+  FileJson,
   PauseCircle,
   PlayCircle,
-  Upload,
-  FileJson,
-  Trash2,
-  Download,
+  Radio,
   Star,
+  Trash2,
+  Upload,
 } from "lucide-react";
 import { FilterBuilder } from "@/components/dashboard/FilterBuilder";
 import { EventFeedTable } from "@/components/dashboard/EventFeedTable";
@@ -27,124 +26,178 @@ import { useLiveFeed } from "@/lib/hooks/useLiveFeed";
 import { useLanguage } from "@/lib/hooks/useLanguage";
 import { useNetwork } from "@/lib/hooks/useNetwork";
 import { useDashboardPrefs } from "@/lib/hooks/useDashboardPrefs";
-import { useEventFilters } from "@/lib/hooks/useEventFilters";
-import { getMockEventsForContract, MOCK_RAW_EVENTS } from "@/lib/mock-data";
+import { useEventFilters, type EventFilters } from "@/lib/hooks/useEventFilters";
+import { MOCK_RAW_EVENTS } from "@/lib/mock-data";
 import {
   buildCustomBlueprints,
   loadCustomAbis,
   removeCustomAbi,
   saveCustomAbi,
 } from "@/lib/translator/custom-abi";
-import { getMockEventsForContract, MOCK_RAW_EVENTS } from "@/lib/mock-data";
-import { useLiveFeed } from "@/lib/hooks/useLiveFeed";
-import type { TranslatedEvent } from "@/lib/translator/types";
-import type { RawEvent, CustomAbi } from "@/lib/translator/types";
 import { translateEvents } from "@/lib/translator/registry";
-import type { TranslatedEvent, RawEvent, CustomAbi } from "@/lib/translator/types";
+import type { EmptyStateCause } from "@/components/dashboard/EmptyState";
+import type { CustomAbi, RawEvent, TranslatedEvent } from "@/lib/translator/types";
+
+const INITIAL_EVENT_LOAD_MS = 250;
 
 function simulateNetworkDelay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise(function (resolve) {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+function hasActiveFilters(filters: EventFilters): boolean {
+  return (
+    Boolean(filters.contractId) ||
+    Boolean(filters.eventType) ||
+    filters.minAmount !== undefined ||
+    filters.startLedger !== undefined ||
+    filters.endLedger !== undefined
+  );
+}
+
+function readEventAmount(data: string): number {
+  const normalized = data.slice(2).replace(/[^0-9a-fA-F]/g, "");
+  if (!normalized) return 0;
+  return Number(BigInt(`0x${normalized}`));
+}
+
+function eventMatchesFilters(event: TranslatedEvent, filters: EventFilters): boolean {
+  if (filters.contractId && event.raw.contractId !== filters.contractId) {
+    return false;
+  }
+
+  if (filters.eventType) {
+    const normalizedEventType = filters.eventType.toLowerCase();
+    const translatedType = event.eventType?.toLowerCase() ?? "";
+    if (!translatedType.includes(normalizedEventType)) {
+      return false;
+    }
+  }
+
+  if (filters.minAmount !== undefined && readEventAmount(event.raw.data) < filters.minAmount) {
+    return false;
+  }
+
+  if (filters.startLedger !== undefined && event.raw.ledger < filters.startLedger) {
+    return false;
+  }
+
+  if (filters.endLedger !== undefined && event.raw.ledger > filters.endLedger) {
+    return false;
+  }
+
+  return true;
 }
 
 export function DashboardClient(): React.JSX.Element {
-  const [rawEvents, setRawEvents] = useState<RawEvent[]>(MOCK_RAW_EVENTS);
+  const [rawEvents, setRawEvents] = useState<RawEvent[]>([]);
   const [liveEvents, setLiveEvents] = useState<TranslatedEvent[]>([]);
   const [customAbis, setCustomAbis] = useState<CustomAbi[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
-  const [liveEvents, setLiveEvents] = useState<TranslatedEvent[]>([]);
 
   const { language } = useLanguage();
   const { network } = useNetwork();
   const { prefs, ready, update, toggleColumn, toggleFavorite } = useDashboardPrefs();
-  const { filters, setFilters } = useEventFilters();
+  const { filters, setFilters, clearAll } = useEventFilters();
 
   useEffect(function () {
     setCustomAbis(loadCustomAbis());
   }, []);
 
+  useEffect(
+    function () {
+      let isCurrent = true;
+
+      setIsLoading(true);
+      setError(null);
+
+      simulateNetworkDelay(INITIAL_EVENT_LOAD_MS)
+        .then(function () {
+          if (!isCurrent) return;
+          setRawEvents(MOCK_RAW_EVENTS);
+        })
+        .catch(function (reason: unknown) {
+          if (!isCurrent) return;
+          setRawEvents([]);
+          setError(
+            reason instanceof Error
+              ? reason.message
+              : "Could not load event history."
+          );
+        })
+        .finally(function () {
+          if (isCurrent) setIsLoading(false);
+        });
+
+      return function cleanup(): void {
+        isCurrent = false;
+      };
+    },
+    [network]
+  );
+
   const customBlueprints = useMemo(
-    () => buildCustomBlueprints(customAbis),
+    function () {
+      return buildCustomBlueprints(customAbis);
+    },
     [customAbis]
   );
 
-  // Derive translations from the raw events + current custom blueprints so the
-  // feed re-translates instantly when an ABI is uploaded or removed.
-  const translatedRawEvents = useMemo(
-    function () {
-      return translateEvents(rawEvents, customBlueprints);
-    },
-    [rawEvents, customBlueprints]
-  );
-
-  // Merge live-streamed events (prepended) with the translated batch.
-  const events = useMemo(
-    function () {
-      return [...liveEvents, ...translatedRawEvents];
-    },
-    [liveEvents, translatedRawEvents]
-  );
-
-  const handleNewEvent = useCallback((event: TranslatedEvent) => {
-    setLiveEvents((prev) => [event, ...prev]);
-  }, []);
   const translatedEvents = useMemo(
-    () => translateEvents(rawEvents, customBlueprints, language),
+    function () {
+      return translateEvents(rawEvents, customBlueprints, language);
+    },
     [rawEvents, customBlueprints, language]
-  );
-
-  const allEvents = useMemo(
-    () => [...liveEvents, ...translatedEvents],
-    [liveEvents, translatedEvents]
-  );
-
-  const filteredEvents = useMemo(
-    () =>
-      allEvents.filter((event) => {
-        if (filters.contractId && event.raw.contractId !== filters.contractId) {
-          return false;
-        }
-
-        if (filters.eventType) {
-          const normalizedEventType = filters.eventType.toLowerCase();
-          const translatedType = event.eventType?.toLowerCase() ?? "";
-          if (!translatedType.includes(normalizedEventType)) {
-            return false;
-          }
-        }
-
-        if (filters.minAmount !== undefined) {
-          const amount = Number(event.raw.data ? BigInt("0x" + event.raw.data.slice(2).replace(/[^0-9a-fA-F]/g, "0")) : 0n);
-          if (Number(amount) < filters.minAmount) {
-            return false;
-          }
-        }
-
-        if (filters.startLedger !== undefined && event.raw.ledger < filters.startLedger) {
-          return false;
-        }
-
-        if (filters.endLedger !== undefined && event.raw.ledger > filters.endLedger) {
-          return false;
-        }
-
-        return true;
-      }),
-    [allEvents, filters]
   );
 
   const handleNewEvent = useCallback(
     function (event: TranslatedEvent): void {
       if (filters.contractId && event.raw.contractId !== filters.contractId) return;
-      setLiveEvents((prev) => [event, ...prev]);
+      setLiveEvents(function (prev) {
+        return [event, ...prev];
+      });
     },
     [filters.contractId]
   );
 
-  const { isLive, isPaused, newEventIds, toggleLive, togglePause } =
-    useLiveFeed(handleNewEvent);
+  const {
+    isLive,
+    isPaused,
+    connectionStatus,
+    newEventIds,
+    toggleLive,
+    togglePause,
+  } = useLiveFeed(handleNewEvent);
+
+  const allEvents = useMemo(
+    function () {
+      return [...liveEvents, ...translatedEvents];
+    },
+    [liveEvents, translatedEvents]
+  );
+
+  const filteredEvents = useMemo(
+    function () {
+      return allEvents.filter(function (event) {
+        return eventMatchesFilters(event, filters);
+      });
+    },
+    [allEvents, filters]
+  );
+
+  const activeFilters = hasActiveFilters(filters);
+  const emptyStateCause: EmptyStateCause =
+    connectionStatus === "error"
+      ? "connection-error"
+      : activeFilters
+        ? "filtered"
+        : "waiting";
+  const isEventFeedLoading =
+    isLoading || (connectionStatus === "connecting" && allEvents.length === 0);
 
   const handleAbiUpload = useCallback(function (abi: CustomAbi): void {
     setCustomAbis(saveCustomAbi(abi));
@@ -166,31 +219,43 @@ export function DashboardClient(): React.JSX.Element {
     ? prefs.favorites.includes(filters.contractId)
     : false;
 
+  function handleToggleFilteredFavorite(): void {
+    if (filters.contractId) {
+      toggleFavorite(filters.contractId);
+    }
+  }
+
   return (
     <div className="space-y-6">
-      {/* Pinned contracts sidebar */}
       {ready && (
         <FavoritesSidebar
           favorites={prefs.favorites}
-          activeContract={filters.contractId}
+          activeContract={filters.contractId ?? null}
           onSelect={handleFavoriteSelect}
           onRemove={toggleFavorite}
         />
       )}
 
-      {/* Search + favorite toggle */}
       <section aria-label="Event filters">
         <div className="flex flex-col gap-3">
           <FilterBuilder
             eventTypeSuggestions={Array.from(
               new Set(
                 allEvents
-                  .map((event) => event.eventType)
-                  .filter((value): value is string => Boolean(value))
+                  .map(function (event) {
+                    return event.eventType;
+                  })
+                  .filter(function (value): value is string {
+                    return Boolean(value);
+                  })
               )
             )}
             contractSuggestions={Array.from(
-              new Set(allEvents.map((event) => event.raw.contractId))
+              new Set(
+                allEvents.map(function (event) {
+                  return event.raw.contractId;
+                })
+              )
             )}
           />
 
@@ -200,7 +265,7 @@ export function DashboardClient(): React.JSX.Element {
                 variant="ghost"
                 size="icon"
                 className="mt-0.5 h-9 w-9 shrink-0"
-                onClick={() => toggleFavorite(filters.contractId)}
+                onClick={handleToggleFilteredFavorite}
                 aria-label={isFavorited ? "Unpin this contract" : "Pin this contract"}
                 title={isFavorited ? "Unpin contract" : "Pin contract"}
               >
@@ -212,13 +277,14 @@ export function DashboardClient(): React.JSX.Element {
                   }`}
                 />
               </Button>
-              <span className="text-sm text-muted-foreground">Filtered contract is pinned / unpinned by toggle.</span>
+              <span className="text-sm text-muted-foreground">
+                Filtered contract is pinned / unpinned by toggle.
+              </span>
             </div>
           )}
         </div>
       </section>
 
-      {/* Error state */}
       {error && (
         <div
           role="alert"
@@ -229,70 +295,48 @@ export function DashboardClient(): React.JSX.Element {
         </div>
       )}
 
-      {/* Active filter indicator */}
-      {searchedContract && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
-          <span>Showing events for:</span>
-          <code className="font-mono text-xs bg-muted px-2 py-1 rounded">
-            {searchedContract.slice(0, 10)}...{searchedContract.slice(-6)}
-          </code>
-          <button
-            type="button"
-            onClick={() => {
-              setSearchValue("");
-              handleSearch("");
-            }}
-            className="text-violet-600 dark:text-violet-400 hover:underline text-xs"
-            aria-label="Clear contract filter"
-          >
-            Clear all filters
-          </button>
-        </div>
-      )}
-
-      {/* Custom ABIs */}
       <section aria-label="Custom ABIs" className="flex flex-wrap items-center gap-2">
         <Button variant="outline" size="sm" onClick={() => setIsUploadOpen(true)}>
           <Upload className="mr-2 h-4 w-4" />
           Upload Custom ABI
         </Button>
 
-        {customAbis.map((abi) => (
-          <span
-            key={abi.contractId}
-            className="inline-flex items-center gap-1.5 rounded-full border bg-muted/40 py-1 pl-2.5 pr-1.5 text-xs"
-            title={abi.contractId}
-          >
-            <FileJson className="h-3.5 w-3.5 text-violet-500" />
-            <span className="font-medium">{abi.contractName}</span>
-            <button
-              type="button"
-              onClick={() => handleAbiRemove(abi.contractId)}
-              className="text-muted-foreground transition-colors hover:text-destructive"
-              aria-label={`Remove custom ABI for ${abi.contractName}`}
+        {customAbis.map(function (abi) {
+          return (
+            <span
+              key={abi.contractId}
+              className="inline-flex items-center gap-1.5 rounded-full border bg-muted/40 py-1 pl-2.5 pr-1.5 text-xs"
+              title={abi.contractId}
             >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
-          </span>
-        ))}
+              <FileJson className="h-3.5 w-3.5 text-violet-500" />
+              <span className="font-medium">{abi.contractName}</span>
+              <button
+                type="button"
+                onClick={() => handleAbiRemove(abi.contractId)}
+                className="text-muted-foreground transition-colors hover:text-destructive"
+                aria-label={`Remove custom ABI for ${abi.contractName}`}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </span>
+          );
+        })}
       </section>
 
-      {/* Stats */}
-      {!isLoading && <StatsBar events={allEvents} />}
+      {!isEventFeedLoading && <StatsBar events={allEvents} />}
 
-      {/* Event feed */}
       <section aria-label="Event feed">
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
             Event Feed
           </h2>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="outline"
               size="sm"
               className="h-7 px-3 text-xs border-violet-300 text-violet-700 hover:bg-violet-50 dark:border-violet-700 dark:text-violet-400 dark:hover:bg-violet-950"
               onClick={() => setIsExportOpen(true)}
-              disabled={isLoading || allEvents.length === 0}
+              disabled={isEventFeedLoading || allEvents.length === 0}
               aria-label="Export filtered event data"
             >
               <Download className="h-3.5 w-3.5 mr-1.5" />
@@ -339,20 +383,21 @@ export function DashboardClient(): React.JSX.Element {
           </div>
         </div>
 
-        {ready && (
-          <EventFeedTable
-            events={filteredEvents}
-            isLoading={isLoading}
-            newEventIds={newEventIds}
-            columns={prefs.columns}
-            density={prefs.density}
-            onToggleColumn={toggleColumn}
-            onDensityChange={(d) => update({ density: d })}
-          />
-        )}
+        <EventFeedTable
+          events={filteredEvents}
+          isLoading={isEventFeedLoading}
+          newEventIds={newEventIds}
+          emptyStateCause={emptyStateCause}
+          columns={prefs.columns}
+          density={prefs.density}
+          onToggleColumn={toggleColumn}
+          onDensityChange={function (density) {
+            update({ density });
+          }}
+          onClearSearch={activeFilters ? clearAll : undefined}
+        />
       </section>
 
-      {/* Contribute banner */}
       <section
         aria-label="Contribute"
         className="rounded-lg border border-violet-200 bg-violet-50 p-5 dark:border-violet-800 dark:bg-violet-950/30"
