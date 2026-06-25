@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { translateEvent, matchesEventCriteria } from "./registry";
 import * as Core from "./core";
-import type { RawEvent } from "./types";
+import type { RawEvent, TranslationBlueprint } from "./types";
 
 const { interpolateTemplate, isValidHex, sanitizeHex, escapeHtml, detectScValType, decodeMap, decodeVec, decodeEnum, decodeScVal, sanitizeTextField, validateTextField } = Core;
 

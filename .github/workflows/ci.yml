@@ -1,0 +1,62 @@
+name: CI — Lint, Type-check & Test
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Lint · Type-check · Test
+    runs-on: ubuntu-latest
+
+    env:
+      # Tests that hit Prisma need a DATABASE_URL even if it's not reachable;
+      # the reconciliation tests use a real DB, but most others mock it.
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/openaudit_test"
+      # Disable Redis so tests fall back to in-process caching.
+      REDIS_URL: ""
+      NODE_ENV: "test"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # ── Type-check ───────────────────────────────────────────────────────
+      # Catches TypeScript errors that ESLint misses. Runs before tests so
+      # type errors surface early without waiting for the full test run.
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      # ── Lint ─────────────────────────────────────────────────────────────
+      - name: Lint
+        run: npm run lint
+
+      # ── Test ─────────────────────────────────────────────────────────────
+      # Skip tests that require a live database, RPC, or external services.
+      # The reconciliation suite needs a real Postgres instance; it is excluded
+      # here and runs in a separate integration job (not yet configured).
+      - name: Run unit tests
+        run: npx vitest run --exclude '**/reconciliation.test.ts' --exclude '**/client.integration.test.ts'
+        timeout-minutes: 10
+
+      # ── Reconciliation integration tests (optional, requires Postgres) ───
+      # Uncomment and add a Postgres service container when you are ready to
+      # run the full reconciliation suite in CI.
+      #
+      # - name: Run reconciliation tests
+      #   run: npx vitest run lib/reconciliation/reconciliation.test.ts

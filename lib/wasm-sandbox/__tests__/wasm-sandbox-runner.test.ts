@@ -9,7 +9,7 @@
  * - Successful execution of valid parsers
  */
 
-import { describe, test, expect, beforeAll, afterEach } from "@jest/globals";
+import { describe, test, expect, beforeAll, afterEach } from "vitest";
 import { join } from "path";
 import { writeFileSync, existsSync, mkdirSync } from "fs";
 import {

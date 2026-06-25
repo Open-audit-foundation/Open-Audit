@@ -6,21 +6,156 @@
  * relational table.  Designed to run during off-peak periods via the
  * retention scheduler (lib/retention/scheduler.ts).
  *
- * Archive format  : gzip-compressed CSV  (open-audit-archive-<ISO-date>.csv.gz)
- * Archive location: configurable via ARCHIVE_OUTPUT_DIR (default: ./archives)
- *
- * Environment variables consumed
- *   RETENTION_DAYS        – rows older than this many days are archived  (default 180)
- *   ARCHIVE_BATCH_SIZE    – rows processed per DB round-trip              (default 1000)
- *   ARCHIVE_OUTPUT_DIR    – directory for archive flat files              (default ./archives)
+ * Archive format  : gzip-compressed CSV  (open-audit-archive-<ISO-date>-<batch>.csv.gz)
+ * Archive location: configurable via policy.archiveDir
  */
 
 import fs from "fs";
 import path from "path";
 import zlib from "zlib";
 import { pipeline } from "stream/promises";
-import { Readable, PassThrough } from "stream";
+import { PassThrough } from "stream";
 import { db } from "@/lib/db/client";
+import type { RetentionPolicy } from "./policy";
+
+// ── Typed row from Prisma ────────────────────────────────────────────────────
+
+/**
+ * A minimal projection of the Event table row used for archiving.
+ * Matches what the pruner selects via `db.event.findMany`.
+ */
+export interface PrismaEventRow {
+  id: string;
+  contractId: string;
+  ledger: number;
+  timestamp: number;
+  txHash: string;
+  topics: string[];
+  data: string;
+  description?: string | null;
+  status: string;
+  blueprintName?: string | null;
+  eventType?: string | null;
+  createdAt: Date;
+}
+
+// ── Archive batch result ─────────────────────────────────────────────────────
+
+export interface ArchiveResult {
+  /** Number of rows written. */
+  rowCount: number;
+  /** Absolute path to the written .csv.gz file. */
+  filePath: string;
+  /** Compressed file size in bytes. */
+  compressedBytes: number;
+  /** Smallest `timestamp` value in the batch. */
+  oldestTimestamp: number;
+  /** Largest `timestamp` value in the batch. */
+  newestTimestamp: number;
+}
+
+// ── CSV helpers ─────────────────────────────────────────────────────────────
+
+const CSV_HEADER =
+  "id,contractId,ledger,timestamp,txHash,topics,data,description,status,blueprintName,eventType,createdAt\r\n";
+
+function escapeCSVCell(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  const s = typeof value === "object" ? JSON.stringify(value) : String(value);
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function rowToCSVLine(row: PrismaEventRow): string {
+  return [
+    row.id,
+    row.contractId,
+    row.ledger,
+    row.timestamp,
+    row.txHash,
+    escapeCSVCell(JSON.stringify(row.topics)),
+    escapeCSVCell(row.data),
+    escapeCSVCell(row.description ?? ""),
+    row.status,
+    escapeCSVCell(row.blueprintName ?? ""),
+    escapeCSVCell(row.eventType ?? ""),
+    row.createdAt.toISOString(),
+  ].join(",") + "\r\n";
+}
+
+// ── archiveBatch ─────────────────────────────────────────────────────────────
+
+/**
+ * Archives a single batch of Event rows to a gzip-compressed CSV file.
+ *
+ * @param rows         The rows to archive (already fetched from DB).
+ * @param batchIndex   Zero-based batch counter used in the filename.
+ * @param policy       The current retention policy.
+ * @returns            Archive metadata, or `null` in dry-run mode.
+ */
+export async function archiveBatch(
+  rows: PrismaEventRow[],
+  batchIndex: number,
+  policy: RetentionPolicy
+): Promise<ArchiveResult | null> {
+  // Dry-run: skip the write entirely.
+  if (policy.dryRun) return null;
+
+  // Empty batch: still return a metadata object with zero counts so the caller
+  // can distinguish "nothing to archive" from "archive failed".
+  if (rows.length === 0) {
+    return {
+      rowCount: 0,
+      filePath: "",
+      compressedBytes: 0,
+      oldestTimestamp: 0,
+      newestTimestamp: 0,
+    };
+  }
+
+  // Ensure archive directory exists.
+  if (!fs.existsSync(policy.archiveDir)) {
+    fs.mkdirSync(policy.archiveDir, { recursive: true });
+  }
+
+  const dateSlug = new Date().toISOString().slice(0, 10);
+  const filePath = path.join(
+    policy.archiveDir,
+    `open-audit-archive-${dateSlug}-batch${batchIndex}.csv.gz`
+  );
+
+  // Stream rows → gzip → file.
+  const pass = new PassThrough();
+  const gzip = zlib.createGzip({ level: zlib.constants.Z_BEST_COMPRESSION });
+  const fileStream = fs.createWriteStream(filePath);
+
+  const pipelinePromise = pipeline(pass, gzip, fileStream);
+
+  pass.write(Buffer.from(CSV_HEADER, "utf8"));
+  for (const row of rows) {
+    pass.write(Buffer.from(rowToCSVLine(row), "utf8"));
+  }
+  pass.end();
+
+  await pipelinePromise;
+
+  const stat = fs.statSync(filePath);
+
+  // Compute timestamp range for this batch.
+  let oldestTimestamp = rows[0].timestamp;
+  let newestTimestamp = rows[0].timestamp;
+  for (const row of rows) {
+    if (row.timestamp < oldestTimestamp) oldestTimestamp = row.timestamp;
+    if (row.timestamp > newestTimestamp) newestTimestamp = row.timestamp;
+  }
+
+  return {
+    rowCount: rows.length,
+    filePath,
+    compressedBytes: stat.size,
+    oldestTimestamp,
+    newestTimestamp,
+  };
+}
 
 // ── Config helpers ──────────────────────────────────────────────────────────
 
