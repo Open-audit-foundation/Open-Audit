@@ -23,8 +23,6 @@ import { decodeEventName } from "./core";
 import { sanitizeTextField } from "./core";
 import { decodeGenericEventPayload, formatGenericValue } from "./generic-fallback-decoder";
 import { RegistryTemplateException } from "../errors";
-import { captureExceptionSync } from "../telemetry";
-import { getCachedTranslation, setCachedTranslation, isRedisEnabled } from "../cache/redisCache";
 import type {
   EventMatchCriteria,
   RawEvent,
@@ -37,9 +35,6 @@ import type {
   TranslationResult,
 } from "./types";
 
-/** The registry maps contract IDs to their versioned entries. */
-type BlueprintRegistry = Map<string, ContractRegistryEntry>;
-
 /** Cache for resolved schemas to avoid repeated scans of the registry. */
 const RESOLUTION_CACHE: Map<string, ContractSchema> = new Map();
 
@@ -47,9 +42,18 @@ const RESOLUTION_CACHE: Map<string, ContractSchema> = new Map();
  * Interpolates a template string with values from an object.
  * e.g. "Hello {name}" + { name: "World" } -> "Hello World"
  */
-type BlueprintRegistry = Map<string, TranslationBlueprint | VersionedTranslationBlueprint[]>;
+/** The registry maps contract IDs to their versioned entries. */
+type BlueprintRegistry = Map<string, ContractRegistryEntry>;
 
 export type PersistedRawEvent = RawEvent & Partial<Pick<TranslatedEvent, "description" | "status" | "blueprintName" | "eventType" | "schemaVersion">>;
+
+interface EventMappingDefinition {
+  eventType?: string;
+  description?: string;
+  template?: string;
+  english_template?: string;
+  topics?: EventMatchCriteria["topics"] | string[];
+}
 
 function hasPersistedTranslation(event: PersistedRawEvent): boolean {
   return (
@@ -77,8 +81,15 @@ export async function translateWithCache(
   customBlueprints?: Map<string, TranslationBlueprint>,
   lang: Language = "en"
 ): Promise<TranslatedEvent> {
-  if (event.txHash && event.id && isRedisEnabled()) {
-    const cached = await getCachedTranslation(event);
+  const cache =
+    typeof window === "undefined"
+      ? await import("../cache/redisCache").catch(function () {
+          return null;
+        })
+      : null;
+
+  if (event.txHash && event.id && cache?.isRedisEnabled()) {
+    const cached = await cache.getCachedTranslation(event);
     if (cached) return cached;
   }
 
@@ -87,8 +98,8 @@ export async function translateWithCache(
       ? buildTranslationFromPersisted(event)
       : translateEvent(event, customBlueprints, lang);
 
-  if (event.txHash && event.id && isRedisEnabled()) {
-    await setCachedTranslation(event, translated);
+  if (event.txHash && event.id && cache?.isRedisEnabled()) {
+    await cache.setCachedTranslation(event, translated);
   }
 
   return translated;
@@ -141,11 +152,21 @@ function buildRegistry(): BlueprintRegistry {
     const mintBurnBlueprint = createSacMintBurnBlueprint(contractId);
     const existing = registry.get(contractId);
     if (existing) {
-      const existingBlueprint = Array.isArray(existing) ? existing[0] : existing;
-      const originalTranslate = existingBlueprint.translate.bind(existingBlueprint);
-      registry.set(contractId, {
-        ...mintBurnBlueprint,
-        translate: (event, lang) => originalTranslate(event, lang) ?? mintBurnBlueprint.translate(event, lang),
+      const existingSchema = existing.schemas[0];
+      if (!existingSchema) {
+        register(mintBurnBlueprint);
+        continue;
+      }
+
+      const existingBlueprint = existingSchema.blueprint;
+      existingSchema.blueprint = {
+        ...existingBlueprint,
+        translate: function (event, lang) {
+          return (
+            existingBlueprint.translate(event, lang) ??
+            mintBurnBlueprint.translate(event, lang)
+          );
+        },
       };
     } else {
       register(mintBurnBlueprint);
@@ -163,7 +184,7 @@ export function registerUpgrade(
   contractId: string,
   version: string,
   fromLedger: number,
-  eventMappings: any[]
+  eventMappings: EventMappingDefinition[]
 ) {
   const entry = REGISTRY.get(contractId);
   if (!entry) return;
@@ -197,6 +218,50 @@ export function registerUpgrade(
     if (key.startsWith(`${contractId}:`)) {
       RESOLUTION_CACHE.delete(key);
     }
+  });
+}
+
+function createTranslateFromMapping(
+  mapping: EventMappingDefinition
+): TranslationBlueprint["translate"] {
+  return function (event: RawEvent): TranslationResult | null {
+    if (mapping.topics && !mappingMatchesTopics(event, mapping.topics)) {
+      return null;
+    }
+
+    const eventType = sanitizeTextField(mapping.eventType ?? "Event", {
+      maxLength: 64,
+    });
+    const description = sanitizeTextField(
+      mapping.description ??
+        mapping.template ??
+        mapping.english_template ??
+        `${eventType} event emitted.`,
+      { maxLength: 512 }
+    );
+
+    return {
+      description,
+      eventType,
+    };
+  };
+}
+
+function mappingMatchesTopics(
+  event: RawEvent,
+  topics: EventMappingDefinition["topics"]
+): boolean {
+  if (!topics) return true;
+  if (topics.length === 0) return true;
+
+  if (typeof topics[0] === "string") {
+    return (topics as string[]).every(function (topic, index) {
+      return event.topics[index] === topic;
+    });
+  }
+
+  return matchesEventCriteria(event, {
+    topics: topics as EventMatchCriteria["topics"],
   });
 }
 
@@ -256,8 +321,9 @@ export function translateEvent(
 ): TranslatedEvent {
   const schema = resolveSchema(event.contractId, event.ledger, customBlueprints);
 
-  if (!entry) {
+  if (!schema) {
     console.warn(`No translation blueprint found for contract ${event.contractId}`);
+    const custom = customBlueprints?.get(event.contractId);
     
     // Try to decode the event using the generic fallback decoder
     const genericDecoded = decodeGenericEventPayload(event);
@@ -276,23 +342,7 @@ export function translateEvent(
     };
   }
 
-  const blueprint = Array.isArray(entry)
-    ? resolveBlueprint(entry, event.ledger)
-    : entry;
-
-  if (!blueprint) {
-    console.warn(`No translation blueprint applicable for contract ${event.contractId} at ledger ${event.ledger}`);
-    return {
-      raw: event,
-      description: `[Unknown Event: No blueprint applicable for contract ${event.contractId} at ledger ${event.ledger}. Hex Data: ${event.data}]`,
-      status: "cryptic",
-      blueprintName: Array.isArray(entry) ? entry[0].contractName : entry.contractName,
-      eventType: null,
-      schemaVersion: null,
-    };
-  }
-
-  const translated = applyBlueprint(event, blueprint, lang);
+  const translated = applyBlueprint(event, schema.blueprint, lang);
   if (translated) return translated;
 
   return {
@@ -301,7 +351,7 @@ export function translateEvent(
     status: "cryptic",
     blueprintName: schema.blueprint.contractName,
     eventType: null,
-    schemaVersion: null,
+    schemaVersion: schema.version,
   };
 }
 
@@ -315,13 +365,15 @@ function applyBlueprint(event: RawEvent, blueprint: TranslationBlueprint, lang: 
   const result = blueprint.translate(event, lang);
   if (!result) return null;
 
+  const versioned = blueprint as VersionedTranslationBlueprint;
+
   return {
     raw: event,
     description: result.description ? sanitizeTextField(result.description) : null,
     status: "translated",
     blueprintName: blueprint.contractName,
     eventType: result.eventType ? sanitizeTextField(result.eventType, { maxLength: 64 }) : null,
-    schemaVersion: (blueprint as any).version ?? null,
+    schemaVersion: versioned.version ?? null,
   };
 }
 
@@ -415,7 +467,7 @@ function translateEventSafe(
       },
       error
     );
-    captureExceptionSync(templateError);
+    console.error("[open-audit:registry]", templateError);
 
     return {
       raw: event,
@@ -458,19 +510,33 @@ export function getBlueprintCount(): number {
 export function registerBlueprint(...blueprints: TranslationBlueprint[]): void {
   for (const blueprint of blueprints) {
     const existing = REGISTRY.get(blueprint.contractId);
+    const versioned = blueprint as VersionedTranslationBlueprint;
+    const schema: ContractSchema = {
+      version: versioned.version ?? "runtime",
+      validFromLedger: versioned.validFromLedger ?? 0,
+      validToLedger: null,
+      blueprint,
+    };
+
     if (!existing) {
-      REGISTRY.set(blueprint.contractId, blueprint);
+      REGISTRY.set(blueprint.contractId, {
+        contractId: blueprint.contractId,
+        contractName: blueprint.contractName,
+        schemas: [schema],
+      });
       continue;
     }
 
-    const merged: VersionedTranslationBlueprint[] = Array.isArray(existing)
-      ? [...existing]
-      : [{ ...existing } as VersionedTranslationBlueprint];
+    existing.schemas.push(schema);
+    existing.schemas.sort((a, b) => a.validFromLedger - b.validFromLedger);
+    for (let i = 0; i < existing.schemas.length - 1; i++) {
+      existing.schemas[i].validToLedger = existing.schemas[i + 1].validFromLedger - 1;
+    }
 
-    merged.push(blueprint as VersionedTranslationBlueprint);
-    REGISTRY.set(
-      blueprint.contractId,
-      merged.sort((a, b) => (b.validFromLedger ?? 0) - (a.validFromLedger ?? 0))
-    );
+    RESOLUTION_CACHE.forEach(function (_, key) {
+      if (key.startsWith(`${blueprint.contractId}:`)) {
+        RESOLUTION_CACHE.delete(key);
+      }
+    });
   }
 }

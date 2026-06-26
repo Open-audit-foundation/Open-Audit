@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import { useState } from "react";
 import { CheckCircle2, HelpCircle, Clock, Eye, GitBranch, Settings2, Network } from "lucide-react";
 import {
@@ -20,6 +21,8 @@ import {
 } from "@/components/ui/dialog";
 import { EventDetailsModal } from "./EventDetailsModal";
 import { ContributeDialog } from "./ContributeDialog";
+import { EmptyState, type EmptyStateCause } from "./EmptyState";
+import { EventListSkeleton } from "./EventListSkeleton";
 import { DagPanel } from "@/components/dag/DagPanel";
 import { formatRelativeTime, truncateHex } from "@/lib/translator/decode";
 import type { TranslatedEvent, RawEvent } from "@/lib/translator/types";
@@ -37,10 +40,12 @@ interface EventFeedTableProps {
   events: TranslatedEvent[];
   isLoading?: boolean;
   newEventIds?: Set<string>;
+  emptyStateCause?: EmptyStateCause;
   columns: ColumnVisibility;
   density: Density;
   onToggleColumn: (col: keyof ColumnVisibility) => void;
   onDensityChange: (d: Density) => void;
+  onClearSearch?: () => void;
 }
 
 function StatusBadge({ status }: { status: TranslatedEvent["status"] }): React.JSX.Element {
@@ -73,35 +78,23 @@ function StatusBadge({ status }: { status: TranslatedEvent["status"] }): React.J
   );
 }
 
-function SkeletonRow({ colCount }: { colCount: number }): React.JSX.Element {
-  return (
-    <TableRow>
-      {Array.from({ length: colCount }).map(function (_, i) {
-        return (
-          <TableCell key={i}>
-            <div className="h-4 bg-muted animate-pulse rounded" />
-          </TableCell>
-        );
-      })}
-    </TableRow>
-  );
-}
-
 export function EventFeedTable({
   events,
   isLoading = false,
   newEventIds = new Set(),
+  emptyStateCause = "waiting",
   columns,
   density,
   onToggleColumn,
   onDensityChange,
+  onClearSearch,
 }: EventFeedTableProps): React.JSX.Element {
   const [detailsEvent, setDetailsEvent] = useState<TranslatedEvent | null>(null);
   const [contributeDialogEvent, setContributeDialogEvent] = useState<RawEvent | null>(null);
   const [showColMenu, setShowColMenu] = useState(false);
   const [dagTxHash, setDagTxHash] = useState<string | null>(null);
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTableSectionElement>) => {
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTableSectionElement>): void {
     if (e.target instanceof HTMLElement && e.target.tagName === "TR") {
       const currentRow = e.target as HTMLTableRowElement;
       
@@ -115,10 +108,10 @@ export function EventFeedTable({
         if (prevRow) prevRow.focus();
       }
     }
-  };
+  }
 
   const cellPadding = density === "compact" ? "py-1.5" : "py-3";
-  const visibleColCount = Object.values(columns).filter(Boolean).length;
+  const visibleColCount = Math.max(Object.values(columns).filter(Boolean).length, 1);
 
   return (
     <>
@@ -192,12 +185,11 @@ export function EventFeedTable({
               )}
             </TableRow>
           </TableHeader>
-          <TableBody onKeyDown={handleKeyDown}>
-            {isLoading
-              ? Array.from({ length: 5 }).map(function (_, i) {
-                  return <SkeletonRow key={i} colCount={visibleColCount} />;
-                })
-              : events.map(function (event) {
+          {isLoading ? (
+            <EventListSkeleton columns={columns} density={density} />
+          ) : (
+            <TableBody onKeyDown={handleKeyDown}>
+              {events.map(function (event) {
                   const isTranslated = event.status === "translated";
 
                   return (
@@ -301,17 +293,18 @@ export function EventFeedTable({
                   );
                 })}
 
-            {!isLoading && events.length === 0 && (
-              <TableRow>
-                <TableCell
-                  colSpan={visibleColCount}
-                  className="text-center py-12 text-muted-foreground"
-                >
-                  No events found. Enter a Contract ID above to search.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
+              {events.length === 0 && (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell colSpan={visibleColCount} className="p-0">
+                    <EmptyState
+                      cause={emptyStateCause}
+                      onClearSearch={onClearSearch}
+                    />
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          )}
         </Table>
       </div>
 

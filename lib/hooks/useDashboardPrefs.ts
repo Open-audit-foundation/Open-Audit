@@ -1,7 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
-import { useLocalStorage } from "./useLocalStorage";
+import { useCallback, useEffect, useState } from "react";
 
 export type Density = "compact" | "comfortable";
 

@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TranslatedEvent } from "../translator/types";
 
+export type LiveFeedConnectionStatus = "idle" | "connecting" | "open" | "error";
+
 export interface LiveFeedState {
   isLive: boolean;
   isPaused: boolean;
+  connectionStatus: LiveFeedConnectionStatus;
+  errorMessage: string | null;
   newEventIds: Set<string>;
   toggleLive: () => void;
   togglePause: () => void;
@@ -52,6 +56,9 @@ function computeBackoffDelay(attempt: number): number {
 export function useLiveFeed(onEvent: (event: TranslatedEvent) => void): LiveFeedState {
   const [isLive, setIsLive] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [connectionStatus, setConnectionStatus] =
+    useState<LiveFeedConnectionStatus>("idle");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [newEventIds, setNewEventIds] = useState<Set<string>>(new Set());
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -111,12 +118,22 @@ export function useLiveFeed(onEvent: (event: TranslatedEvent) => void): LiveFeed
     // Guard: do not open a second socket if one is already live.
     if (wsRef.current !== null) return;
 
+    setConnectionStatus("connecting");
+    setErrorMessage(null);
+
     const ws = new WebSocket(WS_URL);
     wsRef.current = ws;
 
     ws.onopen = () => {
       // Successful handshake — reset the backoff counter.
       attemptRef.current = 0;
+      setConnectionStatus("open");
+      setErrorMessage(null);
+    };
+
+    ws.onerror = () => {
+      setConnectionStatus("error");
+      setErrorMessage("Could not connect to Stellar. Retrying...");
     };
 
     ws.onmessage = (e: MessageEvent) => {
@@ -131,7 +148,7 @@ export function useLiveFeed(onEvent: (event: TranslatedEvent) => void): LiveFeed
       setNewEventIds((prev) => new Set(prev).add(event.raw.id));
 
       // Remove the highlight badge after the animation completes (600 ms).
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         setNewEventIds((prev) => {
           const next = new Set(prev);
           next.delete(event.raw.id);
@@ -147,6 +164,9 @@ export function useLiveFeed(onEvent: (event: TranslatedEvent) => void): LiveFeed
 
       // Only schedule a reconnect if the feed is still supposed to be live.
       if (!isLiveRef.current) return;
+
+      setConnectionStatus("error");
+      setErrorMessage("Could not connect to Stellar. Retrying...");
 
       const delay = computeBackoffDelay(attemptRef.current);
       attemptRef.current += 1;
@@ -169,6 +189,8 @@ export function useLiveFeed(onEvent: (event: TranslatedEvent) => void): LiveFeed
   const disconnect = useCallback(() => {
     closeSocket();
     attemptRef.current = 0;
+    setConnectionStatus("idle");
+    setErrorMessage(null);
   }, [closeSocket]);
 
   const toggleLive = useCallback(() => {
@@ -226,5 +248,13 @@ export function useLiveFeed(onEvent: (event: TranslatedEvent) => void): LiveFeed
     };
   }, [disconnect]);
 
-  return { isLive, isPaused, newEventIds, toggleLive, togglePause };
+  return {
+    isLive,
+    isPaused,
+    connectionStatus,
+    errorMessage,
+    newEventIds,
+    toggleLive,
+    togglePause,
+  };
 }
