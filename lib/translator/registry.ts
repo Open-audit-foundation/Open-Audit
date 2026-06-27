@@ -146,7 +146,7 @@ function buildRegistry(): BlueprintRegistry {
       registry.set(contractId, {
         ...mintBurnBlueprint,
         translate: (event, lang) => originalTranslate(event, lang) ?? mintBurnBlueprint.translate(event, lang),
-      };
+      });
     } else {
       register(mintBurnBlueprint);
     }

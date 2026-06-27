@@ -242,6 +242,7 @@ export function decodeEventName(topicHex: string): string {
 // ─── Display helpers ──────────────────────────────────────────────────────────
 
 export function truncateHex(hex: string, chars: number = 8): string {
+  if (typeof hex !== "string") return "";
   if (hex.length <= chars * 2 + 2) return hex;
   return `${hex.slice(0, chars + 2)}...${hex.slice(-chars)}`;
 }

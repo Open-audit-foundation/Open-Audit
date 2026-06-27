@@ -147,7 +147,7 @@ export function decodeScValFromHex(hex: string): GenericDecodedValue | null {
 
 /** Decodes a bool (type 0): 4-byte discriminant + 4-byte padding + 1-byte value. */
 function decodeBool(clean: string): GenericDecodedValue {
-  const valueHex = clean.slice(16, 18);
+  const valueHex = clean.slice(8, 16);
   const value = parseInt(valueHex, 16) !== 0;
   return { type: "bool", value };
 }

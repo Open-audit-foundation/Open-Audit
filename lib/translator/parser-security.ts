@@ -179,6 +179,11 @@ export interface ParsingContext {
   allocatedBytes: number;
   /** Maximum allowed allocation. */
   maxAllocation: number;
+  /** Shared mutable stats object to survive context cloning. */
+  stats: {
+    maxDepthReached: number;
+    maxAllocatedBytes: number;
+  };
 }
 
 /**
@@ -192,6 +197,10 @@ export function createParsingContext(): ParsingContext {
     maxParseTime: MAX_PARSE_TIME_MS,
     allocatedBytes: 0,
     maxAllocation: MAX_PAYLOAD_SIZE_BYTES,
+    stats: {
+      maxDepthReached: 0,
+      maxAllocatedBytes: 0,
+    },
   };
 }
 
@@ -204,6 +213,10 @@ export function enterLevel(ctx: ParsingContext): ParsingContext {
   
   if (newDepth > ctx.maxDepth) {
     throw new MaxDepthExceededError(newDepth, ctx.maxDepth);
+  }
+  
+  if (ctx.stats) {
+    ctx.stats.maxDepthReached = Math.max(ctx.stats.maxDepthReached, newDepth);
   }
   
   return {
@@ -233,6 +246,10 @@ export function trackAllocation(ctx: ParsingContext, bytes: number): ParsingCont
   
   if (newTotal > ctx.maxAllocation) {
     throw new MaxPayloadSizeExceededError(newTotal, ctx.maxAllocation);
+  }
+  
+  if (ctx.stats) {
+    ctx.stats.maxAllocatedBytes = Math.max(ctx.stats.maxAllocatedBytes, newTotal);
   }
   
   return {
@@ -299,18 +316,21 @@ export function safeParseXdr<T>(
     const value = fn(context);
     
     // Success!
+    recordParse(true, context);
     return { success: true, value, error: null };
     
   } catch (error) {
     // Convert to ParserSecurityError if not already
+    let securityError: ParserSecurityError;
     if (error instanceof ParserSecurityError) {
-      return { success: false, value: null, error };
+      securityError = error;
+    } else {
+      // Wrap unknown errors as MalformedXdrError
+      const message = error instanceof Error ? error.message : String(error);
+      securityError = new MalformedXdrError(message);
     }
     
-    // Wrap unknown errors as MalformedXdrError
-    const message = error instanceof Error ? error.message : String(error);
-    const securityError = new MalformedXdrError(message);
-    
+    recordParse(false, context, securityError);
     return { success: false, value: null, error: securityError };
   }
 }
@@ -375,8 +395,11 @@ export function recordParse(
   }
   
   // Update max values seen
-  metrics.maxDepthReached = Math.max(metrics.maxDepthReached, ctx.currentDepth);
-  metrics.maxPayloadSizeSeen = Math.max(metrics.maxPayloadSizeSeen, ctx.allocatedBytes);
+  const maxDepth = ctx.stats ? ctx.stats.maxDepthReached : ctx.currentDepth;
+  const maxAlloc = ctx.stats ? ctx.stats.maxAllocatedBytes : ctx.allocatedBytes;
+  
+  metrics.maxDepthReached = Math.max(metrics.maxDepthReached, maxDepth);
+  metrics.maxPayloadSizeSeen = Math.max(metrics.maxPayloadSizeSeen, maxAlloc);
   
   const elapsed = Date.now() - ctx.startTime;
   metrics.maxParseTimeSeen = Math.max(metrics.maxParseTimeSeen, elapsed);

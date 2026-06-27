@@ -24,6 +24,7 @@ import {
   logSecurityError,
   recordParse,
   toSafeErrorMessage,
+  MalformedXdrError,
   type ParsingContext,
   type SafeParseResult,
 } from "./parser-security";
@@ -41,15 +42,48 @@ import { truncateHex } from "./decode";
  * @returns SafeParseResult with either the parsed ScVal or security error
  */
 export function secureParseScVal(hex: string): SafeParseResult<StellarXdr.ScVal> {
+  if (typeof hex !== "string") {
+    const error = new MalformedXdrError("Input must be a string");
+    recordParse(false, createParsingContext(), error);
+    logSecurityError(error, { hex: "" });
+    return { success: false, value: null, error };
+  }
+
   const result = safeParseXdr<StellarXdr.ScVal>((ctx) => {
     // Validate hex length first
     validateHexLength(hex);
     
     // Track allocation for the hex string
-    const cleanHex = hex.startsWith("0x") ? hex.slice(2) : hex;
+    let cleanHex = hex;
+    while (cleanHex.startsWith("0x") || cleanHex.startsWith("0X")) {
+      cleanHex = cleanHex.slice(2);
+    }
     const estimatedBytes = cleanHex.length / 2; // 2 hex chars = 1 byte
     const updatedCtx = trackAllocation(ctx, estimatedBytes);
     
+    // Pre-check collection size to prevent underflow crashes on large count headers
+    if (cleanHex.length >= 16) {
+      const typeDiscriminant = parseInt(cleanHex.slice(0, 8), 16);
+      if (typeDiscriminant === 16 || typeDiscriminant === 17) { // scvVec or scvMap
+        let count = NaN;
+        if (cleanHex.length >= 24) {
+          const indicator = parseInt(cleanHex.slice(8, 16), 16);
+          if (indicator === 1) {
+            count = parseInt(cleanHex.slice(16, 24), 16);
+          } else if (indicator === 0) {
+            count = 0;
+          } else {
+            count = indicator;
+          }
+        } else {
+          count = parseInt(cleanHex.slice(8, 16), 16);
+        }
+        if (!isNaN(count)) {
+          validateCollectionSize(count);
+        }
+      }
+    }
+
     // Parse the XDR
     const scVal = StellarXdr.ScVal.fromXDR(cleanHex, "hex");
     
@@ -58,10 +92,6 @@ export function secureParseScVal(hex: string): SafeParseResult<StellarXdr.ScVal>
     
     return scVal;
   });
-  
-  // Record metrics
-  recordParse(result.success, result.success ? createParsingContext() : createParsingContext(), result.error ?? undefined);
-  
   // Log security errors
   if (!result.success) {
     logSecurityError(result.error, { hex: truncateHex(hex) });

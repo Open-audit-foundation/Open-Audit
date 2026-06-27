@@ -69,16 +69,17 @@ describe("Fuzz Testing: XDR Parser", () => {
       
       let hex = "0x0000000e"; // String "x"
       hex += "00000001"; // Length 1
-      hex += "78"; // ASCII 'x'
+      hex += "78000000"; // ASCII 'x' padded to 4 bytes
       
       // Wrap in 150 levels of Vecs (should exceed MAX_RECURSION_DEPTH=100)
       for (let i = 0; i < 150; i++) {
         const vecHex = "0x00000010"; // Vec marker
+        const pointerHex = "00000001"; // Pointer present
         const countHex = "00000001"; // 1 element
-        hex = vecHex + countHex + hex.slice(2); // Remove 0x and wrap
+        hex = vecHex + pointerHex + countHex + hex.slice(2); // Remove 0x and wrap
       }
       
-      const result = secureParseScVal("0x" + hex);
+      const result = secureParseScVal(hex);
       
       expect(result.success).toBe(false);
       expect(result.error?.errorType).toBe("MAX_DEPTH_EXCEEDED");
@@ -90,17 +91,18 @@ describe("Fuzz Testing: XDR Parser", () => {
       
       let hex = "0x0000000e"; // String "x"
       hex += "00000001"; // Length 1
-      hex += "78"; // ASCII 'x'
+      hex += "78000000"; // ASCII 'x' padded
       
       // Wrap in 150 levels of Maps (should exceed MAX_RECURSION_DEPTH=100)
       for (let i = 0; i < 150; i++) {
         const mapHex = "0x00000011"; // Map marker
+        const pointerHex = "00000001"; // Pointer present
         const countHex = "00000001"; // 1 entry
-        const keyHex = "0x0000000e0000000178"; // String "x" as key
-        hex = mapHex + countHex + keyHex + hex.slice(2); // Remove 0x and wrap
+        const keyHex = "0000000e0000000178000000"; // String "x" as key padded
+        hex = mapHex + pointerHex + countHex + keyHex + hex.slice(2); // Remove 0x and wrap
       }
       
-      const result = secureParseScVal("0x" + hex);
+      const result = secureParseScVal(hex);
       
       expect(result.success).toBe(false);
       expect(result.error?.errorType).toBe("MAX_DEPTH_EXCEEDED");
@@ -111,17 +113,18 @@ describe("Fuzz Testing: XDR Parser", () => {
     it("rejects Vecs with too many elements", () => {
       // Try to create a Vec with 20,000 elements (exceeds MAX_COLLECTION_SIZE=10,000)
       const vecHex = "0x00000010"; // Vec marker
+      const pointerHex = "00000001"; // Pointer present
       const countHex = "00004e20"; // 20,000 in hex
       const elementHex = "0x00000000"; // U32 value 0
       
-      let hex = vecHex + countHex;
+      let hex = vecHex + pointerHex + countHex;
       
       // Add 20,000 elements (this will be huge)
       for (let i = 0; i < 100; i++) { // Just add 100 for testing, parser checks count
         hex += elementHex.slice(2);
       }
       
-      const result = secureParseScVal("0x" + hex);
+      const result = secureParseScVal(hex);
       
       expect(result.success).toBe(false);
       expect(result.error?.errorType).toBe("MAX_COLLECTION_SIZE_EXCEEDED");
@@ -130,9 +133,10 @@ describe("Fuzz Testing: XDR Parser", () => {
     it("rejects Maps with too many entries", () => {
       // Try to create a Map with 20,000 entries
       const mapHex = "0x00000011"; // Map marker
+      const pointerHex = "00000001"; // Pointer present
       const countHex = "00004e20"; // 20,000 in hex
       
-      const result = secureParseScVal("0x" + mapHex + countHex);
+      const result = secureParseScVal(mapHex + pointerHex + countHex);
       
       expect(result.success).toBe(false);
       expect(result.error?.errorType).toBe("MAX_COLLECTION_SIZE_EXCEEDED");
@@ -309,12 +313,13 @@ function mutateHex(hex: string): string {
  * Generates a deeply nested Vec structure for testing.
  */
 function generateDeepNesting(depth: number): string {
-  let hex = "0x0000000e0000000178"; // String "x" at the core
+  let hex = "0x0000000e0000000178000000"; // String "x" at the core padded
   
   for (let i = 0; i < depth; i++) {
     const vecHex = "0x00000010"; // Vec marker
+    const pointerHex = "00000001"; // Pointer present
     const countHex = "00000001"; // 1 element
-    hex = vecHex + countHex + hex.slice(2); // Wrap previous value
+    hex = vecHex + pointerHex + countHex + hex.slice(2); // Wrap previous value
   }
   
   return hex;

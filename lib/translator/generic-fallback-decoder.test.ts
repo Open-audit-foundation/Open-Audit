@@ -34,7 +34,7 @@ describe("decodeScValFromHex", () => {
   describe("U32 (type 3)", () => {
     it("decodes a simple U32", () => {
       // Type 3 (u32) + value 42
-      const hex = "0x0000000300000002a";
+      const hex = "0x000000030000002a";
       const result = decodeScValFromHex(hex);
       expect(result).toBeDefined();
       expect(result?.type).toBe("u32");
@@ -76,7 +76,7 @@ describe("decodeScValFromHex", () => {
       // Type 14 (string) + length 5 + "Hello"
       // Length is encoded as 0x00000005
       // "Hello" = 0x48656c6c6f
-      const hex = "0x0e000000054865" + "6c6c6f";
+      const hex = "0x0000000e000000054865" + "6c6c6f";
       const result = decodeScValFromHex(hex);
       expect(result).toBeDefined();
       expect(result?.type).toBe("string");
@@ -85,7 +85,7 @@ describe("decodeScValFromHex", () => {
 
     it("decodes empty string", () => {
       // Type 14 + length 0
-      const hex = "0x0e00000000";
+      const hex = "0x0000000e00000000";
       const result = decodeScValFromHex(hex);
       expect(result).toBeDefined();
       expect(result?.type).toBe("string");
@@ -96,7 +96,7 @@ describe("decodeScValFromHex", () => {
   describe("Bytes (type 13)", () => {
     it("decodes bytes", () => {
       // Type 13 (bytes) + length 4 + data
-      const hex = "0x0d000000040102030405";
+      const hex = "0x0000000d0000000401020304";
       const result = decodeScValFromHex(hex);
       expect(result).toBeDefined();
       expect(result?.type).toBe("bytes");
@@ -109,7 +109,7 @@ describe("decodeScValFromHex", () => {
   describe("Vec (type 16)", () => {
     it("decodes an empty vector", () => {
       // Type 16 (vec) + length 0
-      const hex = "0x1000000000";
+      const hex = "0x0000001000000000";
       const result = decodeScValFromHex(hex);
       expect(result).toBeDefined();
       expect(result?.type).toBe("vec");
@@ -121,7 +121,7 @@ describe("decodeScValFromHex", () => {
   describe("Map (type 17)", () => {
     it("decodes an empty map", () => {
       // Type 17 (map) + length 0
-      const hex = "0x1100000000";
+      const hex = "0x0000001100000000";
       const result = decodeScValFromHex(hex);
       expect(result).toBeDefined();
       expect(result?.type).toBe("map");

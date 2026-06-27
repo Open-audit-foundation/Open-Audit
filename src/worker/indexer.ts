@@ -20,6 +20,7 @@ import { getNetworkConfig } from "../../lib/stellar/client";
 import { translateEvent } from "../../lib/translator/registry";
 import { captureExceptionSync } from "../../lib/telemetry";
 import { fetchContractEventsResilient } from "../../lib/stellar/resilient-stellar-client";
+import { dispatchWebhooks } from "../../lib/webhooks/deliver";
 import type { RawEvent } from "../../lib/translator/types";
 
 // ============================================================================
@@ -325,6 +326,22 @@ class StellarIndexerWorker {
 
       // Publish to Redis
       await this.publisher.publish(REDIS_CHANNEL, message);
+
+      // Dispatch to registered webhook subscribers (fire-and-forget; errors
+      // are caught inside dispatchWebhooks to avoid blocking the pipeline)
+      dispatchWebhooks({
+        id: rawEvent.id,
+        contractId: rawEvent.contractId,
+        ledger: rawEvent.ledger,
+        timestamp: rawEvent.timestamp,
+        txHash: rawEvent.txHash,
+        status: translatedEvent.status,
+        eventType: translatedEvent.eventType ?? null,
+        description: translatedEvent.description ?? null,
+        blueprintName: translatedEvent.blueprintName ?? null,
+      }).catch((err) => {
+        console.error(`[${WORKER_ID}] dispatchWebhooks error:`, err);
+      });
 
       // Update metrics
       this.processedCount++;

@@ -236,39 +236,28 @@ model CrossChainMatch {
 // Webhook subscriptions
 model WebhookSubscription {
   id              String   @id @default(cuid())
-  name            String?
   url             String
-  secret          String
   contractId      String
-  eventTypes      Json?
-  enabled         Boolean  @default(true)
+  secret          String   // HMAC-SHA256 signing secret (store securely, returned only on creation)
+  active          Boolean  @default(true)
   createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  
-  webhookDeliveries WebhookDelivery[]
-  
+
+  deliveries      WebhookDelivery[]
+
   @@index([contractId])
-  @@index([enabled])
+  @@index([active])
 }
 
 // Webhook delivery attempts
 model WebhookDelivery {
   id              String   @id @default(cuid())
-  webhookId       String
-  eventId         String
-  contractId      String
+  subscriptionId  String
+  subscription    WebhookSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
   payload         Json
-  status          String   // "pending" | "delivered" | "failed"
-  attempts        Int      @default(0)
-  maxAttempts     Int      @default(3)
-  lastError       String?
-  deliveredAt     DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  
-  webhook         WebhookSubscription @relation(fields: [webhookId], references: [id], onDelete: Cascade)
-  
-  @@index([webhookId])
-  @@index([eventId])
-  @@index([status])
+  statusCode      Int?
+  success         Boolean
+  attemptCount    Int      @default(1)
+  deliveredAt     DateTime @default(now())
+
+  @@index([subscriptionId])
 }
