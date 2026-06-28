@@ -8,6 +8,17 @@
 
 ---
 
+## 📚 Documentation Hub
+
+> [!IMPORTANT]
+> **Looking for documentation?** We have consolidated all guides into a centralized documentation index categorized by goal. Visit **[/docs/README.md](docs/README.md)** to navigate directly to what you need:
+> - **[I want to run this locally](docs/README.md#--i-want-to-run-this-locally)** (Quickstarts & development setup)
+> - **[I want to add a translation](docs/README.md#--i-want-to-add-a-translation)** (Blueprints & registry linter)
+> - **[I want to understand the architecture](docs/README.md#--i-want-to-understand-the-architecture)** (System design & microservices)
+> - **[I want to write a WASM parser](docs/README.md#--i-want-to-write-a-wasm-parser)** (Advanced engine & tuning)
+
+---
+
 ## What is Open-Audit?
 
 Smart contracts on Stellar/Soroban emit events as cryptic, hex-encoded binary data. To the average user — or even most developers — these events are completely unreadable. Open-Audit solves this by:
@@ -162,9 +173,7 @@ Terminal 3: npm run worker:indexer
 ```
 
 📚 **Documentation:**
-- **[Quick Start Guide](QUICKSTART_MICROSERVICES.md)** - Get running in 5 minutes
-- **[Architecture Details](MICROSERVICES_ARCHITECTURE.md)** - Complete technical documentation
-- **[Testing Guide](MICROSERVICES_TESTING_GUIDE.md)** - Comprehensive testing walkthrough
+For complete microservices instructions, architecture breakdowns, and testing guides, visit the **[Documentation Hub](docs/README.md)**.
 
 ### 🔒 Security Hardening (Production-Ready)
 
@@ -189,7 +198,7 @@ Untrusted XDR → Security Guards → Safe Parsing → Graceful Error Handling
 
 📚 **Documentation:**
 - **[Security Hardening Guide](SECURITY_HARDENING_GUIDE.md)** - Complete security documentation
-- **[Security Summary](TASK_4_SECURITY_HARDENING_SUMMARY.md)** - Implementation overview
+- **[Security Summary](docs/archive/TASK_4_SECURITY_HARDENING_SUMMARY.md)** - Historical PR implementation overview
 
 **Quick Start:**
 ```typescript
@@ -273,6 +282,8 @@ open-audit/
 │   ├── lint-registry.ts    # Translation registry validation
 │   └── test-websocket-client.js # WebSocket testing tool
 ├── docs/
+│   ├── README.md           # 📚 Centralized documentation hub
+│   ├── archive/            # 📜 Historical PR write-ups & summaries
 │   └── good-first-issues.json
 ├── server.ts               # Legacy monolithic server (deprecated)
 ├── server-decoupled.ts     # 🆕 Microservices web server
@@ -325,7 +336,7 @@ node dist/cli/open-audit-cli.js test \
 📚 **Documentation:**
 - **[CLI README](cli/README.md)** - Complete command reference and examples
 - **[Quick Start](cli/QUICK_START.md)** - Get started in 30 seconds
-- **[Task Summary](TASK_6_CLI_TOOL_SUMMARY.md)** - Implementation details
+- **[Task Summary](docs/archive/TASK_6_CLI_TOOL_SUMMARY.md)** - Historical PR implementation details
 
 **Quick Example:**
 ```bash
@@ -364,7 +375,7 @@ Untrusted WASM → Sandbox → Zero Host Access → Strict Limits → Safe Execu
 📚 **Documentation:**
 - **[WASM Sandbox Architecture](lib/wasm-sandbox/WASM_SANDBOX_ARCHITECTURE.md)** - Complete technical documentation
 - **[Community Parser Guide](lib/wasm-sandbox/COMMUNITY_PARSER_GUIDE.md)** - Write your own parser
-- **[Implementation Summary](TASK_5_WASM_SANDBOX_SUMMARY.md)** - Overview and testing
+- **[Implementation Summary](docs/archive/TASK_5_WASM_SANDBOX_SUMMARY.md)** - Historical PR overview and testing
 
 **Quick Start (Parser Development):**
 ```bash

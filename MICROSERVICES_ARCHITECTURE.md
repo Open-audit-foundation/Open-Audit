@@ -15,6 +15,9 @@ Successfully decoupled the Stellar Event Indexer from the Next.js server into a 
 
 ## 📊 Architecture Overview
 
+> [!NOTE]
+> **Core Architecture Reference:** This document details the decoupled production microservices setup. For general system concepts, blueprint registry design, and core XDR event translation workflows, please see **[ARCHITECTURE.md](file:///ARCHITECTURE.md)**.
+
 ### Before (Monolithic)
 
 ```
