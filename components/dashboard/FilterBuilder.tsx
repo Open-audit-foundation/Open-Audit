@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Search, X, ChevronRight } from "lucide-react";
+import { Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Select, type SelectOption } from "@/components/ui/select";
 import { useEventFilters } from "@/lib/hooks/useEventFilters";
 
 const EXAMPLE_CONTRACTS = [
@@ -29,6 +30,12 @@ const DEFAULT_EVENT_TYPES = [
   "Withdraw",
 ];
 
+const NETWORK_OPTIONS: SelectOption[] = [
+  { value: "", label: "All Networks" },
+  { value: "testnet", label: "Testnet" },
+  { value: "mainnet", label: "Mainnet" },
+];
+
 interface FilterBuilderProps {
   eventTypeSuggestions: string[];
   contractSuggestions?: string[];
@@ -41,7 +48,6 @@ export function FilterBuilder({
   const { filters, rawParams, setFilters, clearAll } = useEventFilters();
 
   const [contractInput, setContractInput] = useState(filters.contractId ?? "");
-  const [eventTypeInput, setEventTypeInput] = useState(filters.eventType ?? "");
   const [minAmountInput, setMinAmountInput] = useState(rawParams.minAmount ?? "");
   const [startLedgerInput, setStartLedgerInput] = useState(rawParams.startLedger ?? "");
   const [endLedgerInput, setEndLedgerInput] = useState(rawParams.endLedger ?? "");
@@ -51,13 +57,6 @@ export function FilterBuilder({
       setContractInput(filters.contractId ?? "");
     },
     [filters.contractId]
-  );
-
-  useEffect(
-    function () {
-      setEventTypeInput(filters.eventType ?? "");
-    },
-    [filters.eventType]
   );
 
   useEffect(
@@ -81,23 +80,39 @@ export function FilterBuilder({
     [rawParams.endLedger]
   );
 
-  const eventTypeOptions = useMemo(
+  const eventTypeOptions: SelectOption[] = useMemo(
     function () {
-      return Array.from(
+      const all = Array.from(
         new Set([...DEFAULT_EVENT_TYPES, ...eventTypeSuggestions].filter(Boolean))
       ).sort();
+      return [
+        { value: "", label: "All Event Types" },
+        ...all.map((et) => ({ value: et, label: et })),
+      ];
     },
     [eventTypeSuggestions]
   );
 
-  const uniqueContractSuggestions = useMemo(
+  const contractOptions: SelectOption[] = useMemo(
     function () {
-      return Array.from(
-        new Set([
-          ...EXAMPLE_CONTRACTS.map((contract) => contract.id),
-          ...contractSuggestions,
-        ])
-      );
+      const seen = new Set<string>();
+      const opts: SelectOption[] = [{ value: "", label: "All Contracts" }];
+
+      for (const ex of EXAMPLE_CONTRACTS) {
+        if (!seen.has(ex.id)) {
+          seen.add(ex.id);
+          opts.push({ value: ex.id, label: `${ex.label} (${ex.id.slice(0, 6)}…${ex.id.slice(-4)})` });
+        }
+      }
+
+      for (const id of contractSuggestions) {
+        if (!seen.has(id)) {
+          seen.add(id);
+          opts.push({ value: id, label: `${id.slice(0, 6)}…${id.slice(-4)}` });
+        }
+      }
+
+      return opts;
     },
     [contractSuggestions]
   );
@@ -105,22 +120,19 @@ export function FilterBuilder({
   const hasAnyFilter =
     Boolean(filters.contractId) ||
     Boolean(filters.eventType) ||
+    Boolean(filters.network) ||
     filters.minAmount !== undefined ||
     filters.startLedger !== undefined ||
     filters.endLedger !== undefined;
 
   function setParam(key: keyof typeof rawParams, value: string | null): void {
-    setFilters({ [key]: value });
+    // Reset page to 1 whenever a filter changes
+    setFilters({ [key]: value, page: "1" });
   }
 
   function handleContractSubmit(): void {
     const value = contractInput.trim();
     setParam("contractId", value || null);
-  }
-
-  function handleEventTypeSubmit(): void {
-    const value = eventTypeInput.trim();
-    setParam("eventType", value || null);
   }
 
   function handleNumericSubmit(key: keyof typeof rawParams, value: string): void {
@@ -131,57 +143,69 @@ export function FilterBuilder({
   return (
     <div className="rounded-2xl border border-input bg-background/70 p-4 shadow-sm">
       <div className="flex flex-col gap-3 md:grid md:grid-cols-2 xl:grid-cols-3 md:gap-3">
+        {/* ── Network Select ─────────────────────────────────── */}
+        <label className="min-w-0">
+          <span className="text-sm font-medium">Network</span>
+          <Select
+            id="filter-network"
+            value={filters.network ?? ""}
+            onValueChange={(val) => setParam("network", val || null)}
+            options={NETWORK_OPTIONS}
+            placeholder="All Networks"
+            className="mt-2"
+            aria-label="Filter by network"
+          />
+        </label>
+
+        {/* ── Contract ID Select + free-text input ───────────── */}
         <label className="min-w-0">
           <span className="text-sm font-medium">Contract ID</span>
-          <div className="relative mt-2">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              list="contract-suggestions"
-              value={contractInput}
-              onChange={(event) => setContractInput(event.target.value)}
-              onBlur={() => handleContractSubmit()}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  handleContractSubmit();
-                }
-              }}
-              placeholder="C... or paste a contract address"
-              className="pl-9"
+          {contractOptions.length > 1 ? (
+            <Select
+              id="filter-contract"
+              value={filters.contractId ?? ""}
+              onValueChange={(val) => setParam("contractId", val || null)}
+              options={contractOptions}
+              placeholder="All Contracts"
+              className="mt-2"
               aria-label="Filter by contract ID"
             />
-            <datalist id="contract-suggestions">
-              {uniqueContractSuggestions.map((contractId) => (
-                <option key={contractId} value={contractId} />
-              ))}
-            </datalist>
-          </div>
+          ) : (
+            <div className="relative mt-2">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={contractInput}
+                onChange={(event) => setContractInput(event.target.value)}
+                onBlur={() => handleContractSubmit()}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    handleContractSubmit();
+                  }
+                }}
+                placeholder="C... or paste a contract address"
+                className="pl-9"
+                aria-label="Filter by contract ID"
+              />
+            </div>
+          )}
         </label>
 
+        {/* ── Event Topic Select ──────────────────────────────── */}
         <label className="min-w-0">
-          <span className="text-sm font-medium">Event name / method</span>
-          <Input
-            list="event-type-suggestions"
-            value={eventTypeInput}
-            onChange={(event) => setEventTypeInput(event.target.value)}
-            onBlur={() => handleEventTypeSubmit()}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                handleEventTypeSubmit();
-              }
-            }}
-            placeholder="Transfer, Swap, Mint..."
+          <span className="text-sm font-medium">Event Topic</span>
+          <Select
+            id="filter-event-type"
+            value={filters.eventType ?? ""}
+            onValueChange={(val) => setParam("eventType", val || null)}
+            options={eventTypeOptions}
+            placeholder="All Event Types"
             className="mt-2"
-            aria-label="Filter by event name or method"
+            aria-label="Filter by event topic"
           />
-          <datalist id="event-type-suggestions">
-            {eventTypeOptions.map((eventType) => (
-              <option key={eventType} value={eventType} />
-            ))}
-          </datalist>
         </label>
 
+        {/* ── Ledger range ────────────────────────────────────── */}
         <div className="grid grid-cols-2 gap-3 xl:col-span-1">
           <label className="min-w-0">
             <span className="text-sm font-medium">Start ledger</span>
@@ -209,6 +233,7 @@ export function FilterBuilder({
           </label>
         </div>
 
+        {/* ── Min amount ──────────────────────────────────────── */}
         <label className="min-w-0 xl:col-span-1">
           <span className="text-sm font-medium">Amount &gt;</span>
           <Input
@@ -224,10 +249,24 @@ export function FilterBuilder({
         </label>
       </div>
 
+      {/* ── Active filter badges ─────────────────────────────── */}
       <div className="mt-4 flex flex-wrap items-center gap-2">
+        {filters.network && (
+          <Badge className="inline-flex items-center gap-2">
+            Network: {filters.network}
+            <button
+              type="button"
+              onClick={() => setParam("network", null)}
+              aria-label="Remove network filter"
+              className="rounded-full p-0.5 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </Badge>
+        )}
         {filters.contractId && (
           <Badge className="inline-flex items-center gap-2">
-            Contract: {filters.contractId}
+            Contract: {filters.contractId.slice(0, 6)}…{filters.contractId.slice(-4)}
             <button
               type="button"
               onClick={() => setParam("contractId", null)}

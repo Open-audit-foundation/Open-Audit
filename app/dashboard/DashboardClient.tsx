@@ -1,8 +1,6 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo } from "react";
-import { AlertCircle, BookOpen, ArrowRight, Radio, PauseCircle, PlayCircle, Upload, FileJson, Trash2 } from "lucide-react";
-import { SearchBar } from "@/components/dashboard/SearchBar";
 import {
   AlertCircle,
   BookOpen,
@@ -15,6 +13,8 @@ import {
   Trash2,
   Download,
   Star,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { FilterBuilder } from "@/components/dashboard/FilterBuilder";
 import { EventFeedTable } from "@/components/dashboard/EventFeedTable";
@@ -28,39 +28,60 @@ import { useLanguage } from "@/lib/hooks/useLanguage";
 import { useNetwork } from "@/lib/hooks/useNetwork";
 import { useDashboardPrefs } from "@/lib/hooks/useDashboardPrefs";
 import { useEventFilters } from "@/lib/hooks/useEventFilters";
-import { getMockEventsForContract, MOCK_RAW_EVENTS } from "@/lib/mock-data";
+import { MOCK_RAW_EVENTS } from "@/lib/mock-data";
 import {
   buildCustomBlueprints,
   loadCustomAbis,
   removeCustomAbi,
   saveCustomAbi,
 } from "@/lib/translator/custom-abi";
-import { getMockEventsForContract, MOCK_RAW_EVENTS } from "@/lib/mock-data";
-import { useLiveFeed } from "@/lib/hooks/useLiveFeed";
-import type { TranslatedEvent } from "@/lib/translator/types";
-import type { RawEvent, CustomAbi } from "@/lib/translator/types";
 import { translateEvents } from "@/lib/translator/registry";
 import type { TranslatedEvent, RawEvent, CustomAbi } from "@/lib/translator/types";
 
-function simulateNetworkDelay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+// ---------------------------------------------------------------------------
+// Types for the server response
+// ---------------------------------------------------------------------------
+interface PaginationMeta {
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  hasNext: boolean;
+  hasPrev: boolean;
 }
 
+interface EventsApiResponse {
+  events: RawEvent[];
+  pagination: PaginationMeta;
+  meta: { network: string; fallback?: boolean };
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 export function DashboardClient(): React.JSX.Element {
-  const [rawEvents, setRawEvents] = useState<RawEvent[]>(MOCK_RAW_EVENTS);
+  const [serverEvents, setServerEvents] = useState<RawEvent[]>([]);
   const [liveEvents, setLiveEvents] = useState<TranslatedEvent[]>([]);
   const [customAbis, setCustomAbis] = useState<CustomAbi[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
-  const [liveEvents, setLiveEvents] = useState<TranslatedEvent[]>([]);
+  const [pagination, setPagination] = useState<PaginationMeta>({
+    total: 0,
+    page: 1,
+    limit: 20,
+    totalPages: 1,
+    hasNext: false,
+    hasPrev: false,
+  });
 
   const { language } = useLanguage();
   const { network } = useNetwork();
   const { prefs, ready, update, toggleColumn, toggleFavorite } = useDashboardPrefs();
-  const { filters, setFilters } = useEventFilters();
+  const { filters, setFilters, setPage, clearAll } = useEventFilters();
 
+  // Load custom ABIs from localStorage on mount
   useEffect(function () {
     setCustomAbis(loadCustomAbis());
   }, []);
@@ -70,71 +91,104 @@ export function DashboardClient(): React.JSX.Element {
     [customAbis]
   );
 
-  // Derive translations from the raw events + current custom blueprints so the
-  // feed re-translates instantly when an ABI is uploaded or removed.
-  const translatedRawEvents = useMemo(
+  // ─── Server-side fetch: triggered on filter / page / network changes ──────
+  useEffect(
     function () {
-      return translateEvents(rawEvents, customBlueprints);
+      const controller = new AbortController();
+
+      async function fetchEvents(): Promise<void> {
+        setIsLoading(true);
+        setError(null);
+
+        const params = new URLSearchParams();
+        if (filters.contractId) params.set("contractId", filters.contractId);
+        if (filters.eventType) params.set("eventType", filters.eventType);
+        if (filters.network) {
+          params.set("network", filters.network);
+        } else if (network) {
+          params.set("network", network);
+        }
+        params.set("page", String(filters.page));
+        params.set("limit", "20");
+
+        try {
+          const res = await fetch(`/api/v1/events?${params.toString()}`, {
+            signal: controller.signal,
+          });
+
+          if (!res.ok) {
+            throw new Error(`Server responded with ${res.status}`);
+          }
+
+          const data: EventsApiResponse = await res.json();
+          setServerEvents(data.events);
+          setPagination(data.pagination);
+        } catch (err: unknown) {
+          if (err instanceof DOMException && err.name === "AbortError") return;
+
+          console.error("Failed to fetch events from server, using mock data:", err);
+
+          // Fallback to client-side mock data
+          const fallback = filters.contractId
+            ? MOCK_RAW_EVENTS.filter((e) => e.contractId === filters.contractId)
+            : MOCK_RAW_EVENTS;
+
+          setServerEvents(fallback);
+          setPagination({
+            total: fallback.length,
+            page: 1,
+            limit: 20,
+            totalPages: Math.max(1, Math.ceil(fallback.length / 20)),
+            hasNext: false,
+            hasPrev: false,
+          });
+        } finally {
+          setIsLoading(false);
+        }
+      }
+
+      fetchEvents();
+      return () => controller.abort();
     },
-    [rawEvents, customBlueprints]
+    [filters.contractId, filters.eventType, filters.network, filters.page, network]
   );
 
-  // Merge live-streamed events (prepended) with the translated batch.
-  const events = useMemo(
-    function () {
-      return [...liveEvents, ...translatedRawEvents];
-    },
-    [liveEvents, translatedRawEvents]
-  );
-
-  const handleNewEvent = useCallback((event: TranslatedEvent) => {
-    setLiveEvents((prev) => [event, ...prev]);
-  }, []);
+  // Translate server events with custom blueprints
   const translatedEvents = useMemo(
-    () => translateEvents(rawEvents, customBlueprints, language),
-    [rawEvents, customBlueprints, language]
+    () => translateEvents(serverEvents, customBlueprints, language),
+    [serverEvents, customBlueprints, language]
   );
 
+  // Merge live-streamed events (prepended) with the server-fetched batch
   const allEvents = useMemo(
     () => [...liveEvents, ...translatedEvents],
     [liveEvents, translatedEvents]
   );
 
+  // Client-side secondary filtering for ledger range and amount
   const filteredEvents = useMemo(
     () =>
       allEvents.filter((event) => {
-        if (filters.contractId && event.raw.contractId !== filters.contractId) {
-          return false;
-        }
-
-        if (filters.eventType) {
-          const normalizedEventType = filters.eventType.toLowerCase();
-          const translatedType = event.eventType?.toLowerCase() ?? "";
-          if (!translatedType.includes(normalizedEventType)) {
-            return false;
-          }
-        }
-
         if (filters.minAmount !== undefined) {
-          const amount = Number(event.raw.data ? BigInt("0x" + event.raw.data.slice(2).replace(/[^0-9a-fA-F]/g, "0")) : 0n);
-          if (Number(amount) < filters.minAmount) {
-            return false;
-          }
+          const amount = Number(
+            event.raw.data
+              ? BigInt("0x" + event.raw.data.slice(2).replace(/[^0-9a-fA-F]/g, "0"))
+              : 0n
+          );
+          if (amount < filters.minAmount) return false;
         }
-
         if (filters.startLedger !== undefined && event.raw.ledger < filters.startLedger) {
           return false;
         }
-
         if (filters.endLedger !== undefined && event.raw.ledger > filters.endLedger) {
           return false;
         }
-
         return true;
       }),
     [allEvents, filters]
   );
 
+  // ─── Live feed handler ────────────────────────────────────────────────────
   const handleNewEvent = useCallback(
     function (event: TranslatedEvent): void {
       if (filters.contractId && event.raw.contractId !== filters.contractId) return;
@@ -146,6 +200,7 @@ export function DashboardClient(): React.JSX.Element {
   const { isLive, isPaused, newEventIds, toggleLive, togglePause } =
     useLiveFeed(handleNewEvent);
 
+  // ─── ABI handlers ─────────────────────────────────────────────────────────
   const handleAbiUpload = useCallback(function (abi: CustomAbi): void {
     setCustomAbis(saveCustomAbi(abi));
     setIsUploadOpen(false);
@@ -165,6 +220,11 @@ export function DashboardClient(): React.JSX.Element {
   const isFavorited = filters.contractId
     ? prefs.favorites.includes(filters.contractId)
     : false;
+
+  // ─── Pagination handlers ──────────────────────────────────────────────────
+  function goToPage(page: number): void {
+    setPage(Math.max(1, Math.min(page, pagination.totalPages)));
+  }
 
   return (
     <div className="space-y-6">
@@ -226,27 +286,6 @@ export function DashboardClient(): React.JSX.Element {
         >
           <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
           <p>{error}</p>
-        </div>
-      )}
-
-      {/* Active filter indicator */}
-      {searchedContract && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
-          <span>Showing events for:</span>
-          <code className="font-mono text-xs bg-muted px-2 py-1 rounded">
-            {searchedContract.slice(0, 10)}...{searchedContract.slice(-6)}
-          </code>
-          <button
-            type="button"
-            onClick={() => {
-              setSearchValue("");
-              handleSearch("");
-            }}
-            className="text-violet-600 dark:text-violet-400 hover:underline text-xs"
-            aria-label="Clear contract filter"
-          >
-            Clear all filters
-          </button>
         </div>
       )}
 
@@ -335,6 +374,7 @@ export function DashboardClient(): React.JSX.Element {
             </Button>
             <span className="text-xs text-muted-foreground">
               {filteredEvents.length} event{filteredEvents.length !== 1 ? "s" : ""}
+              {pagination.total > 0 && ` of ${pagination.total}`}
             </span>
           </div>
         </div>
@@ -351,6 +391,76 @@ export function DashboardClient(): React.JSX.Element {
           />
         )}
       </section>
+
+      {/* ── Pagination controls ─────────────────────────────────────────────── */}
+      {pagination.totalPages > 1 && (
+        <nav
+          aria-label="Pagination"
+          className="flex items-center justify-center gap-2 pt-2"
+        >
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 px-3 text-xs"
+            disabled={!pagination.hasPrev}
+            onClick={() => goToPage(pagination.page - 1)}
+            aria-label="Previous page"
+          >
+            <ChevronLeft className="h-4 w-4 mr-1" />
+            Previous
+          </Button>
+
+          {/* Page number buttons */}
+          <div className="flex items-center gap-1">
+            {Array.from({ length: Math.min(pagination.totalPages, 7) }, (_, i) => {
+              // Show pages around the current page
+              let pageNum: number;
+              const total = pagination.totalPages;
+              const current = pagination.page;
+
+              if (total <= 7) {
+                pageNum = i + 1;
+              } else if (current <= 4) {
+                pageNum = i + 1;
+              } else if (current >= total - 3) {
+                pageNum = total - 6 + i;
+              } else {
+                pageNum = current - 3 + i;
+              }
+
+              return (
+                <Button
+                  key={pageNum}
+                  variant={pageNum === current ? "default" : "outline"}
+                  size="sm"
+                  className={`h-9 w-9 p-0 text-xs ${
+                    pageNum === current
+                      ? "bg-violet-600 text-white hover:bg-violet-700"
+                      : ""
+                  }`}
+                  onClick={() => goToPage(pageNum)}
+                  aria-label={`Go to page ${pageNum}`}
+                  aria-current={pageNum === current ? "page" : undefined}
+                >
+                  {pageNum}
+                </Button>
+              );
+            })}
+          </div>
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 px-3 text-xs"
+            disabled={!pagination.hasNext}
+            onClick={() => goToPage(pagination.page + 1)}
+            aria-label="Next page"
+          >
+            Next
+            <ChevronRight className="h-4 w-4 ml-1" />
+          </Button>
+        </nav>
+      )}
 
       {/* Contribute banner */}
       <section
