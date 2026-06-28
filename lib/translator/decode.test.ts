@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { translateEvent, matchesEventCriteria } from "./registry";
 import * as Core from "./core";
+import { BLUEPRINT_SCHEMA_VERSION } from "./schema-version";
 import type { RawEvent } from "./types";
 
 const { interpolateTemplate, isValidHex, sanitizeHex, escapeHtml, detectScValType, decodeMap, decodeVec, decodeEnum, decodeScVal, sanitizeTextField, validateTextField } = Core;
@@ -141,6 +142,7 @@ describe("translateEvent", () => {
     };
     const blueprint: TranslationBlueprint = {
       contractId,
+      schemaVersion: BLUEPRINT_SCHEMA_VERSION,
       contractName: "Multi Topic Contract",
       matches: function (rawEvent) {
         return matchesEventCriteria(rawEvent, {

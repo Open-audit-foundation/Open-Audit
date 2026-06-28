@@ -12,6 +12,7 @@
  */
 
 import { decodeAddress, decodeAmount, interpolateTemplate } from "../core";
+import { BLUEPRINT_SCHEMA_VERSION } from "../schema-version";
 import type { TranslationBlueprint, TranslationResult, RawEvent, Language } from "../types";
 import { getTranslation } from "../translations";
 
@@ -60,6 +61,7 @@ function translateSacTransfer(event: RawEvent, lang: Language): TranslationResul
 export function createSacTransferBlueprint(contractId: string): TranslationBlueprint {
   return {
     contractId,
+    schemaVersion: BLUEPRINT_SCHEMA_VERSION,
     contractName: `Stellar Asset Contract (${SAC_CONTRACTS[contractId] ?? "TOKEN"})`,
     translate: translateSacTransfer,
   };

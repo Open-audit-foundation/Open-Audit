@@ -1,5 +1,6 @@
 contractId: CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC
 contractName: Test Token Contract
+schemaVersion: "1.0.0"
 version: "1.0.0"
 validFromLedger: 0
 

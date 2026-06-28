@@ -19,6 +19,7 @@
 import { decodeAddress, decodeAmount, decodeEventName, truncateHex } from "./decode";
 import { sanitizeTextField, sanitizeTemplateParam } from "./core";
 import { RegistryTemplateException } from "../errors";
+import { BLUEPRINT_SCHEMA_VERSION } from "./schema-version";
 import type {
   CustomAbi,
   CustomAbiEvent,
@@ -143,6 +144,7 @@ function parseFields(eventRecord: Record<string, unknown>): CustomAbiField[] {
 export function customAbiToBlueprint(abi: CustomAbi): TranslationBlueprint {
   return {
     contractId: abi.contractId,
+    schemaVersion: BLUEPRINT_SCHEMA_VERSION,
     contractName: `${abi.contractName} (Custom ABI)`,
     translate: function (event: RawEvent, lang: Language): TranslationResult | null {
       return translateWithAbi(abi, event, lang);
