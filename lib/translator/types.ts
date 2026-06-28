@@ -53,7 +53,14 @@ export interface TranslatedEvent {
    * e.g. "v2". Null when the blueprint has no version label.
    */
   schemaVersion: string | null;
+  /** Lifecycle status of the blueprint that matched this event. */
+  blueprintStatus?: BlueprintStatus;
+  /** Owner of the blueprint that matched this event. */
+  blueprintOwner?: string;
 }
+
+/** Lifecycle status of a contract translation blueprint. */
+export type BlueprintStatus = "active" | "needs-review" | "deprecated";
 
 /**
  * A translation blueprint for a specific contract.
@@ -64,6 +71,12 @@ export interface TranslationBlueprint {
   contractId: string;
   /** Human-readable name for this contract. */
   contractName: string;
+  /** Primary owner or organization responsible for this blueprint. */
+  owner?: string;
+  /** List of maintainer identities or addresses. */
+  maintainers?: string[];
+  /** Lifecycle status of the blueprint. */
+  status?: BlueprintStatus;
   /**
    * Optional event-level matcher used by the registry before calling translate().
    * This lets a blueprint declare multi-topic requirements such as:
@@ -91,6 +104,12 @@ export interface ContractSchema {
   blueprint: TranslationBlueprint;
   /** Optional metadata about this version (e.g. WASM hash, upgrade tx). */
   metadata?: Record<string, any>;
+  /** Primary owner or organization responsible for this schema version. */
+  owner?: string;
+  /** List of maintainer identities or addresses. */
+  maintainers?: string[];
+  /** Lifecycle status of this schema version. */
+  status?: BlueprintStatus;
 }
 
 /**
@@ -100,6 +119,12 @@ export interface ContractRegistryEntry {
   contractId: string;
   contractName: string;
   schemas: ContractSchema[];
+  /** Primary owner or organization responsible for this contract's blueprints. */
+  owner?: string;
+  /** List of maintainer identities or addresses. */
+  maintainers?: string[];
+  /** Overall lifecycle status of the contract in the registry. */
+  status?: BlueprintStatus;
 }
 
 /** A single topic condition within a multi-topic match. */

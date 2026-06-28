@@ -2,13 +2,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { RawEvent, TranslatedEvent } from "../types";
 import * as Persistence from "../persistence";
 import { db } from "@/lib/db/client";
-import { translateEvent } from "../registry";
+import { translateWithCache } from "../registry";
 
 vi.mock("../registry", async () => {
   const actual = await vi.importActual<typeof import("../registry")>("../registry");
   return {
     ...actual,
-    translateEvent: vi.fn(),
+    translateWithCache: vi.fn(),
   };
 });
 
@@ -24,7 +24,7 @@ vi.mock("@/lib/ipfs/offloader", () => ({
   })),
 }));
 
-const mockedTranslateEvent = translateEvent as unknown as vi.MockedFunction<typeof translateEvent>;
+const mockedTranslateWithCache = translateWithCache as unknown as vi.MockedFunction<typeof translateWithCache>;
 
 const event: RawEvent = {
   id: "dead-letter-1",
@@ -43,7 +43,7 @@ describe("translateAndPersistEvent DLQ", () => {
 
   it("writes a DeadLetterEvent when translation fails", async () => {
     const testError = new Error("Invalid XDR payload");
-    mockedTranslateEvent.mockRejectedValueOnce(testError as any);
+    mockedTranslateWithCache.mockRejectedValueOnce(testError as any);
 
     const createSpy = vi.spyOn(db.deadLetterEvent, "create");
 

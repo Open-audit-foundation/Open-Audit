@@ -52,10 +52,12 @@ export function escapeHtml(str: string): string {
 // ─── Sanitisation ─────────────────────────────────────────────────────────────
 
 const MAX_PARAM_LENGTH = 512;
+const XSS_DISARM_RE = /(onerror|onload|onclick|onmouseover|javascript:|vbscript:)/gi;
 
 export function sanitizeTemplateParam(value: string): string {
   if (typeof value !== "string") return "";
-  return escapeHtml(value.trim().slice(0, MAX_PARAM_LENGTH));
+  const cleaned = value.replace(XSS_DISARM_RE, "");
+  return escapeHtml(cleaned.trim().slice(0, MAX_PARAM_LENGTH));
 }
 
 export interface SanitizeOptions {
