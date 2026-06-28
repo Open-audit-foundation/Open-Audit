@@ -152,6 +152,7 @@ export function createYourContractBlueprint(): TranslationBlueprint {
   return {
     contractId: CONTRACT_ID,
     contractName: "Your Contract Name",
+    schemaVersion: "1.0.0",
     translate: function (event: RawEvent): TranslationResult | null {
       return translateYourEvent(event);
       // Chain additional event handlers with ?? if needed:
@@ -221,6 +222,7 @@ Every blueprint's `translate()` function must conform to the following interface
 |---|---|---|
 | `contractId` | `string` | The deployed Soroban contract address (`C...`). |
 | `contractName` | `string` | Human-readable name shown in the UI, e.g. `"Soroswap Router"`. |
+| `schemaVersion` | `string` | Required blueprint format schema version. Use the current runtime value (`"1.0.0"`) unless maintainers announce a migration. |
 | `translate` | `(event: RawEvent) => TranslationResult \| null` | Returns a result when the event matches, otherwise `null`. |
 
 ### `RawEvent` (input)
@@ -281,6 +283,7 @@ export function createYourContractBlueprint(): TranslationBlueprint {
   return {
     contractId: "CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
     contractName: "Your Contract Name",
+    schemaVersion: "1.0.0",
     translate: function (event: RawEvent): TranslationResult | null {
       return translateYourEvent(event);
     },
@@ -314,12 +317,27 @@ export function createSoroswapRouterBlueprint(): TranslationBlueprint {
   return {
     contractId: CONTRACT_ID,
     contractName: "Soroswap Router",
+    schemaVersion: "1.0.0",
     translate: function (event: RawEvent): TranslationResult | null {
       return translateSwap(event);
     },
   };
 }
 ```
+
+---
+
+## Blueprint Schema Versioning Policy
+
+Every TypeScript blueprint and every `open-audit-cli --spec` JSON/YAML file must declare a top-level `schemaVersion` field. The current blueprint schema version is `"1.0.0"`. The registry and CLI both call the same validator in `lib/translator/schema-version.ts`, so contributors see the same explicit diagnostic in both paths when a blueprint is missing the field or targets an incompatible schema.
+
+Use semver-style rules for blueprint schema changes:
+
+- **Major bump** (`2.0.0`): required for breaking format changes, such as replacing placeholder syntax, removing a field, changing formatter semantics incompatibly, or requiring a new event matcher shape.
+- **Minor bump** (`1.1.0`): use for backwards-compatible additions, such as adding an optional formatter or optional metadata field.
+- **Patch bump** (`1.0.1`): use for documentation clarifications or validator bug fixes that do not change accepted blueprint shapes.
+
+When maintainers bump the runtime schema version, existing community blueprints must either be migrated or intentionally pinned to an older compatible runtime. Do not rely on generic parse errors to signal schema drift; update `schemaVersion` and tests as part of the migration.
 
 ---
 
