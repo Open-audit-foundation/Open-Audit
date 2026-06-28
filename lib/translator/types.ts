@@ -64,6 +64,12 @@ export interface TranslationBlueprint {
   contractId: string;
   /** Human-readable name for this contract. */
   contractName: string;
+  /** Blueprint format schema version required by this runtime. */
+  schemaVersion: string;
+  /** Optional human-readable contract event schema version. */
+  version?: string;
+  /** Optional first ledger for this contract event schema. */
+  validFromLedger?: number;
   /**
    * Optional event-level matcher used by the registry before calling translate().
    * This lets a blueprint declare multi-topic requirements such as:

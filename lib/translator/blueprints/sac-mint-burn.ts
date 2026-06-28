@@ -14,6 +14,7 @@
  */
 
 import { decodeAddress, decodeAmount, interpolateTemplate } from "../core";
+import { BLUEPRINT_SCHEMA_VERSION } from "../schema-version";
 import type { TranslationBlueprint, TranslationResult, RawEvent, Language } from "../types";
 import { getTranslation } from "../translations";
 
@@ -67,6 +68,7 @@ export function createSacMintBurnBlueprint(contractId: string): TranslationBluep
 
   return {
     contractId,
+    schemaVersion: BLUEPRINT_SCHEMA_VERSION,
     contractName: `Stellar Asset Contract — Mint/Burn (${symbol})`,
     translate: function (event: RawEvent, lang: Language): TranslationResult | null {
       return translateMint(event, lang) ?? translateBurn(event, lang);

@@ -17,6 +17,7 @@ import { Command } from "commander";
 import { readFileSync, existsSync } from "fs";
 import { resolve } from "path";
 import { parse as parseYaml } from "yaml";
+import { assertBlueprintSchemaVersion, BLUEPRINT_SCHEMA_VERSION } from "../lib/translator/schema-version";
 import type { RawEvent, TranslationBlueprint, Language } from "../lib/translator/types";
 
 // ============================================================================
@@ -256,6 +257,7 @@ function sanitizeHex(hex: string): string {
 interface BlueprintSpec {
   contractId: string;
   contractName: string;
+  schemaVersion?: string;
   version?: string;
   validFromLedger?: number;
   events: EventSpec[];
@@ -314,6 +316,8 @@ function loadSpecification(
     throw new Error("Specification missing required field: contractName");
   }
 
+  assertBlueprintSchemaVersion(spec);
+
   if (!spec.events || spec.events.length === 0) {
     throw new Error("Specification missing required field: events (must have at least 1 event)");
   }
@@ -324,6 +328,7 @@ function loadSpecification(
   if (verbose) {
     console.log("📄 Loaded Specification:");
     console.log(`  Contract Name: ${spec.contractName}`);
+    console.log(`  Schema:        ${spec.schemaVersion}`);
     console.log(`  Version:       ${spec.version || "none"}`);
     console.log(`  Events:        ${spec.events.length}`);
     console.log("");
@@ -337,6 +342,7 @@ function buildBlueprint(spec: BlueprintSpec): TranslationBlueprint {
   return {
     contractId: spec.contractId,
     contractName: spec.contractName,
+    schemaVersion: spec.schemaVersion || BLUEPRINT_SCHEMA_VERSION,
     version: spec.version,
     validFromLedger: spec.validFromLedger,
 
