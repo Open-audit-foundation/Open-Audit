@@ -39,6 +39,9 @@
     "test:wasm:watch": "vitest lib/wasm-sandbox",
     "test:wasm:manual": "node scripts/test-wasm-sandbox.js",
     "test:wasm:benchmark": "node scripts/test-wasm-sandbox.js benchmark",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:debug": "playwright test --debug",
     "wasm:build-examples": "cd lib/wasm-sandbox/examples/rust && ./build-all.sh",
     "build:cli": "tsc cli/open-audit-cli.ts --outDir dist --module commonjs --target es2020 --moduleResolution node --esModuleInterop --resolveJsonModule --skipLibCheck",
     "cli": "node dist/cli/open-audit-cli.js",
@@ -95,6 +98,7 @@
     "ws": "^8.21.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.51.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/bull": "^4.10.4",
