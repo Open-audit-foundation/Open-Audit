@@ -35,6 +35,8 @@ Smart contracts on Stellar/Soroban emit events as cryptic, hex-encoded binary da
 
 ---
 
+Try the translation playground live at `/playground` (no local setup required).
+
 ## Tech Stack
 
 - **Framework:** Next.js 14 (App Router) + TypeScript
