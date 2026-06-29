@@ -1,0 +1,40 @@
+name: Validate Translation Blueprints
+
+on:
+  pull_request:
+    paths:
+      - "lib/translator/blueprints/**"
+      - "lib/translator/blueprint.schema.ts"
+      - "scripts/validate-blueprints.ts"
+      - ".github/workflows/validate-blueprints.yml"
+  push:
+    branches: [main, master]
+    paths:
+      - "lib/translator/blueprints/**"
+      - "lib/translator/blueprint.schema.ts"
+      - "scripts/validate-blueprints.ts"
+      - ".github/workflows/validate-blueprints.yml"
+
+jobs:
+  validate:
+    name: Blueprint Schema & Test Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 📦 Install Dependencies
+        run: npm ci
+
+      - name: 🔍 Run Schema Validation
+        run: npm run validate:blueprints
+
+      - name: 🧪 Run Blueprint Unit Tests
+        run: npx vitest run lib/translator/__tests__/blueprint-validation.test.ts
