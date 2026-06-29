@@ -36,6 +36,12 @@
  * Run with: npx ts-node --project tsconfig.server.json server.ts --legacy
  * (or via the `dev:ws:legacy` npm script)
  */
+
+// Visible runtime deprecation warning for developers running the legacy server.
+// This should make it obvious when someone accidentally starts the deprecated
+// monolithic server. The process continues to run for compatibility, but the
+// warning recommends the decoupled microservices path.
+console.warn("\n\u001b[33mDEPRECATION: \`server.ts\` is a legacy monolithic server with a known CPU-starvation flaw.\nRecommended: use the microservices/decoupled path (npm run dev:decoupled).\nTo run the legacy server anyway, use the explicit script: npm run dev:legacy\u001b[0m\n");
 import { createServer, IncomingMessage } from "http";
 import { parse } from "url";
 import next from "next";

@@ -65,7 +65,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 For the recommended custom server with WebSocket support and `/metrics`, run:
 
 ```bash
-npm run dev:ws
+npm run dev:decoupled
 ```
 
 `dev:ws` starts the decoupled microservices web server. Start the indexer in a
@@ -130,7 +130,7 @@ npm run format           # Format code with Prettier
 
 ## Telemetry
 
-The custom server exposes Prometheus metrics on `http://localhost:3000/metrics` when running `npm run dev:ws`.
+The custom server exposes Prometheus metrics on `http://localhost:3000/metrics` when running `npm run dev:decoupled`.
 
 You can configure OpenTelemetry to export spans to Jaeger by setting:
 
