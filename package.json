@@ -102,7 +102,7 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/bull": "^4.10.4",
-    "@types/ioredis": "^4.28.10",
+    "@types/ioredis": "^5.0.0",
     "@types/js-yaml": "^4.0",
     "@types/node": "^20",
     "@types/node-cron": "^3.0.11",
