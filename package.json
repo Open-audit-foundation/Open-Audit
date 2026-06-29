@@ -42,6 +42,7 @@
     "test:wasm:watch": "vitest lib/wasm-sandbox",
     "test:wasm:manual": "node scripts/test-wasm-sandbox.js",
     "test:wasm:benchmark": "node scripts/test-wasm-sandbox.js benchmark",
+    "test:fixtures": "vitest run tests/fixtures-regression.spec.ts",
     "wasm:build-examples": "cd lib/wasm-sandbox/examples/rust && ./build-all.sh",
     "build:cli": "tsc cli/open-audit-cli.ts --outDir dist --module commonjs --target es2020 --moduleResolution node --esModuleInterop --resolveJsonModule --skipLibCheck",
     "cli": "node dist/cli/open-audit-cli.js",
