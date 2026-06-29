@@ -62,11 +62,14 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-For the custom server with WebSocket support and `/metrics`, run:
+For the recommended custom server with WebSocket support and `/metrics`, run:
 
 ```bash
 npm run dev:ws
 ```
+
+`dev:ws` starts the decoupled microservices web server. Start the indexer in a
+separate terminal with `npm run worker:indexer` when you need live chain events.
 
 ### Environment Variables
 
@@ -95,9 +98,10 @@ cp .env.microservices.example .env.local
 **Development:**
 ```bash
 npm run dev              # Standard Next.js dev server
-npm run dev:ws           # Legacy monolithic server with WebSocket
+npm run dev:ws           # Recommended decoupled WebSocket server (requires Redis)
 npm run dev:decoupled    # Microservices web server (requires Redis)
 npm run worker:indexer   # Microservices indexer worker (requires Redis)
+npm run dev:ws:legacy    # Deprecated monolithic WebSocket server; explicit legacy opt-in
 npm run test:websocket   # Test WebSocket connection
 ```
 
@@ -217,17 +221,22 @@ GET /api/security/metrics  # Security metrics API
 
 ### Legacy Monolithic Architecture
 
-**Single-process system (for simple deployments):**
+**Deprecated single-process system kept only for migration/debugging:**
 
 ```
 Stellar Network → Event Indexer → Translation Engine → WebSocket Server → Frontend Dashboard
 ```
 
-⚠️ **Known limitations:** Under heavy load, indexing can starve the HTTP/WebSocket server of CPU cycles. See deprecation notice in `server.ts`.
+⚠️ **Known limitations:** Under heavy load, indexing can starve the HTTP/WebSocket server of CPU cycles. See deprecation notice in `server.ts`. New development should use the microservices path above.
 
 ```bash
-npm run dev:ws
+npm run dev:ws:legacy
 ```
+
+The legacy script passes `--legacy` to `server.ts`. Direct invocations of
+`server.ts` without `--legacy` or `OPEN_AUDIT_LEGACY_SERVER=1` exit immediately
+with a migration message so local scripts do not accidentally start the
+deprecated path.
 
 ---
 
@@ -243,7 +252,7 @@ For new contributors wanting to understand the system's data flow and internal a
 1. **Event Indexer** (`lib/stellar/`, `src/worker/`) — Polls Stellar RPC with resilient rate limiting
 2. **Translation Engine** (`lib/translator/`) — Converts XDR to human-readable text with security hardening
 3. **Redis Pub/Sub** (microservices only) — Message broker for event distribution
-4. **WebSocket Server** (`server-decoupled.ts` or `server.ts`) — Broadcasts events in real-time
+4. **WebSocket Server** (`server-decoupled.ts`) — Broadcasts events in real-time; `server.ts` is deprecated and available only through `dev:ws:legacy`
 5. **Frontend Dashboard** (`app/dashboard/`, `components/`) — Interactive UI
 
 ---

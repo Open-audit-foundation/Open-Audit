@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "dev:ws": "node --max-old-space-size=512 --expose-gc -r ts-node/register --project tsconfig.server.json server.ts",
+    "dev:ws": "npm run dev:decoupled",
+    "dev:decoupled": "node --max-old-space-size=512 --expose-gc -r ts-node/register --project tsconfig.server.json server-decoupled.ts",
+    "dev:ws:legacy": "node --max-old-space-size=512 --expose-gc -r ts-node/register --project tsconfig.server.json server.ts --legacy",
     "start:ws": "node --max-old-space-size=1024 --max-semi-space-size=64 --initial-old-space-size=128 --optimize-for-size dist/server.js",
     "profile:heap": "node --expose-gc --max-old-space-size=512 -r tsx/cjs scripts/profile-heap.ts",
     "build": "next build",
@@ -51,6 +53,7 @@
     "db:studio": "prisma studio",
     "retention": "ts-node --project tsconfig.server.json scripts/retention.ts",
     "retention:dry-run": "ts-node --project tsconfig.server.json scripts/retention.ts --dry-run",
+    "worker:indexer": "ts-node --project tsconfig.server.json src/worker/indexer.ts",
     "worker:evm-bridge": "ts-node --project tsconfig.server.json src/worker/evm-bridge-indexer.ts"
   },
   "dependencies": {
