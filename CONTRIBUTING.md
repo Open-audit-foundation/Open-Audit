@@ -409,6 +409,50 @@ Here's a clean, copy-pasteable JSON configuration you can use with the "Upload A
 }
 ```
 
+## Adding translation fixtures (for blueprint authors)
+
+We use committed, real-world fixtures to ensure blueprints continue to produce
+exact, human-readable translations over time. Follow these steps to add fixtures
+for a blueprint you maintain:
+
+1. Create a fixtures file under `lib/translator/fixtures/<blueprint-name>/fixtures.json`.
+2. Add one or more fixture objects with the following shape:
+
+  {
+    "name": "short-descriptive-name",
+    "contractId": "<CONTRACT_ID>",
+    "raw": { /* raw event payload captured from network */ },
+    "expected": { "description": "Exact expected string", "status": "translated" },
+    "blueprintFile": "lib/translator/blueprints/<file>.ts",
+    "fingerprint": "<sha256-of-blueprint-file>"
+  }
+
+3. Compute the `fingerprint` by running `sha256sum` on the blueprint source
+  file and committing the hex digest.
+
+  Example:
+
+  ```bash
+  sha256sum lib/translator/blueprints/sac-transfer.ts | awk '{print $1}'
+  ```
+
+4. Run the fixture regression test locally to verify:
+
+  ```bash
+  npm ci
+  npm run test:fixtures
+  ```
+
+5. Open a PR with the fixture and a short rationale describing the event source
+  (timestamp, network, tx hash if public, and why the example is representative).
+
+Notes
+- If a fixture starts failing after a contract upgrade, the test will report
+  `NEEDS_REVIEW` when the blueprint source fingerprint differs from the
+  committed fingerprint — this indicates the contract's code may have changed
+  and the fixture should be revalidated before updating the expected string.
+
+
 #### Step 6: Run the Test Suite
 
 Before pushing a PR, always run:
