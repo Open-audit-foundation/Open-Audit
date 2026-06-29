@@ -9,7 +9,7 @@
  * - Proper cleanup (no leaked timers)
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from "vitest";
 import {
   createCircuitBreaker,
   CircuitState,
@@ -441,5 +441,152 @@ describe("CircuitBreaker", () => {
       breaker.halfOpen();
       expect(breaker.getState()).toBe(CircuitState.HALF_OPEN);
     });
+  });
+});
+
+describe("Structured log events", () => {
+  let consoleSpy: MockInstance;
+  let logBreaker: CircuitBreaker;
+
+  beforeEach(() => {
+    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleSpy.mockRestore();
+    if (logBreaker) logBreaker.dispose();
+  });
+
+  /**
+   * Acceptance criterion: 5 consecutive simulated RPC failures produce a
+   * visible "circuit breaker opened" log line with cause.
+   */
+  it("emits circuit_breaker_state_change log with cause when circuit opens after 5 failures", async () => {
+    logBreaker = createCircuitBreaker({
+      failureThreshold: 5,
+      successThreshold: 2,
+      resetTimeout: 100,
+    });
+
+    const failingFn = async () => {
+      const err: any = new Error("HTTP 500");
+      err.response = { status: 500 };
+      throw err;
+    };
+
+    for (let i = 0; i < 5; i++) {
+      await expect(logBreaker.execute(failingFn)).rejects.toThrow();
+    }
+
+    expect(logBreaker.getState()).toBe(CircuitState.OPEN);
+
+    const jsonCalls = consoleSpy.mock.calls
+      .map((args) => {
+        try { return JSON.parse(args[0]); } catch { return null; }
+      })
+      .filter(Boolean);
+
+    const openEvent = jsonCalls.find(
+      (e) => e.event === "circuit_breaker_state_change" && e.newState === "OPEN"
+    );
+
+    expect(openEvent).toBeDefined();
+    expect(openEvent.oldState).toBe("CLOSED");
+    expect(openEvent.reason).toMatch(/consecutiveFailures.*5.*failureThreshold.*5/);
+    expect(openEvent.consecutiveFailures).toBe(5);
+    expect(openEvent.timestamp).toBeDefined();
+  });
+
+  /**
+   * Acceptance criterion: half-open → closed recovery transition is also logged.
+   */
+  it("emits circuit_breaker_state_change log for HALF_OPEN → CLOSED recovery", async () => {
+    logBreaker = createCircuitBreaker({
+      failureThreshold: 2,
+      successThreshold: 2,
+      resetTimeout: 80,
+    });
+
+    const failingFn = async () => {
+      const err: any = new Error("HTTP 500");
+      err.response = { status: 500 };
+      throw err;
+    };
+
+    // Open the circuit
+    await expect(logBreaker.execute(failingFn)).rejects.toThrow();
+    await expect(logBreaker.execute(failingFn)).rejects.toThrow();
+
+    // Wait for HALF_OPEN
+    await new Promise((r) => setTimeout(r, 120));
+    expect(logBreaker.getState()).toBe(CircuitState.HALF_OPEN);
+
+    // Reset spy so we only see the recovery log
+    consoleSpy.mockClear();
+
+    // Two successes → CLOSED
+    await logBreaker.execute(async () => "ok");
+    await logBreaker.execute(async () => "ok");
+
+    expect(logBreaker.getState()).toBe(CircuitState.CLOSED);
+
+    const jsonCalls = consoleSpy.mock.calls
+      .map((args) => {
+        try { return JSON.parse(args[0]); } catch { return null; }
+      })
+      .filter(Boolean);
+
+    const recoveryEvent = jsonCalls.find(
+      (e) =>
+        e.event === "circuit_breaker_state_change" &&
+        e.oldState === "HALF_OPEN" &&
+        e.newState === "CLOSED"
+    );
+
+    expect(recoveryEvent).toBeDefined();
+    expect(recoveryEvent.reason).toMatch(/recovery confirmed/);
+    expect(recoveryEvent.timestamp).toBeDefined();
+  });
+
+  /**
+   * Acceptance criterion: OPEN → HALF_OPEN transition is also logged (reset timeout hit).
+   */
+  it("emits circuit_breaker_state_change log for OPEN → HALF_OPEN timeout", async () => {
+    logBreaker = createCircuitBreaker({
+      failureThreshold: 2,
+      successThreshold: 2,
+      resetTimeout: 80,
+    });
+
+    const failingFn = async () => {
+      const err: any = new Error("HTTP 500");
+      err.response = { status: 500 };
+      throw err;
+    };
+
+    await expect(logBreaker.execute(failingFn)).rejects.toThrow();
+    await expect(logBreaker.execute(failingFn)).rejects.toThrow();
+
+    consoleSpy.mockClear();
+
+    await new Promise((r) => setTimeout(r, 120));
+    expect(logBreaker.getState()).toBe(CircuitState.HALF_OPEN);
+
+    const jsonCalls = consoleSpy.mock.calls
+      .map((args) => {
+        try { return JSON.parse(args[0]); } catch { return null; }
+      })
+      .filter(Boolean);
+
+    const halfOpenEvent = jsonCalls.find(
+      (e) =>
+        e.event === "circuit_breaker_state_change" &&
+        e.oldState === "OPEN" &&
+        e.newState === "HALF_OPEN"
+    );
+
+    expect(halfOpenEvent).toBeDefined();
+    expect(halfOpenEvent.reason).toMatch(/resetTimeout/);
+    expect(halfOpenEvent.timestamp).toBeDefined();
   });
 });

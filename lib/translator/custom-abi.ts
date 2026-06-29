@@ -166,7 +166,7 @@ function translateWithAbi(abi: CustomAbi, event: RawEvent, lang: Language): Tran
 
   const matched = abi.events.find(function (eventDef: CustomAbiEvent): boolean {
     return matchesEvent(topic0, decodedName, eventDef.name);
-  });
+  }) ?? (abi.events.length === 1 ? abi.events[0] : undefined);
 
   if (!matched) return null;
 
@@ -190,7 +190,7 @@ function matchesEvent(topicHex: string, decodedName: string, eventName: string):
 /** Renders a matched event into a human-readable sentence. */
 function renderEvent(eventDef: CustomAbiEvent, event: RawEvent): string {
   // Sanitize the event label — it comes from user-uploaded ABI name field
-  const label = sanitizeTextField(capitalize(eventDef.name), { maxLength: 64 });
+  const label = sanitizeTemplateParam(capitalize(eventDef.name)).slice(0, 64);
 
   if (eventDef.fields.length === 0) {
     return `${label} event emitted (${truncateHex(event.data, 8)})`;
@@ -202,7 +202,7 @@ function renderEvent(eventDef: CustomAbiEvent, event: RawEvent): string {
   const parts = eventDef.fields.map(function (field: CustomAbiField, index: number): string {
     const hex = positions[index] ?? "0x00";
     // Sanitize field name from ABI and the rendered value from blockchain data
-    const safeName = sanitizeTextField(field.name, { maxLength: 64 });
+    const safeName = sanitizeTemplateParam(field.name).slice(0, 64);
     return `${safeName}: ${renderField(field, hex)}`;
   });
 

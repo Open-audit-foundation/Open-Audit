@@ -1,0 +1,28 @@
+name: Fixture Regression Tests
+
+on:
+  pull_request:
+    paths:
+      - 'lib/translator/**'
+      - 'tests/**'
+      - '.github/workflows/**'
+  push:
+    paths:
+      - 'lib/translator/**'
+      - 'tests/**'
+
+jobs:
+  fixtures-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: |
+          npm ci
+      - name: Run fixture regression tests
+        run: |
+          npm run test:fixtures

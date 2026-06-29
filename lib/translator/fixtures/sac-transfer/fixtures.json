@@ -1,0 +1,112 @@
+[
+  {
+    "name": "sac-transfer-usdc-1",
+    "contractId": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+    "raw": {
+      "contractId": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+      "ledger": 1,
+      "topics": [
+        "0x0000000000000000000000000000000000000000000000000000000074726e73",
+        "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "data": "0x000000003B9ACA00",
+      "txHash": "0xdeadbeef",
+      "id": 1
+    },
+    "expected": {
+      "description": "Public Key [GAAA...AAAA] transferred 100.00 USDC to [GBBB...BBBB]",
+      "status": "translated"
+    },
+    "blueprintFile": "lib/translator/blueprints/sac-transfer.ts",
+    "fingerprint": "a14f7e07609f8512fb834f3b7c8dd66b95307921051262e17e2a61995ae08e4e"
+  },
+  {
+    "name": "sac-transfer-xlm-1",
+    "contractId": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+    "raw": {
+      "contractId": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+      "ledger": 1,
+      "topics": [
+        "0x0000000000000000000000000000000000000000000000000000000074726e73",
+        "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ],
+      "data": "0x000000003B9ACA00",
+      "txHash": "0xdeadbeef",
+      "id": 2
+    },
+    "expected": {
+      "description": "Public Key [GCCC...CCCC] transferred 100.00 XLM to [GDDD...DDDD]",
+      "status": "translated"
+    },
+    "blueprintFile": "lib/translator/blueprints/sac-transfer.ts",
+    "fingerprint": "a14f7e07609f8512fb834f3b7c8dd66b95307921051262e17e2a61995ae08e4e"
+  },
+  {
+    "name": "sac-transfer-eurc-1",
+    "contractId": "CAZAQB3D7KSLSNOSQKYD2V4JP5V2Y3B4RDJZRLBFCCIXDCTE3WHSY3UE",
+    "raw": {
+      "contractId": "CAZAQB3D7KSLSNOSQKYD2V4JP5V2Y3B4RDJZRLBFCCIXDCTE3WHSY3UE",
+      "ledger": 1,
+      "topics": [
+        "0x0000000000000000000000000000000000000000000000000000000074726e73",
+        "0x1111111111111111111111111111111111111111111111111111111111111111",
+        "0x2222222222222222222222222222222222222222222222222222222222222222"
+      ],
+      "data": "0x000000003B9ACA00",
+      "txHash": "0xdeadbeef",
+      "id": 3
+    },
+    "expected": {
+      "description": "Public Key [G111...1111] transferred 100.00 EURC to [G222...2222]",
+      "status": "translated"
+    },
+    "blueprintFile": "lib/translator/blueprints/sac-transfer.ts",
+    "fingerprint": "a14f7e07609f8512fb834f3b7c8dd66b95307921051262e17e2a61995ae08e4e"
+  },
+  {
+    "name": "sac-transfer-usdc-2",
+    "contractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+    "raw": {
+      "contractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+      "ledger": 1,
+      "topics": [
+        "0x0000000000000000000000000000000000000000000000000000000074726e73",
+        "0x3333333333333333333333333333333333333333333333333333333333333333",
+        "0x4444444444444444444444444444444444444444444444444444444444444444"
+      ],
+      "data": "0x000000003B9ACA00",
+      "txHash": "0xdeadbeef",
+      "id": 4
+    },
+    "expected": {
+      "description": "Public Key [G333...3333] transferred 100.00 USDC to [G444...4444]",
+      "status": "translated"
+    },
+    "blueprintFile": "lib/translator/blueprints/sac-transfer.ts",
+    "fingerprint": "a14f7e07609f8512fb834f3b7c8dd66b95307921051262e17e2a61995ae08e4e"
+  },
+  {
+    "name": "sac-transfer-xlm-2",
+    "contractId": "CBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+    "raw": {
+      "contractId": "CBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "ledger": 1,
+      "topics": [
+        "0x0000000000000000000000000000000000000000000000000000000074726e73",
+        "0x5555555555555555555555555555555555555555555555555555555555555555",
+        "0x6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "data": "0x000000003B9ACA00",
+      "txHash": "0xdeadbeef",
+      "id": 5
+    },
+    "expected": {
+      "description": "Public Key [G555...5555] transferred 100.00 XLM to [G666...6666]",
+      "status": "translated"
+    },
+    "blueprintFile": "lib/translator/blueprints/sac-transfer.ts",
+    "fingerprint": "a14f7e07609f8512fb834f3b7c8dd66b95307921051262e17e2a61995ae08e4e"
+  }
+]

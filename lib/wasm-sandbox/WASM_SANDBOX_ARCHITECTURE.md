@@ -417,3 +417,55 @@ For questions or issues:
 - GitHub Issues: [Open-Audit/issues](https://github.com/yourusername/Open-Audit/issues)
 - Discord: `#wasm-sandbox` channel
 - Email: security@open-audit.io
+
+## Adversarial Security Test Suite
+
+Added in response to issue #252. The sandbox documented firm limits (16MB memory,
+5s timeout, no host capabilities) but these boundaries were only tested against
+normal example parsers. A security boundary never stress-tested against something
+designed to break it is a claim, not a guarantee.
+
+The adversarial suite in `lib/wasm-sandbox/tests/adversarial/` runs in CI on
+every change to `lib/wasm-sandbox/` and covers four deliberately malicious cases.
+
+### Tested security properties
+
+These properties are verified by the adversarial suite on every CI run:
+
+| Property | Test case | Expected result |
+|---|---|---|
+| Memory limit (16MB / 256 pages) | `MEMORY_BOMB_WASM` — attempts `memory.grow(512)` | Rejected/terminated; host process survives |
+| Execution timeout (5s) | `INFINITE_LOOP_WASM` — unconditional `br` loop | Worker terminated; `TIMEOUT_EXCEEDED` returned |
+| No host capabilities | `HOST_PROBE_WASM` — imports `fs.readFileSync` and `net.fetch` | Instantiation fails with link error |
+| Output schema enforcement | `MALFORMED_OUTPUT_WASM` — returns pointer to 0xFF bytes | `INVALID_OUTPUT` returned; host process survives |
+
+All four cases must be caught and handled gracefully — rejected or terminated —
+without crashing the worker thread or the host process.
+
+### Designed but not automatically verified
+
+These properties are part of the sandbox design but are NOT covered by the
+adversarial suite and should be considered theoretical until explicitly tested:
+
+- **Gas metering / deterministic CPU limits** — the 5s wall-clock timeout is
+  enforced but there is no instruction-count budget. A parser that does
+  expensive-but-finite computation could consume significant CPU before timing out.
+- **Side-channel isolation** — the Worker thread shares the same OS process.
+  Spectre/Meltdown-class attacks between Worker threads are not tested.
+- **Output size enforcement at WASM level** — output size is validated after the
+  fact by `validateOutput()`. A module that allocates a large output buffer
+  internally before returning could transiently exceed the limit.
+- **WASI imports** — `HOST_PROBE_WASM` tests `fs` and `net` namespaces. A module
+  importing `wasi_snapshot_preview1` functions is not explicitly tested, though
+  the import object construction provides no WASI namespace.
+- **Multi-instance resource exhaustion** — concurrent execution of many parsers
+  is tested for correctness but not for aggregate memory/CPU ceiling enforcement.
+
+### Running the adversarial suite
+
+```bash
+npm run test:wasm
+```
+
+The suite uses pre-compiled WASM byte arrays committed in `wasm-fixtures.ts` —
+no Rust or AssemblyScript toolchain required.

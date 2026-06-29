@@ -149,6 +149,17 @@ export function createTokenBucket(config: TokenBucketConfig): TokenBucket {
     // Slow path: queue the request
     if (queue.length >= maxQueueSize) {
       totalRejected++;
+      console.log(
+        JSON.stringify({
+          event: "token_bucket_rejected",
+          reason: "queue full",
+          queueSize: queue.length,
+          maxQueueSize,
+          availableTokens: Math.floor(tokens),
+          totalRejected,
+          timestamp: new Date().toISOString(),
+        })
+      );
       return Promise.reject(
         new Error(
           `TokenBucket queue full (${maxQueueSize} requests). Rate limit exceeded.`
@@ -157,6 +168,16 @@ export function createTokenBucket(config: TokenBucketConfig): TokenBucket {
     }
 
     totalQueued++;
+    console.log(
+      JSON.stringify({
+        event: "token_bucket_throttled",
+        reason: "no tokens available, request queued",
+        queueDepth: queue.length,
+        availableTokens: Math.floor(tokens),
+        totalQueued,
+        timestamp: new Date().toISOString(),
+      })
+    );
     return new Promise<void>((resolve, reject) => {
       queue.push({ resolve, reject });
     });

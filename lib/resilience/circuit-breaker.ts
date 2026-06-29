@@ -240,15 +240,48 @@ export function createCircuitBreaker(config: CircuitBreakerConfig): CircuitBreak
   let lastSuccessTime: number | undefined;
 
   /**
+   * Emits a structured log event for a state transition.
+   */
+  function logTransition(
+    oldState: CircuitState,
+    newState: CircuitState,
+    reason: string,
+    extra?: Record<string, unknown>
+  ): void {
+    console.log(
+      JSON.stringify({
+        event: "circuit_breaker_state_change",
+        oldState,
+        newState,
+        reason,
+        consecutiveFailures,
+        consecutiveSuccesses,
+        resetTimeoutMs: currentResetTimeout,
+        timestamp: new Date().toISOString(),
+        ...extra,
+      })
+    );
+  }
+
+  /**
    * Transitions to a new state and notifies listeners.
    */
-  function transitionTo(newState: CircuitState): void {
+  function transitionTo(newState: CircuitState, reason?: string): void {
     if (state === newState) return;
 
     const oldState = state;
     state = newState;
 
-    console.log(`[circuit-breaker] ${oldState} → ${newState}`);
+    const defaultReason =
+      newState === CircuitState.OPEN
+        ? `consecutiveFailures (${consecutiveFailures}) reached failureThreshold (${failureThreshold})`
+        : newState === CircuitState.HALF_OPEN
+        ? `resetTimeout (${currentResetTimeout}ms) elapsed`
+        : newState === CircuitState.CLOSED
+        ? `consecutiveSuccesses (${consecutiveSuccesses}) reached successThreshold (${successThreshold})`
+        : "manual transition";
+
+    logTransition(oldState, newState, reason ?? defaultReason);
 
     if (onStateChange) {
       try {
@@ -286,7 +319,10 @@ export function createCircuitBreaker(config: CircuitBreakerConfig): CircuitBreak
 
     if (state === CircuitState.HALF_OPEN) {
       if (consecutiveSuccesses >= successThreshold) {
-        transitionTo(CircuitState.CLOSED);
+        transitionTo(
+          CircuitState.CLOSED,
+          `recovery confirmed: ${consecutiveSuccesses} consecutive successes reached successThreshold (${successThreshold})`
+        );
         consecutiveSuccesses = 0;
       }
     }
@@ -308,11 +344,17 @@ export function createCircuitBreaker(config: CircuitBreakerConfig): CircuitBreak
     if (state === CircuitState.HALF_OPEN) {
       // Single failure in HALF_OPEN reopens the circuit with backoff
       currentResetTimeout = Math.min(currentResetTimeout * 2, maxResetTimeout);
-      transitionTo(CircuitState.OPEN);
+      transitionTo(
+        CircuitState.OPEN,
+        `canary request failed in HALF_OPEN state; backoff increased to ${currentResetTimeout}ms`
+      );
       consecutiveFailures = 0; // Reset counter for next attempt
     } else if (state === CircuitState.CLOSED) {
       if (consecutiveFailures >= failureThreshold) {
-        transitionTo(CircuitState.OPEN);
+        transitionTo(
+          CircuitState.OPEN,
+          `consecutiveFailures (${consecutiveFailures}) reached failureThreshold (${failureThreshold})`
+        );
       }
     }
   }
@@ -399,18 +441,18 @@ export function createCircuitBreaker(config: CircuitBreakerConfig): CircuitBreak
   }
 
   function open(): void {
-    transitionTo(CircuitState.OPEN);
+    transitionTo(CircuitState.OPEN, "manually opened");
   }
 
   function close(): void {
     consecutiveFailures = 0;
     consecutiveSuccesses = 0;
     currentResetTimeout = resetTimeout;
-    transitionTo(CircuitState.CLOSED);
+    transitionTo(CircuitState.CLOSED, "manually closed");
   }
 
   function halfOpen(): void {
-    transitionTo(CircuitState.HALF_OPEN);
+    transitionTo(CircuitState.HALF_OPEN, "manually set to half-open");
   }
 
   function dispose(): void {

@@ -33,9 +33,15 @@
  * Broadcasts newly translated Soroban events to all connected clients.
  * Bloated event data (>2KB) is automatically offloaded to IPFS before broadcast.
  *
- * Run with: npx ts-node --project tsconfig.server.json server.ts
- * (or via the `dev:ws` npm script)
+ * Run with: npx ts-node --project tsconfig.server.json server.ts --legacy
+ * (or via the `dev:ws:legacy` npm script)
  */
+
+// Visible runtime deprecation warning for developers running the legacy server.
+// This should make it obvious when someone accidentally starts the deprecated
+// monolithic server. The process continues to run for compatibility, but the
+// warning recommends the decoupled microservices path.
+console.warn("\n\u001b[33mDEPRECATION: \`server.ts\` is a legacy monolithic server with a known CPU-starvation flaw.\nRecommended: use the microservices/decoupled path (npm run dev:decoupled).\nTo run the legacy server anyway, use the explicit script: npm run dev:legacy\u001b[0m\n");
 import { createServer, IncomingMessage } from "http";
 import { parse } from "url";
 import next from "next";
@@ -50,6 +56,27 @@ import { getNetworkConfig } from "./lib/stellar/client";
 import { captureExceptionSync, eventsIngestedTotal, metricsHandler, recordTranslationDuration, startTelemetry } from "./lib/telemetry";
 import { startRetentionScheduler } from "./lib/retention/scheduler";
 import { schedulePruner } from "./lib/retention/pruner";
+
+const legacyExplicitlyEnabled =
+  process.argv.includes("--legacy") || process.env.OPEN_AUDIT_LEGACY_SERVER === "1";
+
+if (!legacyExplicitlyEnabled) {
+  console.error(
+    [
+      "[legacy-server] Refusing to start server.ts without an explicit legacy opt-in.",
+      "Use `npm run dev:ws` for the recommended decoupled WebSocket server.",
+      "If you are migrating old local scripts, use `npm run dev:ws:legacy` or pass `--legacy`.",
+    ].join("\n")
+  );
+  process.exit(1);
+}
+
+console.warn(
+  [
+    "[legacy-server] Starting deprecated monolithic server.ts.",
+    "The decoupled microservices path is recommended: npm run dev:ws + npm run worker:indexer.",
+  ].join("\n")
+);
 
 const dev = process.env.NODE_ENV !== "production";
 const port = parseInt(process.env.PORT ?? "3000", 10);

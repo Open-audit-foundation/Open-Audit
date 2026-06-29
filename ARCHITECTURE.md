@@ -19,6 +19,9 @@ This document provides a detailed architectural overview of Open-Audit, the "Goo
 
 ## System Overview
 
+> [!NOTE]
+> **Deployment Topology Note:** This document describes the core data flow and monolithic development architecture (`server.ts`). For production environments requiring horizontal scaling and decoupled background indexing via Redis Pub/Sub, please consult **[MICROSERVICES_ARCHITECTURE.md](file:///MICROSERVICES_ARCHITECTURE.md)**.
+
 Open-Audit is a full-stack application that bridges the gap between raw blockchain data and human understanding. The system consists of five major components that work together to fetch, translate, store, and display Soroban smart contract events.
 
 ### High-Level Architecture
@@ -294,7 +297,10 @@ Blueprint Match?
 
 ### 4. WebSocket Server
 
-**Location:** `server.ts`
+> [!TIP]
+> In production microservices mode, HTTP serving and real-time streaming are handled by `server-decoupled.ts`, receiving events from isolated worker processes via Redis Pub/Sub. See [Microservices Architecture](file:///MICROSERVICES_ARCHITECTURE.md#architecture-overview).
+
+**Location:** `server.ts` (Monolithic mode) / `server-decoupled.ts` (Microservices mode)
 
 The WebSocket server runs alongside the Next.js app, providing real-time event streaming to connected clients.
 
@@ -694,8 +700,8 @@ ws.onmessage = (e) => console.log(JSON.parse(e.data));
 - **Impact:** Zero event loss during rate limiting
 
 ### WebSocket Scaling
-- **Current:** Single server broadcasts to all clients
-- **Future:** Consider Redis pub/sub for multi-server deployments
+- **Monolithic Mode (`server.ts`):** Single server broadcasts directly to all clients.
+- **Production Mode (`server-decoupled.ts`):** Utilizes Redis Pub/Sub for multi-server deployments and decoupled background workers. See [MICROSERVICES_ARCHITECTURE.md](file:///MICROSERVICES_ARCHITECTURE.md).
 
 ### Translation Performance
 - **Optimization:** Blueprint lookup is O(1) via Map

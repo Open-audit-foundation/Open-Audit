@@ -19,8 +19,7 @@
 
 import { createAllSacBlueprints } from "./blueprints/sac-transfer";
 import { createSacMintBurnBlueprint } from "./blueprints/sac-mint-burn";
-import { decodeEventName } from "./core";
-import { sanitizeTextField } from "./core";
+import { decodeEventName, decodeAddress, decodeAmount, interpolateTemplate, sanitizeTextField } from "./core";
 import { decodeGenericEventPayload, formatGenericValue } from "./generic-fallback-decoder";
 import { RegistryTemplateException } from "../errors";
 import { captureExceptionSync } from "../telemetry";
@@ -35,6 +34,7 @@ import type {
   ContractSchema,
   ContractRegistryEntry,
   TranslationResult,
+  BlueprintStatus,
 } from "./types";
 
 /** The registry maps contract IDs to their versioned entries. */
@@ -43,11 +43,6 @@ type BlueprintRegistry = Map<string, ContractRegistryEntry>;
 /** Cache for resolved schemas to avoid repeated scans of the registry. */
 const RESOLUTION_CACHE: Map<string, ContractSchema> = new Map();
 
-/**
- * Interpolates a template string with values from an object.
- * e.g. "Hello {name}" + { name: "World" } -> "Hello World"
- */
-type BlueprintRegistry = Map<string, TranslationBlueprint | VersionedTranslationBlueprint[]>;
 
 export type PersistedRawEvent = RawEvent & Partial<Pick<TranslatedEvent, "description" | "status" | "blueprintName" | "eventType" | "schemaVersion">>;
 
@@ -108,9 +103,16 @@ function buildRegistry(): BlueprintRegistry {
       entry = {
         contractId: blueprint.contractId,
         contractName: blueprint.contractName,
+        owner: blueprint.owner,
+        maintainers: blueprint.maintainers,
+        status: blueprint.status ?? "active",
         schemas: [],
       };
       registry.set(blueprint.contractId, entry);
+    } else {
+      if (blueprint.owner) entry.owner = blueprint.owner;
+      if (blueprint.maintainers) entry.maintainers = blueprint.maintainers;
+      if (blueprint.status) entry.status = blueprint.status;
     }
 
     entry.schemas.push({
@@ -118,6 +120,9 @@ function buildRegistry(): BlueprintRegistry {
       validFromLedger: fromLedger,
       validToLedger: null,
       blueprint,
+      owner: blueprint.owner,
+      maintainers: blueprint.maintainers,
+      status: blueprint.status ?? "active",
     });
 
     entry.schemas.sort((a, b) => a.validFromLedger - b.validFromLedger);
@@ -141,18 +146,96 @@ function buildRegistry(): BlueprintRegistry {
     const mintBurnBlueprint = createSacMintBurnBlueprint(contractId);
     const existing = registry.get(contractId);
     if (existing) {
-      const existingBlueprint = Array.isArray(existing) ? existing[0] : existing;
-      const originalTranslate = existingBlueprint.translate.bind(existingBlueprint);
-      registry.set(contractId, {
-        ...mintBurnBlueprint,
-        translate: (event, lang) => originalTranslate(event, lang) ?? mintBurnBlueprint.translate(event, lang),
-      });
+      for (const schema of existing.schemas) {
+        const originalTranslate = schema.blueprint.translate.bind(schema.blueprint);
+        schema.blueprint.translate = (event, lang) => originalTranslate(event, lang) ?? mintBurnBlueprint.translate(event, lang);
+      }
     } else {
       register(mintBurnBlueprint);
     }
   }
 
   return registry;
+}
+
+function createTranslateFromMapping(mapping: any) {
+  return (event: RawEvent, lang: Language): TranslationResult | null => {
+    const topic0 = event.topics[0] ?? "";
+    const decodedName = decodeEventName(topic0);
+    const expectedTopics = mapping.topics ?? [];
+    if (expectedTopics.length > 0) {
+      const expected = expectedTopics[0];
+      if (
+        decodedName !== expected &&
+        topic0 !== expected &&
+        !topic0.toLowerCase().includes(Buffer.from(expected).toString("hex"))
+      ) {
+        return null;
+      }
+    }
+
+    const params: Record<string, string> = {};
+    const structure = mapping.event_structure ?? {};
+
+    // Topics mapping
+    const topicFields = structure.topics ?? [];
+    topicFields.forEach((field: any, idx: number) => {
+      const hex = event.topics[idx + 1] ?? "0x00";
+      const name = field.name;
+      const type = field.type;
+      if (type === "address") {
+        const addr = decodeAddress(hex);
+        params[name] = addr.publicKey || hex;
+        params[`${name}.short`] = addr.short || hex;
+      } else if (
+        ["i128", "u128", "i64", "u64", "u32", "i32"].includes(type)
+      ) {
+        const amt = decodeAmount(hex);
+        params[name] = amt.formatted;
+        params[`${name}.formatted`] = amt.formatted;
+      } else {
+        params[name] = hex;
+      }
+    });
+
+    // Data mapping
+    const dataField = structure.data;
+    if (dataField && typeof dataField === "object") {
+      const hex = event.data ?? "0x00";
+      const name = dataField.name;
+      const type = dataField.type;
+      if (type === "address") {
+        const addr = decodeAddress(hex);
+        params[name] = addr.publicKey || hex;
+        params[`${name}.short`] = addr.short || hex;
+      } else if (
+        ["i128", "u128", "i64", "u64", "u32", "i32"].includes(type)
+      ) {
+        const amt = decodeAmount(hex);
+        params[name] = amt.formatted;
+        params[`${name}.formatted`] = amt.formatted;
+      } else {
+        params[name] = hex;
+      }
+    }
+
+    const template =
+      mapping.templates?.[lang] ??
+      mapping.templates?.en ??
+      mapping.english_template ??
+      "";
+    if (!template) return null;
+
+    const description = interpolateTemplate(template, params);
+    const eventType = expectedTopics[0]
+      ? expectedTopics[0].charAt(0).toUpperCase() + expectedTopics[0].slice(1)
+      : "Event";
+
+    return {
+      description,
+      eventType,
+    };
+  };
 }
 
 /**
@@ -256,7 +339,7 @@ export function translateEvent(
 ): TranslatedEvent {
   const schema = resolveSchema(event.contractId, event.ledger, customBlueprints);
 
-  if (!entry) {
+  if (!schema) {
     console.warn(`No translation blueprint found for contract ${event.contractId}`);
     
     // Try to decode the event using the generic fallback decoder
@@ -265,43 +348,46 @@ export function translateEvent(
       ? `[Unregistered Contract] ${formatGenericValue(genericDecoded)}`
       : `[Unknown Event: No blueprint registered for contract ${event.contractId}. Hex Data: ${event.data}]`;
     
+    const entry = REGISTRY.get(event.contractId);
+    const custom = customBlueprints?.get(event.contractId);
+    const contractName = custom?.contractName ?? entry?.contractName;
+
     return {
       raw: event,
       description: sanitizeTextField(description, { maxLength: 512 }),
       status: "cryptic",
-      // Surface the custom contract name (if any) so the UI still has context.
-      blueprintName: custom?.contractName ? sanitizeTextField(custom.contractName, { maxLength: 100 }) : "Unregistered Contract",
+      blueprintName: contractName ? sanitizeTextField(contractName, { maxLength: 100 }) : "Unregistered Contract",
       eventType: null,
       schemaVersion: null,
+      blueprintStatus: entry?.status ?? custom?.status ?? "active",
+      blueprintOwner: entry?.owner ?? custom?.owner,
     };
   }
 
-  const blueprint = Array.isArray(entry)
-    ? resolveBlueprint(entry, event.ledger)
-    : entry;
-
-  if (!blueprint) {
-    console.warn(`No translation blueprint applicable for contract ${event.contractId} at ledger ${event.ledger}`);
-    return {
-      raw: event,
-      description: `[Unknown Event: No blueprint applicable for contract ${event.contractId} at ledger ${event.ledger}. Hex Data: ${event.data}]`,
-      status: "cryptic",
-      blueprintName: Array.isArray(entry) ? entry[0].contractName : entry.contractName,
-      eventType: null,
-      schemaVersion: null,
-    };
-  }
-
+  const entry = REGISTRY.get(event.contractId);
+  const blueprint = schema.blueprint;
   const translated = applyBlueprint(event, blueprint, lang);
-  if (translated) return translated;
+  const resolvedStatus = schema.status ?? schema.blueprint.status ?? entry?.status ?? "active";
+  const resolvedOwner = schema.owner ?? schema.blueprint.owner ?? entry?.owner;
+
+  if (translated) {
+    return {
+      ...translated,
+      schemaVersion: schema.version === "custom" ? null : schema.version,
+      blueprintStatus: resolvedStatus,
+      blueprintOwner: resolvedOwner,
+    };
+  }
 
   return {
     raw: event,
     description: null,
     status: "cryptic",
-    blueprintName: schema.blueprint.contractName,
+    blueprintName: blueprint.contractName,
     eventType: null,
-    schemaVersion: null,
+    schemaVersion: schema.version === "custom" ? null : schema.version,
+    blueprintStatus: resolvedStatus,
+    blueprintOwner: resolvedOwner,
   };
 }
 
@@ -322,6 +408,8 @@ function applyBlueprint(event: RawEvent, blueprint: TranslationBlueprint, lang: 
     blueprintName: blueprint.contractName,
     eventType: result.eventType ? sanitizeTextField(result.eventType, { maxLength: 64 }) : null,
     schemaVersion: (blueprint as any).version ?? null,
+    blueprintStatus: blueprint.status ?? "active",
+    blueprintOwner: blueprint.owner,
   };
 }
 
@@ -457,20 +545,83 @@ export function getBlueprintCount(): number {
  */
 export function registerBlueprint(...blueprints: TranslationBlueprint[]): void {
   for (const blueprint of blueprints) {
-    const existing = REGISTRY.get(blueprint.contractId);
-    if (!existing) {
-      REGISTRY.set(blueprint.contractId, blueprint);
-      continue;
+    const versioned = blueprint as VersionedTranslationBlueprint;
+    const version = versioned.version ?? "1.0.0";
+    const fromLedger = versioned.validFromLedger ?? 0;
+
+    let entry = REGISTRY.get(blueprint.contractId);
+    if (!entry) {
+      entry = {
+        contractId: blueprint.contractId,
+        contractName: blueprint.contractName,
+        owner: blueprint.owner,
+        maintainers: blueprint.maintainers,
+        status: blueprint.status ?? "active",
+        schemas: [],
+      };
+      REGISTRY.set(blueprint.contractId, entry);
+    } else {
+      if (blueprint.owner) entry.owner = blueprint.owner;
+      if (blueprint.maintainers) entry.maintainers = blueprint.maintainers;
+      if (blueprint.status) entry.status = blueprint.status;
     }
 
-    const merged: VersionedTranslationBlueprint[] = Array.isArray(existing)
-      ? [...existing]
-      : [{ ...existing } as VersionedTranslationBlueprint];
+    entry.schemas.push({
+      version,
+      validFromLedger: fromLedger,
+      validToLedger: null,
+      blueprint,
+      owner: blueprint.owner,
+      maintainers: blueprint.maintainers,
+      status: blueprint.status ?? "active",
+    });
 
-    merged.push(blueprint as VersionedTranslationBlueprint);
-    REGISTRY.set(
-      blueprint.contractId,
-      merged.sort((a, b) => (b.validFromLedger ?? 0) - (a.validFromLedger ?? 0))
-    );
+    entry.schemas.sort((a, b) => a.validFromLedger - b.validFromLedger);
+    for (let i = 0; i < entry.schemas.length - 1; i++) {
+      entry.schemas[i].validToLedger = entry.schemas[i + 1].validFromLedger - 1;
+    }
+
+    RESOLUTION_CACHE.forEach((_, key) => {
+      if (key.startsWith(`${blueprint.contractId}:`)) {
+        RESOLUTION_CACHE.delete(key);
+      }
+    });
   }
+}
+
+/**
+ * Returns the registry entry for a contract ID, including its schemas, ownership, and deprecation status.
+ */
+export function getContractRegistryEntry(contractId: string): ContractRegistryEntry | undefined {
+  return REGISTRY.get(contractId);
+}
+
+/**
+ * Updates the deprecation status or ownership metadata of a registered contract.
+ */
+export function updateContractMetadata(
+  contractId: string,
+  metadata: { owner?: string; maintainers?: string[]; status?: BlueprintStatus }
+): boolean {
+  const entry = REGISTRY.get(contractId);
+  if (!entry) return false;
+
+  if (metadata.owner !== undefined) entry.owner = metadata.owner;
+  if (metadata.maintainers !== undefined) entry.maintainers = metadata.maintainers;
+  if (metadata.status !== undefined) entry.status = metadata.status;
+
+  for (const schema of entry.schemas) {
+    if (metadata.owner !== undefined) schema.owner = metadata.owner;
+    if (metadata.maintainers !== undefined) schema.maintainers = metadata.maintainers;
+    if (metadata.status !== undefined) schema.status = metadata.status;
+  }
+
+  // Clear cache for this contract
+  RESOLUTION_CACHE.forEach((_, key) => {
+    if (key.startsWith(`${contractId}:`)) {
+      RESOLUTION_CACHE.delete(key);
+    }
+  });
+
+  return true;
 }

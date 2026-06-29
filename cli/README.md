@@ -1,130 +1,59 @@
-# open-audit-cli - Standalone Translation Registry Testing Tool
+# open-audit-cli
 
-**Instant offline testing for Open-Audit translation blueprints** — no database, no network, no services required.
+Standalone CLI for testing Open-Audit translation registry blueprints offline.
 
 ## Overview
 
-`open-audit-cli` enables contributors to test new translation blueprints locally before submitting to the registry. Test raw hex event data against draft JSON/YAML specifications and see the compiled output immediately in your terminal.
+`open-audit-cli` lets you test a draft blueprint spec against raw hex event
+data before registering it in the production registry. The key guarantee:
 
-## Features
+> **A spec that passes `open-audit-cli test` uses the exact same validation
+> and builder logic as production registration.**
 
-✅ **Zero Dependencies** - No database setup, no network calls, no running services  
-✅ **Pure Function Execution** - Stateless translation engine with no side effects  
-✅ **JSON & YAML Support** - Write specifications in your preferred format  
-✅ **Verbose Mode** - Debug output shows parsed spec and intermediate values  
-✅ **Multi-Language** - Test translations in English, Spanish, French, Chinese  
-✅ **Exit Codes** - Proper success (0) and failure (1) codes for CI/CD integration  
+Both the CLI and `lib/translator/registry.ts` consume the shared
+`validateBlueprintSpec()` and `buildBlueprintFromSpec()` functions from
+`lib/translator/blueprint-spec.ts`. There is no parallel reimplementation.
+
+## Spec file format vs production blueprints
+
+| | `--spec` file (CLI) | `lib/translator/blueprints/*.ts` (registry) |
+|---|---|---|
+| Format | JSON or YAML | TypeScript |
+| Type | `BlueprintSpec` | `TranslationBlueprint` |
+| Validated by | `validateBlueprintSpec()` | TypeScript compiler + same validator |
+| Builder | `buildBlueprintFromSpec()` | Same function |
+| Versioning | `validFromLedger` field | `VersionedTranslationBlueprint` |
+
+Both paths produce an identical `TranslationBlueprint` object at runtime.
+The only difference is that production blueprints are written in TypeScript
+directly (for complex matching logic) while spec files are declarative
+JSON/YAML (for simpler event patterns and community submissions).
 
 ## Installation
 
 ```bash
-# Install dependencies
-npm install
-
-# Build CLI
 npm run build:cli
-
-# Make executable (Unix-like systems)
-chmod +x dist/cli/open-audit-cli.js
-
-# Add to PATH (optional)
-npm link
 ```
 
-## Quick Start
-
-### Test a Transfer Event
+## Usage
 
 ```bash
-open-audit-cli test \
-  --hex 0x0000000000000000000000000000000000000000000000000000000074726e73123456789abcdef0 \
-  --spec ./cli/examples/token-transfer.json
+open-audit-cli test --hex <raw_hex_data> --spec <path_to_spec>
 ```
 
-**Output:**
-```
-GABC...EF01 transferred 100.00 USDC to G1234...5678
-```
+### Options
 
-### Test with Verbose Mode
+| Flag | Description | Default |
+|---|---|---|
+| `-x, --hex` | Raw hex-encoded event data | required |
+| `-s, --spec` | Path to blueprint spec file (.json or .yaml) | required |
+| `-c, --contract` | Stellar contract ID (C...) | test address |
+| `-l, --lang` | Output language: en, es, fr, zh | en |
+| `-t, --topics` | Separate topic hex strings (space-separated) | auto-parsed |
+| `--ledger` | Ledger sequence number | 1000000 |
+| `--verbose` | Enable verbose output | false |
 
-```bash
-open-audit-cli test \
-  --hex 0x74726e7312345678 \
-  --spec ./cli/examples/token-transfer.yaml \
-  --verbose
-```
-
-**Output:**
-```
-🔍 Open-Audit CLI - Test Mode
-
-Configuration:
-  Hex Data:     0x74726e7312345678
-  Spec File:    /path/to/token-transfer.yaml
-  Contract ID:  CTEST...0000
-  Language:     en
-  Ledger:       1000000
-
-📄 Loaded Specification:
-  Contract Name: Test Token Contract
-  Version:       1.0.0
-  Events:        2
-
-📋 Raw Event:
-{
-  "id": "mock-1719331234567",
-  "contractId": "CTEST...",
-  "topics": ["0x74726e73"],
-  "data": "0x12345678",
-  ...
-}
-
-✅ Translation Successful
-
-Event Type: transfer
-Blueprint: Test Token Contract
-Description:
-GABC...5678 transferred 100.00 USDC to G1234...CDEF
-
-Schema Version: 1.0.0
-```
-
-## Command Reference
-
-### `open-audit-cli test`
-
-Test a raw hex event against a draft translation specification.
-
-#### Required Options
-
-| Option | Alias | Description |
-|--------|-------|-------------|
-| `--hex <data>` | `-x` | Raw hex-encoded event data |
-| `--spec <path>` | `-s` | Path to specification file (JSON/YAML) |
-
-#### Optional Options
-
-| Option | Alias | Default | Description |
-|--------|-------|---------|-------------|
-| `--contract <id>` | `-c` | `CTEST...0000` | Stellar contract ID |
-| `--lang <language>` | `-l` | `en` | Output language (en, es, fr, zh) |
-| `--topics <topics...>` | `-t` | (auto) | Space-separated topic hex strings |
-| `--ledger <number>` | | `1000000` | Ledger sequence number |
-| `--verbose` | | `false` | Enable verbose debug output |
-| `--no-telemetry` | | `true` | Disable telemetry (always disabled) |
-
-### `open-audit-cli --help`
-
-Display help information.
-
-### `open-audit-cli --version`
-
-Display CLI version.
-
-## Specification Format
-
-### JSON Format
+## Spec file schema
 
 ```json
 {
@@ -134,130 +63,11 @@ Display CLI version.
   "validFromLedger": 0,
   "events": [
     {
-      "name": "transfer",
-      "template": "{from} transferred {amount} to {to}",
+      "name": "Transfer",
+      "template": "{from} sent {amount} to {to}",
       "topics": [
-        {
-          "index": 0,
-          "decodedName": "transfer"
-        }
+        { "index": 0, "includes": "74726e73" }
       ],
-      "fields": [
-        {
-          "name": "from",
-          "source": "topic",
-          "index": 1,
-          "type": "address"
-        },
-        {
-          "name": "to",
-          "source": "topic",
-          "index": 2,
-          "type": "address"
-        },
-        {
-          "name": "amount",
-          "source": "data",
-          "type": "amount",
-          "format": "USDC"
-        }
-      ]
-    }
-  ]
-}
-```
-
-### YAML Format
-
-```yaml
-contractId: CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC
-contractName: My Token Contract
-version: "1.0.0"
-validFromLedger: 0
-
-events:
-  - name: transfer
-    template: "{from} transferred {amount} to {to}"
-    topics:
-      - index: 0
-        decodedName: transfer
-    fields:
-      - name: from
-        source: topic
-        index: 1
-        type: address
-      - name: to
-        source: topic
-        index: 2
-        type: address
-      - name: amount
-        source: data
-        type: amount
-        format: USDC
-```
-
-### Specification Fields
-
-#### Root Level
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `contractId` | string | No* | Stellar contract ID (can override with CLI flag) |
-| `contractName` | string | Yes | Human-readable contract name |
-| `version` | string | No | Schema version (e.g., "1.0.0") |
-| `validFromLedger` | number | No | First ledger this schema applies to (default: 0) |
-| `events` | array | Yes | Array of event definitions (at least 1) |
-
-#### Event Definition
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | string | Yes | Event name (e.g., "transfer", "swap") |
-| `template` | string | Yes | Description template with `{field}` placeholders |
-| `topics` | array | No | Topic matching criteria |
-| `fields` | array | Yes | Field extraction and formatting rules |
-
-#### Topic Matcher
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `index` | number | Yes | Topic array index to check (0-based) |
-| `equals` | string | No | Exact hex value match |
-| `includes` | string | No | Substring match (case-insensitive) |
-| `decodedName` | string | No | Decoded event name match |
-
-#### Field Mapping
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | string | Yes | Field name for template interpolation |
-| `source` | string | Yes | Data source: `"topic"` or `"data"` |
-| `index` | number | No* | Topic index (required if source="topic") |
-| `type` | string | Yes | Value type (see types below) |
-| `format` | string | No | Format hint (e.g., token symbol for amounts) |
-
-#### Supported Types
-
-| Type | Description | Example Output |
-|------|-------------|----------------|
-| `address` | Stellar address | `GABC...1234` |
-| `amount` / `u128` / `i128` | Token amount | `100.00 USDC` |
-| `string` | UTF-8 string | `Hello World` |
-| `symbol` | Symbol/identifier | `transfer` |
-| `hex` / `bytes` | Raw hex | `0x1234...cdef` |
-
-## Examples
-
-### Example 1: Simple Transfer
-
-**Specification** (`transfer.json`):
-```json
-{
-  "contractName": "USDC Token",
-  "events": [
-    {
-      "name": "transfer",
-      "template": "Transfer of {amount} from {from} to {to}",
       "fields": [
         { "name": "from", "source": "topic", "index": 1, "type": "address" },
         { "name": "to", "source": "topic", "index": 2, "type": "address" },
@@ -268,316 +78,44 @@ events:
 }
 ```
 
-**Command:**
-```bash
-open-audit-cli test -x 0xabcd1234 -s transfer.json
-```
+### Field types
 
-**Output:**
-```
-Transfer of 100.00 USDC from GABC...1234 to GXYZ...5678
-```
+| Type | Description |
+|---|---|
+| `address` | Stellar address, shortened to `GABC...1234` |
+| `amount` / `u128` / `i128` | Numeric amount, formatted with symbol |
+| `string` / `symbol` | UTF-8 decoded from hex |
+| `hex` / `bytes` | Truncated hex string |
 
-### Example 2: Multi-Event Contract
+## CI validation
 
-**Specification** (`dex.yaml`):
-```yaml
-contractName: DEX Router
-events:
-  - name: swap
-    template: "Swapped {amountIn} {tokenIn} for {amountOut} {tokenOut}"
-    topics:
-      - index: 0
-        decodedName: swap
-    fields:
-      - name: tokenIn
-        source: topic
-        index: 1
-        type: address
-      - name: tokenOut
-        source: topic
-        index: 2
-        type: address
-      - name: amountIn
-        source: data
-        type: amount
-      - name: amountOut
-        source: data
-        type: amount
-
-  - name: addLiquidity
-    template: "Added liquidity: {amount0} + {amount1}"
-    topics:
-      - index: 0
-        decodedName: addLiquidity
-    fields:
-      - name: amount0
-        source: data
-        type: amount
-      - name: amount1
-        source: data
-        type: amount
-```
-
-**Command:**
-```bash
-open-audit-cli test \
-  --hex 0x7377617012345678abcdef --spec dex.yaml \
-  --topics 0x73776170 CDLZ...YSC CB3S...QXQ
-```
-
-### Example 3: Versioned Blueprint
-
-**Specification** (`token-v2.json`):
-```json
-{
-  "contractName": "Token V2",
-  "version": "2.0.0",
-  "validFromLedger": 500000,
-  "events": [
-    {
-      "name": "transfer",
-      "template": "[V2] {from} sent {amount} to {to} (fee: {fee})",
-      "fields": [
-        { "name": "from", "source": "topic", "index": 1, "type": "address" },
-        { "name": "to", "source": "topic", "index": 2, "type": "address" },
-        { "name": "amount", "source": "data", "type": "amount" },
-        { "name": "fee", "source": "data", "type": "amount" }
-      ]
-    }
-  ]
-}
-```
-
-**Command:**
-```bash
-open-audit-cli test \
-  --hex 0x1234567890abcdef \
-  --spec token-v2.json \
-  --ledger 600000
-```
-
-## Integration with CI/CD
-
-### GitHub Actions
-
-```yaml
-name: Test Translation Blueprint
-
-on: [pull_request]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
-      - run: npm install
-      - run: npm run build:cli
-      
-      - name: Test Blueprint
-        run: |
-          open-audit-cli test \
-            --hex 0x74726e7312345678 \
-            --spec ./blueprints/my-contract.json
-```
-
-### Pre-commit Hook
+Run all committed blueprint specs through the shared validator:
 
 ```bash
-#!/bin/bash
-# .git/hooks/pre-commit
-
-echo "Testing translation blueprints..."
-
-for spec in blueprints/*.json; do
-  echo "Testing $spec..."
-  open-audit-cli test \
-    --hex 0x74726e7312345678 \
-    --spec "$spec" \
-    --verbose || exit 1
-done
-
-echo "All blueprints passed!"
+npm run validate:blueprints
 ```
 
-## Troubleshooting
+This is the same check that runs in CI on every change to
+`lib/translator/blueprints/`. A spec that passes here is guaranteed to use
+the same validation and builder logic as production registration.
 
-### Error: "Invalid hex data"
+## Tested vs designed-but-unverified properties
 
-**Cause:** Hex string contains invalid characters or is empty.
+The following properties are **tested** by the shared validator and CI:
 
-**Solution:** Ensure hex string only contains 0-9, a-f, A-F. Prefix with `0x` or omit it.
+- `contractId` starts with `C` (valid Stellar contract address format)
+- `contractName` is a non-empty string
+- `events` array has at least one entry
+- Every event has `name`, `template`, and at least one `fields` entry
+- Every field has `name`, `source` (`topic` or `data`), and a supported `type`
+- `version` is a string if present
+- `validFromLedger` is a number if present
 
-```bash
-# ✅ Valid
-open-audit-cli test -x 0x1234abcd -s spec.json
-open-audit-cli test -x 1234ABCD -s spec.json
+The following are **designed but not automatically verified** by the CLI:
 
-# ❌ Invalid
-open-audit-cli test -x 0xGHIJ -s spec.json
-```
+- That `validFromLedger` matches the actual on-chain ledger of a contract upgrade
+- That topic hex values in `equals`/`includes` matchers are correctly encoded XDR
+- That `format` symbols match the asset symbol registered in the production SAC map
+- That the human-readable `template` string is accurate and grammatically correct
 
-### Error: "Specification file not found"
-
-**Cause:** File path is incorrect or file doesn't exist.
-
-**Solution:** Use absolute path or path relative to current directory.
-
-```bash
-# ✅ Correct
-open-audit-cli test -x 0x1234 -s ./cli/examples/token-transfer.json
-
-# ❌ Incorrect
-open-audit-cli test -x 0x1234 -s token-transfer.json  # If not in current dir
-```
-
-### Error: "Event does not match blueprint criteria"
-
-**Cause:** The hex data doesn't match any event patterns in the specification.
-
-**Solution:** 
-1. Use `--verbose` to see parsed event structure
-2. Check topic matchers in specification
-3. Verify hex data format
-
-```bash
-open-audit-cli test -x 0x1234 -s spec.json --verbose
-```
-
-### Error: "Blueprint returned null"
-
-**Cause:** Specification doesn't have a matching event pattern.
-
-**Solution:** Add an event definition that matches your hex data structure.
-
-## Best Practices
-
-### 1. Start with Examples
-
-Copy and modify provided examples rather than starting from scratch:
-
-```bash
-cp cli/examples/token-transfer.json my-contract.json
-```
-
-### 2. Test Incrementally
-
-Build your specification step by step:
-
-```bash
-# Test basic structure
-open-audit-cli test -x 0x1234 -s my-contract.json --verbose
-
-# Add field mappings
-# Test again...
-
-# Add topic matchers
-# Test again...
-```
-
-### 3. Use Verbose Mode for Debugging
-
-Always use `--verbose` when developing a new specification:
-
-```bash
-open-audit-cli test -x 0x1234 -s my-contract.json --verbose
-```
-
-### 4. Test Multiple Events
-
-Create test cases for each event type in your specification:
-
-```bash
-# Transfer event
-open-audit-cli test -x 0x74726e73... -s spec.json
-
-# Mint event  
-open-audit-cli test -x 0x6d696e74... -s spec.json
-
-# Burn event
-open-audit-cli test -x 0x6275726e... -s spec.json
-```
-
-### 5. Version Your Specifications
-
-Use semantic versioning and `validFromLedger` for upgrades:
-
-```json
-{
-  "version": "2.0.0",
-  "validFromLedger": 500000,
-  ...
-}
-```
-
-## Development Workflow
-
-1. **Create Specification**
-   ```bash
-   cp cli/examples/token-transfer.yaml my-contract.yaml
-   # Edit my-contract.yaml
-   ```
-
-2. **Test Locally**
-   ```bash
-   open-audit-cli test -x <hex> -s my-contract.yaml --verbose
-   ```
-
-3. **Refine Template**
-   - Adjust field mappings
-   - Fix formatting
-   - Test again
-
-4. **Add to Registry**
-   - Convert to TypeScript blueprint
-   - Submit PR to Open-Audit
-   - Include test cases
-
-## Architecture
-
-### Pure Function Design
-
-The CLI executes translation in a pure function context with **zero side effects**:
-
-- ✅ No database connections
-- ✅ No network calls
-- ✅ No file writes (except stdout/stderr)
-- ✅ No telemetry collection
-- ✅ No state mutations
-
-### Exit Codes
-
-| Code | Meaning |
-|------|---------|
-| 0 | Success - translation executed successfully |
-| 1 | Failure - translation failed or error occurred |
-
-Use in scripts:
-
-```bash
-if open-audit-cli test -x 0x1234 -s spec.json; then
-  echo "Test passed!"
-else
-  echo "Test failed!"
-  exit 1
-fi
-```
-
-## Contributing
-
-Contributions welcome! See [CONTRIBUTING.md](../CONTRIBUTING.md) for guidelines.
-
-## Support
-
-- **GitHub Issues:** [Open-Audit/issues](https://github.com/your-org/Open-Audit/issues)
-- **Discord:** `#translation-registry` channel
-- **Documentation:** [Full docs](../README.md)
-
-## License
-
-MIT License - See LICENSE file for details
-
----
-
-**Developer-friendly | Zero dependencies | Instant feedback**
+Always verify these manually before submitting a blueprint for production registration.

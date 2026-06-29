@@ -8,7 +8,7 @@
  * - Proper cleanup (no leaked timers)
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from "vitest";
 import { createTokenBucket, type TokenBucket } from "../token-bucket";
 
 describe("TokenBucket", () => {
@@ -352,5 +352,99 @@ describe("TokenBucket", () => {
       const metrics = bucket.metrics();
       expect(metrics.totalConsumed).toBe(100);
     });
+  });
+});
+
+describe("Structured log events", () => {
+  let consoleSpy: MockInstance;
+  let logBucket: ReturnType<typeof createTokenBucket>;
+
+  beforeEach(() => {
+    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleSpy.mockRestore();
+    if (logBucket) logBucket.dispose();
+  });
+
+  /**
+   * Acceptance criterion: token bucket exhaustion is distinguishable from
+   * genuine upstream errors in logs (token_bucket_throttled vs upstream errors).
+   */
+  it("emits token_bucket_throttled when a request is queued (no tokens available)", async () => {
+    logBucket = createTokenBucket({ capacity: 1, refillRate: 1, maxQueueSize: 5 });
+
+    // Drain the one token
+    await logBucket.acquire();
+
+    // Next acquire should queue and log throttled
+    const pending = logBucket.acquire();
+
+    const jsonCalls = consoleSpy.mock.calls
+      .map((args) => {
+        try { return JSON.parse(args[0]); } catch { return null; }
+      })
+      .filter(Boolean);
+
+    const throttleEvent = jsonCalls.find((e) => e.event === "token_bucket_throttled");
+    expect(throttleEvent).toBeDefined();
+    expect(throttleEvent.reason).toMatch(/queued/);
+    expect(throttleEvent.availableTokens).toBe(0);
+    expect(throttleEvent.timestamp).toBeDefined();
+
+    // No circuit_breaker or upstream-error event should be present
+    const cbEvent = jsonCalls.find((e) => e.event === "circuit_breaker_state_change");
+    expect(cbEvent).toBeUndefined();
+
+    // Clean up pending promise
+    await pending;
+  });
+
+  it("emits token_bucket_rejected when queue is full", async () => {
+    logBucket = createTokenBucket({ capacity: 1, refillRate: 1, maxQueueSize: 2 });
+
+    // Drain the bucket
+    await logBucket.acquire();
+
+    // Fill the queue
+    const p1 = logBucket.acquire();
+    const p2 = logBucket.acquire();
+
+    consoleSpy.mockClear();
+
+    // This one should be rejected
+    await expect(logBucket.acquire()).rejects.toThrow("queue full");
+
+    const jsonCalls = consoleSpy.mock.calls
+      .map((args) => {
+        try { return JSON.parse(args[0]); } catch { return null; }
+      })
+      .filter(Boolean);
+
+    const rejectEvent = jsonCalls.find((e) => e.event === "token_bucket_rejected");
+    expect(rejectEvent).toBeDefined();
+    expect(rejectEvent.reason).toMatch(/queue full/);
+    expect(rejectEvent.queueSize).toBe(2);
+    expect(rejectEvent.timestamp).toBeDefined();
+
+    await Promise.all([p1, p2]);
+  });
+
+  it("does NOT emit throttled/rejected log when token is immediately available", async () => {
+    logBucket = createTokenBucket({ capacity: 10, refillRate: 5 });
+
+    await logBucket.acquire();
+
+    const jsonCalls = consoleSpy.mock.calls
+      .map((args) => {
+        try { return JSON.parse(args[0]); } catch { return null; }
+      })
+      .filter(Boolean);
+
+    const throttleEvent = jsonCalls.find(
+      (e) => e.event === "token_bucket_throttled" || e.event === "token_bucket_rejected"
+    );
+    expect(throttleEvent).toBeUndefined();
   });
 });

@@ -8,6 +8,17 @@
 
 ---
 
+## 📚 Documentation Hub
+
+> [!IMPORTANT]
+> **Looking for documentation?** We have consolidated all guides into a centralized documentation index categorized by goal. Visit **[/docs/README.md](docs/README.md)** to navigate directly to what you need:
+> - **[I want to run this locally](docs/README.md#--i-want-to-run-this-locally)** (Quickstarts & development setup)
+> - **[I want to add a translation](docs/README.md#--i-want-to-add-a-translation)** (Blueprints & registry linter)
+> - **[I want to understand the architecture](docs/README.md#--i-want-to-understand-the-architecture)** (System design & microservices)
+> - **[I want to write a WASM parser](docs/README.md#--i-want-to-write-a-wasm-parser)** (Advanced engine & tuning)
+
+---
+
 ## What is Open-Audit?
 
 Smart contracts on Stellar/Soroban emit events as cryptic, hex-encoded binary data. To the average user — or even most developers — these events are completely unreadable. Open-Audit solves this by:
@@ -51,11 +62,14 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-For the custom server with WebSocket support and `/metrics`, run:
+For the recommended custom server with WebSocket support and `/metrics`, run:
 
 ```bash
-npm run dev:ws
+npm run dev:decoupled
 ```
+
+`dev:ws` starts the decoupled microservices web server. Start the indexer in a
+separate terminal with `npm run worker:indexer` when you need live chain events.
 
 ### Environment Variables
 
@@ -84,9 +98,10 @@ cp .env.microservices.example .env.local
 **Development:**
 ```bash
 npm run dev              # Standard Next.js dev server
-npm run dev:ws           # Legacy monolithic server with WebSocket
+npm run dev:ws           # Recommended decoupled WebSocket server (requires Redis)
 npm run dev:decoupled    # Microservices web server (requires Redis)
 npm run worker:indexer   # Microservices indexer worker (requires Redis)
+npm run dev:ws:legacy    # Deprecated monolithic WebSocket server; explicit legacy opt-in
 npm run test:websocket   # Test WebSocket connection
 ```
 
@@ -115,7 +130,7 @@ npm run format           # Format code with Prettier
 
 ## Telemetry
 
-The custom server exposes Prometheus metrics on `http://localhost:3000/metrics` when running `npm run dev:ws`.
+The custom server exposes Prometheus metrics on `http://localhost:3000/metrics` when running `npm run dev:decoupled`.
 
 You can configure OpenTelemetry to export spans to Jaeger by setting:
 
@@ -162,9 +177,7 @@ Terminal 3: npm run worker:indexer
 ```
 
 📚 **Documentation:**
-- **[Quick Start Guide](QUICKSTART_MICROSERVICES.md)** - Get running in 5 minutes
-- **[Architecture Details](MICROSERVICES_ARCHITECTURE.md)** - Complete technical documentation
-- **[Testing Guide](MICROSERVICES_TESTING_GUIDE.md)** - Comprehensive testing walkthrough
+For complete microservices instructions, architecture breakdowns, and testing guides, visit the **[Documentation Hub](docs/README.md)**.
 
 ### 🔒 Security Hardening (Production-Ready)
 
@@ -189,7 +202,7 @@ Untrusted XDR → Security Guards → Safe Parsing → Graceful Error Handling
 
 📚 **Documentation:**
 - **[Security Hardening Guide](SECURITY_HARDENING_GUIDE.md)** - Complete security documentation
-- **[Security Summary](TASK_4_SECURITY_HARDENING_SUMMARY.md)** - Implementation overview
+- **[Security Summary](docs/archive/TASK_4_SECURITY_HARDENING_SUMMARY.md)** - Historical PR implementation overview
 
 **Quick Start:**
 ```typescript
@@ -208,17 +221,22 @@ GET /api/security/metrics  # Security metrics API
 
 ### Legacy Monolithic Architecture
 
-**Single-process system (for simple deployments):**
+**Deprecated single-process system kept only for migration/debugging:**
 
 ```
 Stellar Network → Event Indexer → Translation Engine → WebSocket Server → Frontend Dashboard
 ```
 
-⚠️ **Known limitations:** Under heavy load, indexing can starve the HTTP/WebSocket server of CPU cycles. See deprecation notice in `server.ts`.
+⚠️ **Known limitations:** Under heavy load, indexing can starve the HTTP/WebSocket server of CPU cycles. See deprecation notice in `server.ts`. New development should use the microservices path above.
 
 ```bash
-npm run dev:ws
+npm run dev:ws:legacy
 ```
+
+The legacy script passes `--legacy` to `server.ts`. Direct invocations of
+`server.ts` without `--legacy` or `OPEN_AUDIT_LEGACY_SERVER=1` exit immediately
+with a migration message so local scripts do not accidentally start the
+deprecated path.
 
 ---
 
@@ -234,7 +252,7 @@ For new contributors wanting to understand the system's data flow and internal a
 1. **Event Indexer** (`lib/stellar/`, `src/worker/`) — Polls Stellar RPC with resilient rate limiting
 2. **Translation Engine** (`lib/translator/`) — Converts XDR to human-readable text with security hardening
 3. **Redis Pub/Sub** (microservices only) — Message broker for event distribution
-4. **WebSocket Server** (`server-decoupled.ts` or `server.ts`) — Broadcasts events in real-time
+4. **WebSocket Server** (`server-decoupled.ts`) — Broadcasts events in real-time; `server.ts` is deprecated and available only through `dev:ws:legacy`
 5. **Frontend Dashboard** (`app/dashboard/`, `components/`) — Interactive UI
 
 ---
@@ -273,6 +291,8 @@ open-audit/
 │   ├── lint-registry.ts    # Translation registry validation
 │   └── test-websocket-client.js # WebSocket testing tool
 ├── docs/
+│   ├── README.md           # 📚 Centralized documentation hub
+│   ├── archive/            # 📜 Historical PR write-ups & summaries
 │   └── good-first-issues.json
 ├── server.ts               # Legacy monolithic server (deprecated)
 ├── server-decoupled.ts     # 🆕 Microservices web server
@@ -325,7 +345,7 @@ node dist/cli/open-audit-cli.js test \
 📚 **Documentation:**
 - **[CLI README](cli/README.md)** - Complete command reference and examples
 - **[Quick Start](cli/QUICK_START.md)** - Get started in 30 seconds
-- **[Task Summary](TASK_6_CLI_TOOL_SUMMARY.md)** - Implementation details
+- **[Task Summary](docs/archive/TASK_6_CLI_TOOL_SUMMARY.md)** - Historical PR implementation details
 
 **Quick Example:**
 ```bash
@@ -364,7 +384,7 @@ Untrusted WASM → Sandbox → Zero Host Access → Strict Limits → Safe Execu
 📚 **Documentation:**
 - **[WASM Sandbox Architecture](lib/wasm-sandbox/WASM_SANDBOX_ARCHITECTURE.md)** - Complete technical documentation
 - **[Community Parser Guide](lib/wasm-sandbox/COMMUNITY_PARSER_GUIDE.md)** - Write your own parser
-- **[Implementation Summary](TASK_5_WASM_SANDBOX_SUMMARY.md)** - Overview and testing
+- **[Implementation Summary](docs/archive/TASK_5_WASM_SANDBOX_SUMMARY.md)** - Historical PR overview and testing
 
 **Quick Start (Parser Development):**
 ```bash
