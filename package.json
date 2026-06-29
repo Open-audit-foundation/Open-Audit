@@ -89,7 +89,7 @@
     "redis": "^4.6.12",
     "rettime": "^0.11.11",
     "sha.js": "^2.4.12",
-    "stellar-sdk": "^12.1.0",
+    "stellar-sdk": "^13.3.0",
     "swagger-ui-react": "^5.32.6",
     "tailwind-merge": "^2.3.0",
     "tailwindcss-animate": "^1.0.7",
