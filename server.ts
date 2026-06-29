@@ -48,11 +48,14 @@ import next from "next";
 import { WebSocketServer, WebSocket } from "ws";
 import { MOCK_RAW_EVENTS } from "./lib/mock-data";
 import { translateEvent } from "./lib/translator/registry";
+import type { RawEvent } from "./lib/translator/types";
 import { processEventForIpfs } from "./lib/ipfs/offloader";
-import { createFileIngestionStateStore, startResilientEventIngestion } from "./lib/stellar/indexer";
+import { createFileIngestionStateStore } from "./lib/stellar/ingestion-state";
+import { startResilientEventIngestion } from "./lib/stellar/indexer";
 import { getNetworkConfig } from "./lib/stellar/client";
 import { captureExceptionSync, eventsIngestedTotal, metricsHandler, recordTranslationDuration, startTelemetry } from "./lib/telemetry";
 import { startRetentionScheduler } from "./lib/retention/scheduler";
+import { schedulePruner } from "./lib/retention/pruner";
 
 const legacyExplicitlyEnabled =
   process.argv.includes("--legacy") || process.env.OPEN_AUDIT_LEGACY_SERVER === "1";
@@ -110,12 +113,48 @@ const handle = app.getRequestHandler();
 app.prepare().then(async () => {
   await startTelemetry();
   startRetentionScheduler();
+
+  let broadcast: (data: unknown) => void = () => {};
+
   const httpServer = createServer((req, res) => {
     res.setHeader(
       "Content-Security-Policy",
       "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss://* https://horizon-testnet.stellar.org https://soroban-testnet.stellar.org https://horizon.stellar.org https://mainnet.stellar.validationcloud.io; img-src 'self' data:; font-src 'self' data:;"
     );
     const parsedUrl = parse(req.url ?? "/", true);
+
+    if (process.env.E2E_TEST_MODE === "true" && parsedUrl.pathname === "/e2e/inject-event") {
+      if (req.method !== "POST") {
+        res.statusCode = 405;
+        res.end("Method Not Allowed");
+        return;
+      }
+
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk: Buffer) => chunks.push(chunk));
+      req.on("end", () => {
+        void (async () => {
+          try {
+            const rawEvent = JSON.parse(Buffer.concat(chunks).toString("utf8")) as RawEvent;
+            const processed = await processEventForIpfs(rawEvent);
+            rawEvent.data = processed.data;
+            rawEvent.topics = processed.topics;
+            const translated = recordTranslationDuration(rawEvent.contractId, () =>
+              translateEvent(rawEvent)
+            );
+            broadcast(translated);
+            res.statusCode = 200;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify(translated));
+          } catch (error) {
+            res.statusCode = 400;
+            res.end(error instanceof Error ? error.message : String(error));
+          }
+        })();
+      });
+      return;
+    }
+
     handle(req, res, parsedUrl);
   });
 
@@ -148,21 +187,22 @@ app.prepare().then(async () => {
   });
 
   /** Broadcast a JSON payload to every connected client. */
-  function broadcast(data: unknown): void {
+  broadcast = (data: unknown): void => {
     const message = JSON.stringify(data);
     wss.clients.forEach((client) => {
       if (client.readyState === WebSocket.OPEN) {
         client.send(message);
       }
     });
-  }
+  };
 
-  // Start the real-time streaming indexer
-  const stateStore = createFileIngestionStateStore(
-    process.env.INGESTION_STATE_FILE ?? ".open-audit/ingestion-state.json"
-  );
+  if (process.env.E2E_TEST_MODE !== "true") {
+    // Start the real-time streaming indexer
+    const stateStore = createFileIngestionStateStore(
+      process.env.INGESTION_STATE_FILE ?? ".open-audit/ingestion-state.json"
+    );
 
-  const indexer = startResilientEventIngestion({
+    startResilientEventIngestion({
     networkConfig: getNetworkConfig(),
     stateStore,
     coldStartLookbackLedgers: Number(process.env.INGESTION_COLD_START_LOOKBACK_LEDGERS ?? "100"),
@@ -202,7 +242,8 @@ app.prepare().then(async () => {
       captureExceptionSync(err, { context: { operation: "resilientStreamingIndexer" } });
       console.error("[Indexer] Streaming error:", err);
     },
-  });
+    });
+  }
 
   // Start the retention pruner cron (no-op if RETENTION_ENABLED=false)
   schedulePruner();

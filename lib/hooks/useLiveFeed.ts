@@ -131,7 +131,7 @@ export function useLiveFeed(onEvent: (event: TranslatedEvent) => void): LiveFeed
       setNewEventIds((prev) => new Set(prev).add(event.raw.id));
 
       // Remove the highlight badge after the animation completes (600 ms).
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         setNewEventIds((prev) => {
           const next = new Set(prev);
           next.delete(event.raw.id);

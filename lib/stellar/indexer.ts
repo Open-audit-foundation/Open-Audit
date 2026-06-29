@@ -499,6 +499,10 @@ export interface StreamingIndexerOptions {
    * Called on the consumer thread — safe to perform async work.
    */
   onDag?: (dag: ExecutionDag) => void | Promise<void>;
+  /** Optional durable state store for resuming from the last processed ledger. */
+  stateStore?: IngestionStateStore;
+  /** Number of ledgers to look back on cold start. */
+  coldStartLookbackLedgers?: number;
 }
 
 /**
@@ -556,7 +560,7 @@ export function startHorizonStreamingIndexer(options: StreamingIndexerOptions): 
   stop: () => void;
   getMetrics: () => IngestionPoolMetrics;
 } {
-  const { networkConfig, contractIds, onEvent, onError, workerCount, maxQueueSize, onDag } = options;
+  const { networkConfig, contractIds, onEvent, onError, workerCount, maxQueueSize, onDag, stateStore, coldStartLookbackLedgers } = options;
   const server = new Horizon.Server(networkConfig.horizonUrl);
 
   let isRunning = true;

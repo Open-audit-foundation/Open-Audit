@@ -203,6 +203,7 @@ export function EventFeedTable({
                   return (
                     <TableRow
                       key={event.raw.id}
+                      data-testid="event-row"
                       tabIndex={0}
                       role="row"
                       className={`group transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-violet-500 ${
