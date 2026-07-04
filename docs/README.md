@@ -13,8 +13,6 @@ Choose the path below that best matches what you want to accomplish today.
   Get the standard development server (`server.ts`) up and running with live WebSocket streaming in under 5 minutes.
 - **[Microservices Quickstart](../QUICKSTART_MICROSERVICES.md)**  
   Step-by-step instructions for deploying the decoupled production microservices topology using Docker Compose or PM2.
-- **[Reconciliation Worker Quickstart](../RECONCILIATION_QUICKSTART.md)**  
-  Setup guide for running standalone ledger background workers to automatically detect and reconcile missed events.
 - **[Contributing Guidelines](../CONTRIBUTING.md)**  
   Essential contributor guidelines covering Git workflow, commit naming conventions, and environment preparation.
 
@@ -27,9 +25,6 @@ Choose the path below that best matches what you want to accomplish today.
   Learn how to write versioned translation blueprints for smart contracts, register them, and run the automated validator (`npm run lint:registry`).
 - **[Code & Sanitization Standards](../CODE_STANDARDS.md)**  
   Required TypeScript strict typing rules, UI display formatting, and HTML escaping/sanitization standards for contract descriptions.
-- **[Translation Testing Guide](../TEST_LINTER.md)**  
-  Instructions for writing unit tests against your translation blueprints and verifying custom ABI decoders.
-
 ---
 
 ## 🏗️ "I want to understand the architecture"
@@ -39,14 +34,8 @@ Choose the path below that best matches what you want to accomplish today.
   Comprehensive system overview, high-level data flow diagram, and component deep dive (`server.ts`, polling indexer, translation registry).
 - **[Microservices Production Architecture](../MICROSERVICES_ARCHITECTURE.md)**  
   Detailed breakdown of the production microservices architecture, featuring Redis Pub/Sub decoupling, standalone workers, and independent scaling.
-- **[Visual Architecture Guide](../MICROSERVICES_VISUAL_GUIDE.md)**  
-  ASCII diagrams, sequence flows, and comparative visual models illustrating event propagation across service boundaries.
 - **[Security Hardening Guide](../SECURITY_HARDENING_GUIDE.md)**  
   Deep dive into defensive layers including XSS payload disarming, RPC rate-limit mitigation, and contract payload sanitization.
-- **[Resilience Implementation Guide](../RESILIENCE_IMPLEMENTATION_GUIDE.md)**  
-  Technical specifications for exponential backoff retries, circuit breakers, and Dead-Letter Queue (DLQ) persistence.
-- **[Resilience Quick Reference](../RESILIENCE_QUICK_REFERENCE.md)**  
-  Operational cheat-sheet covering configuration parameters, error codes, and manual recovery commands.
 
 ---
 
