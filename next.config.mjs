@@ -1,6 +1,20 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+
+  // Keeps Node.js-only packages out of the browser bundle.
+  // @sentry/node uses diagnostics_channel and other Node.js built-ins that
+  // do not exist in a browser environment. Without this, Next.js tries to
+  // bundle it when a client component imports registry.ts -> lib/telemetry/index.ts,
+  // causing "Module not found: Can't resolve 'diagnostics_channel'".
+  serverExternalPackages: [
+    "@sentry/node",
+    "@sentry/node-core",
+    "pino",
+    "ioredis",
+    "bull",
+  ],
+
   // Enables Dockerfile.web standalone output tracing (main Dockerfile copies .next directly).
   output: "standalone",
   async headers() {
