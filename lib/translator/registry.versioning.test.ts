@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { translateEvent, registerUpgrade } from "./registry";
-import type { RawEvent } from "./types";
+import { translateEvent, registerUpgrade, resolveSchema } from "./registry";
+import type { EventMappingDefinition, RawEvent } from "./types";
 
 const SAC_USDC = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
 const TRANSFER_TOPIC = "0x0000000000000000000000000000000000000000000000000000000074726e73";
@@ -21,7 +21,7 @@ describe("Translation Registry Versioning", () => {
     // Since the registry is a singleton, we should be careful or use a fresh mock if possible.
     // Here we'll just register two versions and check.
     
-    const v1Mappings = [
+    const v1Mappings: EventMappingDefinition[] = [
       {
         topics: ["transfer"],
         event_structure: {
@@ -32,7 +32,7 @@ describe("Translation Registry Versioning", () => {
       }
     ];
 
-    const v2Mappings = [
+    const v2Mappings: EventMappingDefinition[] = [
       {
         topics: ["transfer"],
         event_structure: {
@@ -44,7 +44,7 @@ describe("Translation Registry Versioning", () => {
     ];
 
     // Register v1 from ledger 100
-    registerUpgrade(SAC_USDC, "1.0.0", 100, v1Mappings);
+    registerUpgrade(SAC_USDC, "1.1.0", 100, v1Mappings);
     // Register v2 from ledger 500
     registerUpgrade(SAC_USDC, "2.0.0", 500, v2Mappings);
 
@@ -60,6 +60,18 @@ describe("Translation Registry Versioning", () => {
     const transV1 = translateEvent(eventV1);
     const transV2 = translateEvent(eventV2);
 
+    expect(resolveSchema(SAC_USDC, 99)?.version).toBe("1.0.0");
+    expect(resolveSchema(SAC_USDC, 100)?.blueprint).toBe(
+      resolveSchema(SAC_USDC, 499)?.blueprint
+    );
+    expect(resolveSchema(SAC_USDC, 100)?.version).toBe("1.1.0");
+    expect(resolveSchema(SAC_USDC, 100)?.validFromLedger).toBe(100);
+    expect(resolveSchema(SAC_USDC, 499)?.version).toBe("1.1.0");
+    expect(resolveSchema(SAC_USDC, 499)?.validToLedger).toBe(499);
+    expect(resolveSchema(SAC_USDC, 500)?.version).toBe("2.0.0");
+    expect(resolveSchema(SAC_USDC, 500)?.validFromLedger).toBe(500);
+    expect(resolveSchema(SAC_USDC, 10_000)?.version).toBe("2.0.0");
+    expect(transOld.status).toBe("translated");
     expect(transV1.description).toContain("v1:");
     expect(transV2.description).toContain("v2:");
   });
@@ -83,7 +95,7 @@ describe("Translation Registry Versioning", () => {
     expect(trans1.description).toContain("v2:");
 
     // Register v3 from ledger 800
-    const v3Mappings = [
+    const v3Mappings: EventMappingDefinition[] = [
       {
         topics: ["transfer"],
         event_structure: {

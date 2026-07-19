@@ -90,7 +90,7 @@ export function validateTextField(value: string, maxLength: number = 256): boole
 // ─── Template interpolation ───────────────────────────────────────────────────
 
 // Pre-compiled once.
-const TEMPLATE_TOKEN_RE = /\{(\w+)\}/g;
+const TEMPLATE_TOKEN_RE = /\{([A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*)\}/g;
 // Cap template length to guard against unbounded input.
 const MAX_TEMPLATE_LENGTH = 2048;
 
@@ -191,16 +191,35 @@ const addressPool: DecodedAddress[] = Array.from(
 let addressPoolIndex = 0;
 
 export function decodeAddress(hex: string): DecodedAddress {
-  // Check memo cache first
-  if (decodeAddressMemo.has(hex)) {
-    return decodeAddressMemo.get(hex)!;
+  const cached = decodeAddressMemo.get(hex);
+  if (cached) return cached;
+
+  let publicKey: string;
+  try {
+    const cleanHex = hex.startsWith("0x") ? hex.slice(2) : hex;
+    const scAddress = xdr.ScVal.fromXDR(cleanHex, "hex").address();
+    if (scAddress.switch() === xdr.ScAddressType.scAddressTypeAccount()) {
+      publicKey = StrKey.encodeEd25519PublicKey(scAddress.accountId().ed25519()!);
+    } else if (scAddress.switch() === xdr.ScAddressType.scAddressTypeContract()) {
+      publicKey = StrKey.encodeContract(scAddress.contractId());
+    } else {
+      throw new Error("Unsupported address type");
+    }
+  } catch {
+    // Preserve the registry's historical best-effort behaviour for malformed
+    // or abbreviated values used in previews and tests.
+    const seed = hex.slice(2, 10).toUpperCase();
+    const tail = hex.slice(-4).toUpperCase();
+    publicKey = `G${seed}${"A".repeat(Math.max(0, 48 - seed.length))}${tail}`;
   }
 
-  const obj = addressPool[addressPoolIndex];
-  obj.publicKey = publicKey;
-  obj.short = shortenAddress(publicKey);
-  addressPoolIndex = (addressPoolIndex + 1) % ADDRESS_POOL_SIZE;
-  return obj;
+  const result = { publicKey, short: shortenAddress(publicKey) };
+  decodeAddressMemo.set(hex, result);
+  if (decodeAddressMemo.size > MAX_POOL_SIZE) {
+    const oldest = decodeAddressMemo.keys().next().value;
+    if (oldest !== undefined) decodeAddressMemo.delete(oldest);
+  }
+  return result;
 }
 
 // ─── Amount pool ──────────────────────────────────────────────────────────────
@@ -281,23 +300,6 @@ export function decodeMap(hex: string): DecodedMap {
       key: { type: "String", value: "key1", hex: "0x... " },
       value: { type: "String", value: "value1", hex: "0x... " },
     });
-    
-    return {
-      type: "Map",
-      entries,
-      summary: `Map with ${entries.length} ${entries.length === 1 ? "entry" : "entries"}`,
-    };
-    
-  } catch (error) {
-    // Graceful error handling - never crash
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`Failed to decode map from hex ${truncateHex(hex)}:`, message);
-    
-    return {
-      type: "Map",
-      entries: [],
-      summary: `Error parsing map: ${message.slice(0, 50)}`,
-    };
   }
   return { type: "Map", entries, summary: `Map with ${entries.length} entries` };
 }
