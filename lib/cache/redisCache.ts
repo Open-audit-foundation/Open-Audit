@@ -129,6 +129,46 @@ export async function purgeTranslationCache(
   }
 }
 
+/**
+ * Generic Redis get helper. Returns parsed JSON or null on miss/error.
+ */
+export async function getCached<T = unknown>(key: string): Promise<T | null> {
+  if (!isRedisEnabled()) return null;
+  try {
+    if (!client) initRedis();
+    if (!client) return null;
+    const raw = await client.get(key);
+    if (!raw) return null;
+    return JSON.parse(raw) as T;
+  } catch (err) {
+    console.warn("[redis] Error reading cache key:", key, err);
+    return null;
+  }
+}
+
+/**
+ * Generic Redis set helper with optional TTL in seconds.
+ */
+export async function setCached(
+  key: string,
+  value: unknown,
+  ttlSeconds?: number
+): Promise<void> {
+  if (!isRedisEnabled()) return;
+  try {
+    if (!client) initRedis();
+    if (!client) return;
+    const raw = JSON.stringify(value);
+    if (ttlSeconds && ttlSeconds > 0) {
+      await client.set(key, raw, "EX", ttlSeconds);
+    } else {
+      await client.set(key, raw);
+    }
+  } catch (err) {
+    console.warn("[redis] Error writing cache key:", key, err);
+  }
+}
+
 export async function disconnectRedis(): Promise<void> {
   if (client) {
     await client.quit();

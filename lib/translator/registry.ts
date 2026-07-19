@@ -567,6 +567,33 @@ export function getBlueprintCount(): number {
 }
 
 /**
+ * Public metadata for a registered contract.
+ * Safe to expose over HTTP — contains no internal blueprint function references.
+ */
+export interface ContractRegistryMetadata {
+  contractId: string;
+  contractName: string;
+  schemaCount: number;
+  latestVersion: string;
+}
+
+/**
+ * Returns metadata for every registered contract.
+ * Suitable for public API discovery endpoints.
+ */
+export function getRegistryMetadata(): ContractRegistryMetadata[] {
+  return Array.from(REGISTRY.entries()).map(([contractId, entry]) => ({
+    contractId,
+    contractName: entry.contractName,
+    schemaCount: entry.schemas.length,
+    latestVersion:
+      entry.schemas.length > 0
+        ? (entry.schemas[entry.schemas.length - 1]?.version ?? "unknown")
+        : "unknown",
+  }));
+}
+
+/**
  * Registers one or more versioned blueprints for a contract at runtime.
  *
  * Call this to add or upgrade a contract's translation schemas without

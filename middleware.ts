@@ -8,12 +8,16 @@ const PROTECTED_PREFIXES = ["/api/"];
 // Routes that are public even under /api/
 const PUBLIC_ROUTES = new Set(["/api/ingest-historical/openapi"]);
 
+// Route prefixes that are publicly accessible without an API key
+const PUBLIC_ROUTE_PREFIXES = ["/api/v1/contracts"];
+
 export async function middleware(request: NextRequest): Promise<NextResponse> {
   const { pathname } = request.nextUrl;
 
   const isProtected =
     PROTECTED_PREFIXES.some((p) => pathname.startsWith(p)) &&
-    !PUBLIC_ROUTES.has(pathname);
+    !PUBLIC_ROUTES.has(pathname) &&
+    !PUBLIC_ROUTE_PREFIXES.some((p) => pathname.startsWith(p));
 
   if (!isProtected) return NextResponse.next();
 
