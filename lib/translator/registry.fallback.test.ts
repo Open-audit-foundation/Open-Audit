@@ -26,5 +26,19 @@ describe("translateEvent fallback", () => {
 
     warnSpy.mockRestore();
   });
+
+  it("returns a French fallback description for a French user, not the English hardcoded string", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const translated = translateEvent(UNKNOWN_EVENT, undefined, "fr");
+
+    expect(translated.status).toBe("cryptic");
+    expect(translated.description).toBeTruthy();
+    expect(String(translated.description)).toContain("[Contrat non enregistré]");
+    expect(String(translated.description)).not.toContain("[Unregistered Contract]");
+    expect(translated.blueprintName).toBe("Contrat non enregistré");
+
+    warnSpy.mockRestore();
+  });
 });
 

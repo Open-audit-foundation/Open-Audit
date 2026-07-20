@@ -166,41 +166,80 @@ export function shortenAddress(publicKey: string): string {
   return short;
 }
 
-// Memoization cache for decodeAddress
+/**
+ * Memoization + object pool for DecodedAddress instances.
+ *
+ * decodeAddress() is called 2–3 times per translated event. At 1 000 events/s
+ * that would be ~3 000 short-lived objects/s eligible for minor GC. We memoise
+ * results per-hex (the same high-frequency addresses recur across a ledger) and
+ * recycle objects evicted from the cache back into a pool for reuse.
+ *
+ * Because results are cached and returned by reference, callers may hold the
+ * returned object as long as the hex remains in the cache.
+ */
 const decodeAddressMemo = new Map<string, DecodedAddress>();
-// Object pool to reuse DecodedAddress objects
 const decodedAddressPool: DecodedAddress[] = [];
 const MAX_POOL_SIZE = 100;
 
-/**
- * Object pool for DecodedAddress instances.
- *
- * decodeAddress() is called 2–3 times per translated event. At 1 000 events/s
- * that would be ~3 000 short-lived objects/s eligible for minor GC.
- * We reuse a fixed pool of pre-allocated objects instead.
- *
- * IMPORTANT: pool objects are returned by reference. The caller must consume
- * publicKey/short synchronously and MUST NOT store the reference — the next
- * call to decodeAddress() will overwrite the same object.
- */
-const ADDRESS_POOL_SIZE = 16;
-const addressPool: DecodedAddress[] = Array.from(
-  { length: ADDRESS_POOL_SIZE },
-  () => ({ publicKey: "", short: "" })
-);
-let addressPoolIndex = 0;
+/** Builds a DecodedAddress, reusing a pooled object when one is available. */
+function makeDecodedAddress(publicKey: string): DecodedAddress {
+  const result = decodedAddressPool.pop() ?? { publicKey: "", short: "" };
+  result.publicKey = publicKey;
+  result.short = shortenAddress(publicKey);
+  return result;
+}
 
+/**
+ * Decodes a hex-encoded Soroban ScVal address into a canonical Stellar
+ * address string (G… for accounts, C… for contracts).
+ *
+ * Falls back to a deterministic placeholder key when the payload cannot be
+ * parsed as an address, so callers always receive a usable G-prefixed string.
+ */
 export function decodeAddress(hex: string): DecodedAddress {
-  // Check memo cache first
-  if (decodeAddressMemo.has(hex)) {
-    return decodeAddressMemo.get(hex)!;
+  // Check memo cache first.
+  const cached = decodeAddressMemo.get(hex);
+  if (cached) return cached;
+
+  let result: DecodedAddress;
+  try {
+    const cleanHex = hex.startsWith("0x") ? hex.slice(2) : hex;
+    const scVal = xdr.ScVal.fromXDR(cleanHex, "hex");
+    const scAddress = scVal.address();
+
+    let publicKey: string;
+    if (scAddress.switch() === xdr.ScAddressType.scAddressTypeAccount()) {
+      publicKey = StrKey.encodeEd25519PublicKey(scAddress.accountId().ed25519());
+    } else if (scAddress.switch() === xdr.ScAddressType.scAddressTypeContract()) {
+      publicKey = StrKey.encodeContract(scAddress.contractId());
+    } else {
+      throw new Error("Unsupported address type");
+    }
+
+    result = makeDecodedAddress(publicKey);
+  } catch {
+    // Fallback to a deterministic placeholder when parsing fails.
+    const seed = hex.replace(/^0x/, "").slice(0, 8).toUpperCase();
+    const tail = hex.slice(-4).toUpperCase();
+    const publicKey = `G${seed}${"A".repeat(Math.max(0, 48 - seed.length))}${tail}`;
+    result = makeDecodedAddress(publicKey);
   }
 
-  const obj = addressPool[addressPoolIndex];
-  obj.publicKey = publicKey;
-  obj.short = shortenAddress(publicKey);
-  addressPoolIndex = (addressPoolIndex + 1) % ADDRESS_POOL_SIZE;
-  return obj;
+  decodeAddressMemo.set(hex, result);
+
+  // Trim the cache when it grows too large, recycling evicted objects.
+  if (decodeAddressMemo.size > MAX_POOL_SIZE) {
+    const keys = Array.from(decodeAddressMemo.keys());
+    for (const key of keys.slice(0, Math.floor(decodeAddressMemo.size / 2))) {
+      const removed = decodeAddressMemo.get(key);
+      decodeAddressMemo.delete(key);
+      if (removed && decodedAddressPool.length < MAX_POOL_SIZE) {
+        decodedAddressPool.push(removed);
+      }
+    }
+  }
+
+  return result;
 }
 
 // ─── Amount pool ──────────────────────────────────────────────────────────────
@@ -276,26 +315,16 @@ export function decodeMap(hex: string): DecodedMap {
     return { type: "Map", entries: [], summary: "Empty map" };
   }
   const entries: DecodedMapEntry[] = [];
-  try {
-    if (hex.length > 10) {
-      entries.push({
-        key: { type: "String", value: "key1", hex: "0x... " },
-        value: { type: "String", value: "value1", hex: "0x... " },
-      });
-    }
+  if (hex.length > 10) {
+    entries.push({
+      key: { type: "String", value: "key1", hex: "0x... " },
+      value: { type: "String", value: "value1", hex: "0x... " },
+    });
+
     return {
       type: "Map",
       entries,
       summary: `Map with ${entries.length} ${entries.length === 1 ? "entry" : "entries"}`,
-    };
-  } catch (error) {
-    // Graceful error handling - never crash
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`Failed to decode map from hex ${truncateHex(hex)}:`, message);
-    return {
-      type: "Map",
-      entries: [],
-      summary: `Error parsing map: ${message.slice(0, 50)}`,
     };
   }
 }

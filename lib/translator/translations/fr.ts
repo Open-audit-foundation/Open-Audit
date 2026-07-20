@@ -1,4 +1,6 @@
-export const FR_TRANSLATIONS = {
+import type { TranslationMap } from "../types";
+
+export const FR_TRANSLATIONS: TranslationMap = {
   sac: {
     transfer: (from: string, amount: string, symbol: string, to: string) =>
       `Clé publique [${from}] a transféré ${amount} ${symbol} à [${to}]`,
@@ -24,5 +26,17 @@ export const FR_TRANSLATIONS = {
       ManageSellOffer: "Gestion Offre de Vente",
       OfferFilled: "Offre Exécutée",
     },
+  },
+  generic: {
+    unregisteredContractName: "Contrat non enregistré",
+    unregisteredContractDescription: (payload: string) => `[Contrat non enregistré] ${payload}`,
+    unknownEventNoBlueprint: (contractId: string, data: string) =>
+      `[Événement inconnu : aucun modèle enregistré pour le contrat ${contractId}. Données hexadécimales : ${data}]`,
+    unknownEventNoBlueprintApplicable: (contractId: string, ledger: number, data: string) =>
+      `[Événement inconnu : aucun modèle applicable pour le contrat ${contractId} au ledger ${ledger}. Données hexadécimales : ${data}]`,
+    invalidStringLength: "[longueur de chaîne invalide]",
+    invalidUtf8: "[UTF-8 invalide]",
+    invalidSymbolLength: "[longueur de symbole invalide]",
+    unknownAddress: "[adresse inconnue]",
   },
 };
