@@ -176,5 +176,52 @@
     "templates": {
       "en": "Public Key [{from.short}] burned {amount.formatted} XLM"
     }
+  },
+  {
+    "contract_id": "CAG5LRYQ5JVEUI5TEID72EYOVX44TTUJT5BQR2J6J77FH65PCCFAJDDH",
+    "topics": ["swap", "path", "amounts", "to"],
+    "event_structure": {
+      "topics": [
+        { "name": "path", "type": "address" },
+        { "name": "amounts", "type": "i128" },
+        { "name": "to", "type": "address" }
+      ],
+      "data": { "name": "payload", "type": "bytes" }
+    },
+    "templates": {
+      "en": "Swap executed along path [{path.short}] with amounts [{amounts.formatted}], tokens sent to [{to.short}]"
+    }
+  },
+  {
+    "contract_id": "CAG5LRYQ5JVEUI5TEID72EYOVX44TTUJT5BQR2J6J77FH65PCCFAJDDH",
+    "topics": ["add", "token_a", "token_b", "pair", "to"],
+    "event_structure": {
+      "topics": [
+        { "name": "token_a", "type": "address" },
+        { "name": "token_b", "type": "address" },
+        { "name": "pair", "type": "address" },
+        { "name": "to", "type": "address" }
+      ],
+      "data": { "name": "amounts", "type": "i128" }
+    },
+    "templates": {
+      "en": "Added liquidity: {amounts.formatted} of [{token_a.short}] and [{token_b.short}] minted LP tokens to [{to.short}]"
+    }
+  },
+  {
+    "contract_id": "CAG5LRYQ5JVEUI5TEID72EYOVX44TTUJT5BQR2J6J77FH65PCCFAJDDH",
+    "topics": ["remove", "token_a", "token_b", "pair", "to"],
+    "event_structure": {
+      "topics": [
+        { "name": "token_a", "type": "address" },
+        { "name": "token_b", "type": "address" },
+        { "name": "pair", "type": "address" },
+        { "name": "to", "type": "address" }
+      ],
+      "data": { "name": "amounts", "type": "i128" }
+    },
+    "templates": {
+      "en": "Removed liquidity: burned LP tokens, received {amounts.formatted} of [{token_a.short}] and [{token_b.short}] at [{to.short}]"
+    }
   }
 ]

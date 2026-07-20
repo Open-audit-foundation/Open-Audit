@@ -27,6 +27,19 @@ export const ZH_TRANSLATIONS: TranslationMap = {
       OfferFilled: "报价成交",
     },
   },
+  soroswap: {
+    swap: (path: string, amounts: string, to: string) =>
+      `Swap 已执行，路径 [${path}]，数量 [${amounts}]，代币已发送至 [${to}]`,
+    addLiquidity: (tokenA: string, amountA: string, tokenB: string, amountB: string, liquidity: string, to: string) =>
+      `添加流动性：[${tokenA}] ${amountA} 和 [${tokenB}] ${amountB} 铸造了 ${liquidity} LP 代币至 [${to}]`,
+    removeLiquidity: (tokenA: string, amountA: string, tokenB: string, amountB: string, liquidity: string, to: string) =>
+      `移除流动性：销毁 ${liquidity} LP 代币，收到 [${tokenA}] ${amountA} 和 [${tokenB}] ${amountB} 至 [${to}]`,
+    eventTypes: {
+      Swap: "Swap",
+      AddLiquidity: "添加流动性",
+      RemoveLiquidity: "移除流动性",
+    },
+  },
   generic: {
     unregisteredContractName: "未注册的合约",
     unregisteredContractDescription: (payload: string) => `[未注册的合约] ${payload}`,
