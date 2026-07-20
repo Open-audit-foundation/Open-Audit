@@ -55,28 +55,84 @@ Violations can be reported by opening a private GitHub issue or contacting a mai
 
 - Node.js >= 18 (we recommend [nvm](https://github.com/nvm-sh/nvm))
 - npm >= 9
+- Git (for cloning the repository)
 
-### Install Dependencies
+### 1. Clone the Repository
+
+If you haven't already, fork the repository on GitHub, then clone your fork locally:
+
+```bash
+git clone https://github.com/YOUR_USERNAME/open-audit.git
+cd open-audit
+```
+
+### 2. Install Dependencies
+
+Install the required Node.js dependencies:
 
 ```bash
 npm install
 ```
 
-### Environment Variables
+### 3. Environment Configuration
+
+Copy the example environment configuration file to `.env`:
 
 ```bash
-cp .env.example .env.local
+cp .env.example .env
 ```
 
-The defaults point to Stellar **testnet**, which is safe for development. No changes are required for running tests.
+#### Minimum Required Variables
 
-### Start the Dev Server
+For basic local development, the default values in `.env` are pre-configured to connect to the Stellar **testnet**. The minimum required variables are:
 
-```bash
-npm run dev
-```
+- `NEXT_PUBLIC_HORIZON_URL`: The Horizon REST API endpoint (defaults to `https://horizon-testnet.stellar.org`).
+- `NEXT_PUBLIC_SOROBAN_RPC_URL`: The Soroban RPC endpoint (defaults to `https://soroban-testnet.stellar.org`).
+- `NEXT_PUBLIC_NETWORK_PASSPHRASE`: The passphrase matching the target network (defaults to `"Test SDF Network ; September 2015"`).
+- `NEXT_PUBLIC_NETWORK`: The network identifier (`testnet`, `mainnet`, or `futurenet`, defaults to `testnet`).
 
-The app will be available at [http://localhost:3000](http://localhost:3000).
+#### Optional Services: PostgreSQL & Redis
+
+For basic development with the in-memory mock data path, **PostgreSQL and Redis are optional**.
+- If `DATABASE_URL` is not configured, the app automatically falls back to the in-memory mock data path.
+- If `REDIS_URL` is not configured, the app falls back to an in-process memory cache.
+
+#### Setting Up PostgreSQL (Optional)
+
+If you need to test database persistence or work on features requiring the database:
+1. Ensure PostgreSQL is running and create a local database:
+   ```bash
+   createdb open_audit
+   ```
+2. Configure the `DATABASE_URL` variable in your `.env` file, for example:
+   ```env
+   DATABASE_URL="postgresql://user:password@localhost:5432/open_audit"
+   ```
+3. Run the database migrations:
+   ```bash
+   npm run db:migrate
+   ```
+4. Seed the database with test data:
+   ```bash
+   npm run db:seed
+   ```
+
+### 4. Start the Development Server
+
+You can run the application in two modes depending on your needs:
+
+- **Basic Dashboard**: To run the Next.js development server for the frontend dashboard:
+  ```bash
+  npm run dev
+  ```
+  The app will be available at [http://localhost:3000](http://localhost:3000).
+
+- **Full WebSocket Server**: To run the monolithic server which includes both the frontend and WebSocket event streaming capabilities:
+  ```bash
+  npm run dev:ws
+  ```
+  The app will be available at [http://localhost:3000](http://localhost:3000).
+
 
 ---
 
