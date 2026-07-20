@@ -58,7 +58,7 @@
     "@mswjs/interceptors": "^0.41.9",
     "@opencensus/core": "^0.1.0",
     "@opentelemetry/exporter-trace-otlp-grpc": "^0.219.0",
-    "@opentelemetry/instrumentation-http": "^0.219.0",
+    "@opentelemetry/instrumentation-http": "^0.220.0",
     "@opentelemetry/sdk-node": "^0.219.0",
     "@opentelemetry/shim-opencensus": "^0.220.0",
     "@prisma/client": "^5.22.0",
