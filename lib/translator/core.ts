@@ -327,7 +327,6 @@ export function decodeMap(hex: string): DecodedMap {
       summary: `Map with ${entries.length} ${entries.length === 1 ? "entry" : "entries"}`,
     };
   }
-  return { type: "Map", entries, summary: `Map with ${entries.length} entries` };
 }
 
 export function decodeVec(hex: string): DecodedVec {
