@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
-import { LanguageProvider, useLanguage, type Language } from "./useLanguage";
+import { LanguageProvider, useLanguage } from "./useLanguage";
+import type { Language } from "@/lib/translator/types";
 
 function renderUseLanguage(localStorageData: Record<string, string> = {}, navigatorLang = "en-US") {
   const localStorageMap = new Map(Object.entries(localStorageData));
