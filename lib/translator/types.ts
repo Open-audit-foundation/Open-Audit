@@ -36,6 +36,16 @@ export interface TranslationMap {
       OfferFilled: string;
     };
   };
+  soroswap: {
+    swap: (path: string, amounts: string, to: string) => string;
+    addLiquidity: (tokenA: string, amountA: string, tokenB: string, amountB: string, liquidity: string, to: string) => string;
+    removeLiquidity: (tokenA: string, amountA: string, tokenB: string, amountB: string, liquidity: string, to: string) => string;
+    eventTypes: {
+      Swap: string;
+      AddLiquidity: string;
+      RemoveLiquidity: string;
+    };
+  };
   generic: {
     /** Fallback contract name shown when an unregistered contract has no custom ABI name. */
     unregisteredContractName: string;

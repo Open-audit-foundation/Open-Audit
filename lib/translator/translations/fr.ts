@@ -27,6 +27,19 @@ export const FR_TRANSLATIONS: TranslationMap = {
       OfferFilled: "Offre Exécutée",
     },
   },
+  soroswap: {
+    swap: (path: string, amounts: string, to: string) =>
+      `Swap exécuté sur le chemin [${path}] avec les montants [${amounts}], tokens envoyés à [${to}]`,
+    addLiquidity: (tokenA: string, amountA: string, tokenB: string, amountB: string, liquidity: string, to: string) =>
+      `Ajout de liquidité : ${amountA} de [${tokenA}] et ${amountB} de [${tokenB}] ont miné ${liquidity} tokens LP à [${to}]`,
+    removeLiquidity: (tokenA: string, amountA: string, tokenB: string, amountB: string, liquidity: string, to: string) =>
+      `Retrait de liquidité : ${liquidity} tokens LP brûlés, reçu ${amountA} de [${tokenA}] et ${amountB} de [${tokenB}] à [${to}]`,
+    eventTypes: {
+      Swap: "Swap",
+      AddLiquidity: "Ajout de Liquidité",
+      RemoveLiquidity: "Retrait de Liquidité",
+    },
+  },
   generic: {
     unregisteredContractName: "Contrat non enregistré",
     unregisteredContractDescription: (payload: string) => `[Contrat non enregistré] ${payload}`,
