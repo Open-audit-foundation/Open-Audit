@@ -6,7 +6,14 @@
  * TranslationBlueprint — the contract-specific translation logic.
  */
 
-/** Supported languages. */
+/**
+ * Supported languages.
+ *
+ * This is the single source of truth for the `Language` type. All locale
+ * files, hooks, and translation functions must import it from here rather
+ * than redeclaring it, so that adding a new locale only requires changing
+ * this declaration.
+ */
 export type Language = "en" | "es" | "fr" | "zh";
 
 /**
