@@ -22,6 +22,16 @@ export function initRedis(): void {
   });
 }
 
+/**
+ * Returns the shared Redis client, lazily initializing it if REDIS_URL is
+ * configured. Returns null when Redis is not enabled.
+ */
+export function getRedisClient(): Redis | null {
+  if (!isRedisEnabled()) return null;
+  if (!client) initRedis();
+  return client;
+}
+
 function makeKey(sorobanUrl: string, contractIds: string[], startLedger: number) {
   const ids = contractIds.join(",");
   return `${EVENTS_CACHE_PREFIX}:${sorobanUrl}:${ids}:${startLedger}`;
