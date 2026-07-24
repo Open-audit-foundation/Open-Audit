@@ -1,7 +1,7 @@
 "use client";
 
-import { Code, ExternalLink, Copy, Check, ChevronDown, ChevronUp } from "lucide-react";
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import { Code, ExternalLink, Copy, Check, Loader2, AlertCircle } from "lucide-react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Dialog,
   DialogContent,

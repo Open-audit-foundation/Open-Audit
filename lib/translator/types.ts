@@ -9,6 +9,53 @@
 /** Supported languages. */
 export type Language = "en" | "es" | "fr" | "zh";
 
+/**
+ * The shape every locale file under `./translations/` must implement.
+ * `generic` covers the registry/decoder fallback and error paths so that
+ * unregistered-contract and unknown-event messages are locale-aware rather
+ * than hardcoded English strings.
+ */
+export interface TranslationMap {
+  sac: {
+    transfer: (from: string, amount: string, symbol: string, to: string) => string;
+    mint: (admin: string, amount: string, symbol: string, to: string) => string;
+    burn: (from: string, amount: string, symbol: string) => string;
+    eventTypes: {
+      Transfer: string;
+      Mint: string;
+      Burn: string;
+    };
+  };
+  sdex: {
+    manageBuyOffer: (seller: string, amount: string, buyingAsset: string, sellingAsset: string) => string;
+    manageSellOffer: (seller: string, amount: string, sellingAsset: string, buyingAsset: string) => string;
+    offerFilled: (seller: string, amount: string, assetSold: string, buyer: string) => string;
+    eventTypes: {
+      ManageBuyOffer: string;
+      ManageSellOffer: string;
+      OfferFilled: string;
+    };
+  };
+  generic: {
+    /** Fallback contract name shown when an unregistered contract has no custom ABI name. */
+    unregisteredContractName: string;
+    /** Description shown when the generic decoder could produce a structure for an unregistered contract. */
+    unregisteredContractDescription: (payload: string) => string;
+    /** Description shown when no blueprint is registered for a contract at all. */
+    unknownEventNoBlueprint: (contractId: string, data: string) => string;
+    /** Description shown when a contract is registered but no schema applies at the event's ledger. */
+    unknownEventNoBlueprintApplicable: (contractId: string, ledger: number, data: string) => string;
+    /** Shown by the generic fallback decoder when a String value's declared length overruns the payload. */
+    invalidStringLength: string;
+    /** Shown by the generic fallback decoder when decoded bytes are not valid UTF-8. */
+    invalidUtf8: string;
+    /** Shown by the generic fallback decoder when a Symbol value's declared length overruns the payload. */
+    invalidSymbolLength: string;
+    /** Shown by the generic fallback decoder when an Address's discriminant is unrecognized. */
+    unknownAddress: string;
+  };
+}
+
 /** A raw Soroban contract event as fetched from Horizon/RPC. */
 export interface RawEvent {
   /** Unique event identifier (ledger sequence + index). */

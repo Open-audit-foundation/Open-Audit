@@ -110,13 +110,24 @@ app.prepare().then(async () => {
     console.log(`[WS] Client connected from ${clientIp} (${activeConnections} active)`);
 
     socket.on("close", () => {
-      const remaining = (connectionsByIp.get(clientIp) ?? 1) - 1;
+      const remaining = (connectionsByIp.get(clientIp) ?? 0) - 1;
       if (remaining <= 0) {
         connectionsByIp.delete(clientIp);
       } else {
         connectionsByIp.set(clientIp, remaining);
       }
       console.log(`[WS] Client disconnected from ${clientIp} (${Math.max(remaining, 0)} remaining)`);
+    });
+
+    // Also clean up on error — socket error may skip the close event
+    socket.on("error", () => {
+      const remaining = (connectionsByIp.get(clientIp) ?? 0) - 1;
+      if (remaining <= 0) {
+        connectionsByIp.delete(clientIp);
+      } else {
+        connectionsByIp.set(clientIp, remaining);
+      }
+      console.log(`[WS] Client error from ${clientIp} (${Math.max(remaining, 0)} remaining)`);
     });
   });
 

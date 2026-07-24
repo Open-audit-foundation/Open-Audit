@@ -13,6 +13,71 @@ import { triggerWebhooksForEvent } from "../jobs/queue";
 import { OpenAuditError } from "../errors";
 import { setCachedTranslation, isRedisEnabled } from "../cache/redisCache";
 
+const DEFAULT_BATCH_SIZE = 50;
+const DEFAULT_BATCH_CONCURRENCY = 5;
+
+class Semaphore {
+  private activeCount = 0;
+  private readonly queue: Array<() => void> = [];
+
+  constructor(private readonly maxConcurrency: number) {}
+
+  async acquire(): Promise<() => void> {
+    if (this.activeCount >= this.maxConcurrency) {
+      await new Promise<void>((resolve) => this.queue.push(resolve));
+    }
+
+    this.activeCount += 1;
+
+    return () => {
+      this.activeCount -= 1;
+      const next = this.queue.shift();
+      if (next) {
+        next();
+      }
+    };
+  }
+}
+
+function getBatchConcurrency(): number {
+  const rawValue = process.env.BATCH_CONCURRENCY;
+
+  if (!rawValue) {
+    return DEFAULT_BATCH_CONCURRENCY;
+  }
+
+  const parsed = Number.parseInt(rawValue, 10);
+
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    console.warn(
+      `[translator] Invalid BATCH_CONCURRENCY value "${rawValue}". Falling back to ${DEFAULT_BATCH_CONCURRENCY}.`
+    );
+    return DEFAULT_BATCH_CONCURRENCY;
+  }
+
+  return parsed;
+}
+
+async function mapWithConcurrencyLimit<T, TResult>(
+  items: T[],
+  maxConcurrency: number,
+  mapper: (item: T) => Promise<TResult>
+): Promise<TResult[]> {
+  const semaphore = new Semaphore(Math.max(1, maxConcurrency));
+
+  return Promise.all(
+    items.map(async (item) => {
+      const release = await semaphore.acquire();
+
+      try {
+        return await mapper(item);
+      } finally {
+        release();
+      }
+    })
+  );
+}
+
 interface DeadLetterPayload {
   errorCode: string;
   errorMessage: string;
@@ -127,12 +192,16 @@ export async function translateAndPersistBatch(rawEvents: RawEvent[]): Promise<{
   let failed = 0;
   const translated: TranslatedEvent[] = [];
 
-  const batchSize = 50;
+  const batchSize = DEFAULT_BATCH_SIZE;
+  const batchConcurrency = getBatchConcurrency();
+
   for (let i = 0; i < rawEvents.length; i += batchSize) {
     const chunk = rawEvents.slice(i, i + batchSize);
 
-    const results = await Promise.all(
-      chunk.map((event) => translateAndPersistEvent(event))
+    const results = await mapWithConcurrencyLimit(
+      chunk,
+      batchConcurrency,
+      translateAndPersistEvent
     );
 
     for (const result of results) {

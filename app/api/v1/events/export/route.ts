@@ -2,9 +2,9 @@
  * GET /api/v1/events/export
  *
  * Streams translated contract events as a flat file without loading the
- * entire dataset into server memory. Rows are yielded from a generator
- * in configurable chunks, so a 500k-row export stays within a few MB of
- * working memory at any point.
+ * entire dataset into server memory. Rows are yielded from a database
+ * cursor in configurable chunks, so a 500k-row export stays within a few
+ * MB of working memory at any point.
  *
  * Query params:
  *   format      csv | json | ndjson   (default: csv)
@@ -15,14 +15,29 @@
  */
 
 import { NextRequest } from "next/server";
-import { getMockEventsForContract, MOCK_RAW_EVENTS } from "@/lib/mock-data";
-import { translateEvents } from "@/lib/translator/registry";
+import type { Prisma } from "@prisma/client";
+import { db } from "@/lib/db/client";
 import { decodeEventName } from "@/lib/translator/decode";
-import type { TranslatedEvent } from "@/lib/translator/types";
+import type { TranslatedEvent, TranslationStatus } from "@/lib/translator/types";
 
 type ExportFormat = "csv" | "json" | "ndjson";
 
-const CHUNK_SIZE = 500; // rows yielded per tick
+/** The Event columns we need to build an export row. */
+type ExportEventRow = {
+  id: string;
+  contractId: string;
+  ledger: number;
+  timestamp: number;
+  txHash: string;
+  topics: Prisma.JsonValue;
+  data: string;
+  description: string | null;
+  status: string;
+  blueprintName: string | null;
+  eventType: string | null;
+};
+
+const CHUNK_SIZE = 500; // rows fetched from the DB and flushed per tick
 const MAX_LIMIT = 1_000_000;
 const DEFAULT_LIMIT = 100_000;
 
@@ -31,6 +46,30 @@ const CSV_HEADER = "timestamp,ledger_id,contract_id,tx_hash,event_name,status,pl
 function escapeCSV(val: string | number): string {
   const s = String(val);
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/**
+ * Maps a persisted Event row onto the TranslatedEvent shape the row
+ * formatter expects. Translation fields are already stored on the row by
+ * the indexer, so no re-translation happens here.
+ */
+function rowToTranslatedEvent(row: ExportEventRow): TranslatedEvent {
+  return {
+    raw: {
+      id: row.id,
+      contractId: row.contractId,
+      topics: Array.isArray(row.topics) ? (row.topics as string[]) : [],
+      data: row.data,
+      ledger: row.ledger,
+      timestamp: row.timestamp,
+      txHash: row.txHash,
+    },
+    description: row.description,
+    status: (row.status as TranslationStatus) ?? "cryptic",
+    blueprintName: row.blueprintName,
+    eventType: row.eventType,
+    schemaVersion: null,
+  };
 }
 
 function toRow(event: TranslatedEvent) {
@@ -71,54 +110,114 @@ function rowToCSVLine(row: ReturnType<typeof toRow>): string {
 }
 
 /**
- * Generator that yields translated events in chunks.
- * In production this would cursor through a database instead of
- * holding everything in memory — swap the source array for a DB cursor here.
+ * Cursors through the Event table in ascending (ledger, id) order, yielding
+ * one page of rows at a time. Keyset pagination on the unique `id` keeps
+ * memory bounded to CHUNK_SIZE regardless of how large the result set is,
+ * and avoids the growing-offset cost of skip/take pagination.
  */
-function buildStream(events: TranslatedEvent[], format: ExportFormat, limit: number): ReadableStream<Uint8Array> {
-  const encoder = new TextEncoder();
-  const total = Math.min(events.length, limit);
+async function* fetchEventPages(
+  where: Prisma.EventWhereInput,
+  limit: number
+): AsyncGenerator<ExportEventRow[]> {
+  let remaining = limit;
+  let cursorId: string | undefined;
 
-  // Pre-materialise row objects so the stream only does formatting work
-  // Each chunk is a small slice — memory stays proportional to CHUNK_SIZE, not total.
-  let offset = 0;
+  while (remaining > 0) {
+    const take = Math.min(CHUNK_SIZE, remaining);
+
+    const page = (await db.event.findMany({
+      where,
+      orderBy: [{ ledger: "asc" }, { id: "asc" }],
+      take,
+      ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
+      select: {
+        id: true,
+        contractId: true,
+        ledger: true,
+        timestamp: true,
+        txHash: true,
+        topics: true,
+        data: true,
+        description: true,
+        status: true,
+        blueprintName: true,
+        eventType: true,
+      },
+    })) as ExportEventRow[];
+
+    if (page.length === 0) return;
+
+    yield page;
+
+    remaining -= page.length;
+    cursorId = page[page.length - 1].id;
+
+    // A short page means the table is exhausted — stop before an empty query.
+    if (page.length < take) return;
+  }
+}
+
+/**
+ * Wraps the DB page generator in a ReadableStream that formats each chunk
+ * on demand. Backpressure is handled by the stream: the next page is only
+ * fetched when the consumer pulls, so at most one page is resident at a time.
+ */
+function buildStream(
+  pages: AsyncGenerator<ExportEventRow[]>,
+  format: ExportFormat
+): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
   let started = false;
+  let closed = false;
+  let firstJsonRow = true; // tracks comma placement for the JSON array
 
   return new ReadableStream<Uint8Array>({
-    pull(controller) {
-      // Write opener once
-      if (!started) {
-        started = true;
-        if (format === "csv") {
-          controller.enqueue(encoder.encode(CSV_HEADER));
-        } else if (format === "json") {
-          controller.enqueue(encoder.encode("[\n"));
+    async pull(controller) {
+      try {
+        // Write opener once, before the first data chunk.
+        if (!started) {
+          started = true;
+          if (format === "csv") {
+            controller.enqueue(encoder.encode(CSV_HEADER));
+          } else if (format === "json") {
+            controller.enqueue(encoder.encode("[\n"));
+          }
         }
-      }
 
-      if (offset >= total) {
-        if (format === "json") controller.enqueue(encoder.encode("]\n"));
-        controller.close();
-        return;
-      }
+        const { value: page, done } = await pages.next();
 
-      const end = Math.min(offset + CHUNK_SIZE, total);
-      let text = "";
-
-      for (let i = offset; i < end; i++) {
-        const row = toRow(events[i]);
-        if (format === "csv") {
-          text += rowToCSVLine(row);
-        } else if (format === "ndjson") {
-          text += JSON.stringify(row) + "\n";
-        } else {
-          const isLast = i === total - 1;
-          text += "  " + JSON.stringify(row) + (isLast ? "\n" : ",\n");
+        if (done || !page) {
+          if (!closed) {
+            closed = true;
+            if (format === "json") {
+              controller.enqueue(encoder.encode(firstJsonRow ? "]\n" : "\n]\n"));
+            }
+            controller.close();
+          }
+          return;
         }
-      }
 
-      offset = end;
-      controller.enqueue(encoder.encode(text));
+        let text = "";
+        for (const dbRow of page) {
+          const row = toRow(rowToTranslatedEvent(dbRow));
+          if (format === "csv") {
+            text += rowToCSVLine(row);
+          } else if (format === "ndjson") {
+            text += JSON.stringify(row) + "\n";
+          } else {
+            text += (firstJsonRow ? "  " : ",\n  ") + JSON.stringify(row);
+            firstJsonRow = false;
+          }
+        }
+
+        controller.enqueue(encoder.encode(text));
+      } catch (err) {
+        controller.error(err);
+      }
+    },
+    async cancel() {
+      // Consumer went away — let the generator release its DB resources.
+      await pages.return(undefined);
     },
   });
 }
@@ -142,16 +241,20 @@ export async function GET(request: NextRequest): Promise<Response> {
   const endLedger = parseInt(params.get("endLedger") ?? "0", 10);
 
   // ── Data source ────────────────────────────────────────────────────────────
-  // In production: replace with a paginated DB cursor.
-  // The streaming architecture is DB-agnostic — just swap this block.
-  let raw = contractId
-    ? getMockEventsForContract(contractId)
-    : MOCK_RAW_EVENTS;
+  // Build the Prisma filter from the request params. Rows are streamed
+  // straight from the Event table via a keyset cursor (see fetchEventPages).
+  const where: Prisma.EventWhereInput = {};
+  if (contractId) where.contractId = contractId;
 
-  if (startLedger > 0) raw = raw.filter((e) => e.ledger >= startLedger);
-  if (endLedger > 0) raw = raw.filter((e) => e.ledger <= endLedger);
+  const ledgerFilter: Prisma.IntFilter = {};
+  if (!isNaN(startLedger) && startLedger > 0) ledgerFilter.gte = startLedger;
+  if (!isNaN(endLedger) && endLedger > 0) ledgerFilter.lte = endLedger;
+  if (ledgerFilter.gte !== undefined || ledgerFilter.lte !== undefined) {
+    where.ledger = ledgerFilter;
+  }
 
-  const events = translateEvents(raw);
+  const pages = fetchEventPages(where, limit);
+  const stream = buildStream(pages, format);
   // ──────────────────────────────────────────────────────────────────────────
 
   const date = new Date().toISOString().slice(0, 10);
@@ -162,8 +265,6 @@ export async function GET(request: NextRequest): Promise<Response> {
     json: "application/json; charset=utf-8",
     ndjson: "application/x-ndjson; charset=utf-8",
   };
-
-  const stream = buildStream(events, format, limit);
 
   return new Response(stream, {
     headers: {

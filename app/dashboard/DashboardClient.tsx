@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useCallback, useEffect, useMemo } from "react";
@@ -37,15 +38,11 @@ import {
 import type { TranslatedEvent, RawEvent, CustomAbi } from "@/lib/translator/types";
 import { translateEvents } from "@/lib/translator/registry";
 
-function simulateNetworkDelay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 export function DashboardClient(): React.JSX.Element {
   const [rawEvents] = useState<RawEvent[]>(MOCK_RAW_EVENTS);
   const [liveEvents, setLiveEvents] = useState<TranslatedEvent[]>([]);
   const [customAbis, setCustomAbis] = useState<CustomAbi[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
@@ -54,11 +51,40 @@ export function DashboardClient(): React.JSX.Element {
 
   const { language } = useLanguage();
   const { network } = useNetwork();
-  const { prefs, ready, update, toggleColumn, toggleFavorite } = useDashboardPrefs();
+  const { prefs, ready, update, toggleColumn, toggleFavorite } =
+    useDashboardPrefs();
   const { filters, setFilters } = useEventFilters();
 
-  useEffect(function () {
+  useEffect(() => {
     setCustomAbis(loadCustomAbis());
+  }, []);
+
+  useEffect(() => {
+    const fetchEvents = async () => {
+      setIsLoading(true);
+      setError(null);
+
+      if (USE_MOCK_DATA) {
+        setRawEvents(MOCK_RAW_EVENTS);
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        const res = await fetch("/api/v1/events?limit=100");
+        if (!res.ok) {
+          throw new Error(`Failed to fetch events: ${res.statusText}`);
+        }
+        const events: RawEvent[] = await res.json();
+        setRawEvents(events);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "An unknown error occurred");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchEvents();
   }, []);
 
   const customBlueprints = useMemo(
@@ -109,17 +135,27 @@ export function DashboardClient(): React.JSX.Element {
         }
 
         if (filters.minAmount !== undefined) {
-          const amount = Number(event.raw.data ? BigInt("0x" + event.raw.data.slice(2).replace(/[^0-9a-fA-F]/g, "0")) : 0n);
+          const amount = Number(
+            event.raw.data
+              ? BigInt("0x" + event.raw.data.slice(2).replace(/[^0-9a-fA-F]/g, "0"))
+              : 0n
+          );
           if (Number(amount) < filters.minAmount) {
             return false;
           }
         }
 
-        if (filters.startLedger !== undefined && event.raw.ledger < filters.startLedger) {
+        if (
+          filters.startLedger !== undefined &&
+          event.raw.ledger < filters.startLedger
+        ) {
           return false;
         }
 
-        if (filters.endLedger !== undefined && event.raw.ledger > filters.endLedger) {
+        if (
+          filters.endLedger !== undefined &&
+          event.raw.ledger > filters.endLedger
+        ) {
           return false;
         }
 
@@ -129,7 +165,7 @@ export function DashboardClient(): React.JSX.Element {
   );
 
   const handleNewEvent = useCallback(
-    function (event: TranslatedEvent): void {
+    (event: TranslatedEvent): void => {
       if (filters.contractId && event.raw.contractId !== filters.contractId) return;
       setLiveEvents((prev) => [event, ...prev]);
     },
@@ -149,17 +185,17 @@ export function DashboardClient(): React.JSX.Element {
   const { isLive, isPaused, newEventIds, toggleLive, togglePause } =
     useLiveFeed(handleNewEvent);
 
-  const handleAbiUpload = useCallback(function (abi: CustomAbi): void {
+  const handleAbiUpload = useCallback((abi: CustomAbi): void => {
     setCustomAbis(saveCustomAbi(abi));
     setIsUploadOpen(false);
   }, []);
 
-  const handleAbiRemove = useCallback(function (contractId: string): void {
+  const handleAbiRemove = useCallback((contractId: string): void => {
     setCustomAbis(removeCustomAbi(contractId));
   }, []);
 
   const handleFavoriteSelect = useCallback(
-    function (contractId: string): void {
+    (contractId: string): void => {
       setFilters({ contractId });
     },
     [setFilters]
@@ -169,9 +205,35 @@ export function DashboardClient(): React.JSX.Element {
     ? prefs.favorites.includes(filters.contractId)
     : false;
 
+  const LoadingSkeleton = () => (
+    <div className="space-y-4 animate-pulse">
+      {[1, 2, 3, 4, 5].map((i) => (
+        <div key={i} className="h-16 bg-muted rounded-lg" />
+      ))}
+    </div>
+  );
+
+  const ErrorState = () => (
+    <div
+      role="alert"
+      className="flex items-start gap-3 rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive"
+    >
+      <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+      <div className="flex flex-col gap-2">
+        <p>{error}</p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => window.location.reload()}
+        >
+          Try Again
+        </Button>
+      </div>
+    </div>
+  );
+
   return (
     <div className="space-y-6">
-      {/* Pinned contracts sidebar */}
       {ready && (
         <FavoritesSidebar
           favorites={prefs.favorites}
@@ -181,7 +243,6 @@ export function DashboardClient(): React.JSX.Element {
         />
       )}
 
-      {/* Search + favorite toggle */}
       <section aria-label="Event filters">
         <div className="flex flex-col gap-3">
           <FilterBuilder
@@ -215,45 +276,16 @@ export function DashboardClient(): React.JSX.Element {
                   }`}
                 />
               </Button>
-              <span className="text-sm text-muted-foreground">Filtered contract is pinned / unpinned by toggle.</span>
+              <span className="text-sm text-muted-foreground">
+                Filtered contract is pinned / unpinned by toggle.
+              </span>
             </div>
           )}
         </div>
       </section>
 
-      {/* Error state */}
-      {error && (
-        <div
-          role="alert"
-          className="flex items-start gap-3 rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive"
-        >
-          <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
-          <p>{error}</p>
-        </div>
-      )}
+      {error && <ErrorState />}
 
-      {/* Active filter indicator */}
-      {searchedContract && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
-          <span>Showing events for:</span>
-          <code className="font-mono text-xs bg-muted px-2 py-1 rounded">
-            {searchedContract.slice(0, 10)}...{searchedContract.slice(-6)}
-          </code>
-          <button
-            type="button"
-            onClick={() => {
-              setSearchValue("");
-              handleSearch("");
-            }}
-            className="text-violet-600 dark:text-violet-400 hover:underline text-xs"
-            aria-label="Clear contract filter"
-          >
-            Clear all filters
-          </button>
-        </div>
-      )}
-
-      {/* Custom ABIs */}
       <section aria-label="Custom ABIs" className="flex flex-wrap items-center gap-2">
         <Button variant="outline" size="sm" onClick={() => setIsUploadOpen(true)}>
           <Upload className="mr-2 h-4 w-4" />
@@ -280,10 +312,8 @@ export function DashboardClient(): React.JSX.Element {
         ))}
       </section>
 
-      {/* Stats */}
-      {!isLoading && <StatsBar events={allEvents} />}
+      <StatsBar events={allEvents} />
 
-      {/* Event feed */}
       <section aria-label="Event feed">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
@@ -342,7 +372,8 @@ export function DashboardClient(): React.JSX.Element {
           </div>
         </div>
 
-        {ready && (
+        {isLoading && <LoadingSkeleton />}
+        {ready && !isLoading && !error && (
           <EventFeedTable
             events={filteredEvents}
             isLoading={isLoading}
@@ -355,7 +386,6 @@ export function DashboardClient(): React.JSX.Element {
         )}
       </section>
 
-      {/* Contribute banner */}
       <section
         aria-label="Contribute"
         className="rounded-lg border border-violet-200 bg-violet-50 p-5 dark:border-violet-800 dark:bg-violet-950/30"
@@ -366,7 +396,8 @@ export function DashboardClient(): React.JSX.Element {
             <div>
               <p className="text-sm font-medium">Help translate more contracts</p>
               <p className="mt-0.5 text-sm text-muted-foreground">
-                Open-Audit is community-powered. Add a translation blueprint and earn Stellar Drips rewards.
+                Open-Audit is community-powered. Add a translation blueprint and earn
+                Stellar Drips rewards.
               </p>
             </div>
           </div>

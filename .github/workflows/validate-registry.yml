@@ -28,4 +28,4 @@ jobs:
         run: npm ci
 
       - name: Validate registry
-        run: npx ts-node scripts/validate-registry.ts
+        run: npx tsx scripts/validate-registry.ts

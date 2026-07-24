@@ -1,4 +1,4 @@
-import { createHash } from "crypto";
+// Use Web Crypto API for Edge Runtime compatibility
 
 // Developer tiers with their rate limits (requests per minute)
 export type Tier = "free" | "partner";
@@ -9,8 +9,11 @@ export interface ApiKeyRecord {
   appName: string;
 }
 
-export function hashKey(rawKey: string): string {
-  return createHash("sha256").update(rawKey).digest("hex");
+export async function hashKey(rawKey: string): Promise<string> {
+  const msgUint8 = new TextEncoder().encode(rawKey);
+  const hashBuffer = await globalThis.crypto.subtle.digest("SHA-256", msgUint8);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /**
@@ -44,10 +47,10 @@ function loadKeyRegistry(): ApiKeyRecord[] {
  * Validates an incoming API key header value.
  * Returns the matching record if valid, null otherwise.
  */
-export function validateApiKey(rawKey: string): ApiKeyRecord | null {
+export async function validateApiKey(rawKey: string): Promise<ApiKeyRecord | null> {
   if (!rawKey || !rawKey.startsWith("oa_live_")) return null;
 
-  const hashed = hashKey(rawKey);
+  const hashed = await hashKey(rawKey);
   const registry = loadKeyRegistry();
   return registry.find((r) => r.hashedKey === hashed) ?? null;
 }

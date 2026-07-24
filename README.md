@@ -179,6 +179,46 @@ Terminal 3: npm run worker:indexer
 - **[Architecture Guide](ARCHITECTURE.md)** - Repository and service architecture overview
 - **[Security Hardening Guide](SECURITY_HARDENING_GUIDE.md)** - Production hardening notes
 
+### 📊 Status Monitoring System (Production-Ready)
+
+**Real-time health monitoring for all system components with sub-500ms response:**
+
+```
+Worker Heartbeat → Redis → Health API → Status Dashboard
+```
+
+**Features:**
+- ✅ Real-time component health checks (Stellar RPC, Database, Redis, Worker)
+- ✅ Circuit breaker state monitoring
+- ✅ System metrics (events, translations, connections)
+- ✅ Beautiful auto-refreshing dashboard
+- ✅ Sub-500ms API response time
+- ✅ Graceful degradation
+
+**Components Monitored:**
+- Stellar RPC (with circuit breaker state)
+- Database (Prisma connection)
+- Redis cache
+- Indexer worker (heartbeat-based)
+
+📚 **Documentation:**
+- **[Status Monitoring Guide](STATUS_MONITORING_GUIDE.md)** - Complete monitoring documentation
+- **[Status Summary](TASK_7_STATUS_MONITORING_SUMMARY.md)** - Implementation overview
+
+**Quick Start:**
+```bash
+# Access status dashboard
+open http://localhost:3000/status
+
+# Check health via API
+curl http://localhost:3000/api/status | jq
+```
+
+**Worker Heartbeat:**
+- Writes to Redis every 30 seconds
+- Validates worker is alive (< 90s threshold)
+- Includes metrics: processed count, error count, uptime
+
 ### 🔒 Security Hardening (Production-Ready)
 
 **Bulletproof XDR parser protection against malicious contract payloads:**

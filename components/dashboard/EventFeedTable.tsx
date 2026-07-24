@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle2, HelpCircle, Clock, Eye, GitBranch, Settings2, Network } from "lucide-react";
+import { CheckCircle2, HelpCircle, Clock, Eye, GitBranch, Settings2 } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -12,15 +12,8 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { EventDetailsModal } from "./EventDetailsModal";
 import { ContributeDialog } from "./ContributeDialog";
-import { DagPanel } from "@/components/dag/DagPanel";
 import { formatRelativeTime, truncateHex } from "@/lib/translator/decode";
 import type { TranslatedEvent, RawEvent } from "@/lib/translator/types";
 import type { ColumnVisibility, Density } from "@/lib/hooks/useDashboardPrefs";
@@ -99,7 +92,6 @@ export function EventFeedTable({
   const [detailsEvent, setDetailsEvent] = useState<TranslatedEvent | null>(null);
   const [contributeDialogEvent, setContributeDialogEvent] = useState<RawEvent | null>(null);
   const [showColMenu, setShowColMenu] = useState(false);
-  const [dagTxHash, setDagTxHash] = useState<string | null>(null);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTableSectionElement>) => {
     if (e.target instanceof HTMLElement && e.target.tagName === "TR") {
@@ -269,19 +261,6 @@ export function EventFeedTable({
                               View Details
                             </Button>
 
-                            {event.raw.txHash && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 px-2 text-xs text-violet-700 hover:text-violet-900 hover:bg-violet-50 dark:text-violet-400 dark:hover:bg-violet-950"
-                                aria-label={`View execution call tree for tx ${event.raw.txHash}`}
-                                onClick={() => setDagTxHash(event.raw.txHash)}
-                              >
-                                <Network className="h-3.5 w-3.5 mr-1" />
-                                Call Tree
-                              </Button>
-                            )}
-
                             {!isTranslated && (
                               <Button
                                 variant="outline"
@@ -329,25 +308,6 @@ export function EventFeedTable({
           if (!open) setContributeDialogEvent(null);
         }}
       />
-
-      <Dialog
-        open={dagTxHash !== null}
-        onOpenChange={(open) => {
-          if (!open) setDagTxHash(null);
-        }}
-      >
-        <DialogContent className="max-w-3xl w-full p-0 overflow-hidden">
-          <DialogHeader className="px-4 pt-4 pb-0">
-            <DialogTitle className="flex items-center gap-2 text-sm font-semibold">
-              <Network className="h-4 w-4 text-primary" />
-              Execution Call Tree
-            </DialogTitle>
-          </DialogHeader>
-          <div className="px-4 pb-4 pt-2">
-            <DagPanel txHash={dagTxHash} maxTreeHeight={480} />
-          </div>
-        </DialogContent>
-      </Dialog>
     </>
   );
 }

@@ -22,7 +22,8 @@
  * truncated hex representation.
  */
 
-import type { RawEvent } from "./types";
+import { getTranslation } from "./translations";
+import type { Language, RawEvent } from "./types";
 
 /** A generic decoded value from a fallback decode operation. */
 export interface GenericDecodedValue {
@@ -36,16 +37,17 @@ export interface GenericDecodedValue {
  * Returns a generic JSON structure suitable for display when no blueprint exists.
  *
  * @param event The raw event to decode
+ * @param lang The locale used for any embedded fallback strings (e.g. invalid UTF-8 markers)
  * @returns A human-readable JSON structure or null if decoding completely fails
  */
-export function decodeGenericEventPayload(event: RawEvent): unknown {
+export function decodeGenericEventPayload(event: RawEvent, lang: Language = "en"): unknown {
   try {
     // Try to decode the main data field as ScVal
     if (!event.data) {
       return { type: "unknown", hex: event.data };
     }
 
-    const decoded = decodeScValFromHex(event.data);
+    const decoded = decodeScValFromHex(event.data, lang);
     if (decoded) {
       return decoded;
     }
@@ -74,7 +76,7 @@ export function decodeGenericEventPayload(event: RawEvent): unknown {
  * Attempts to decode a hex-encoded ScVal into a generic structure.
  * Handles basic types and gracefully falls back to hex for unsupported types.
  */
-export function decodeScValFromHex(hex: string): GenericDecodedValue | null {
+export function decodeScValFromHex(hex: string, lang: Language = "en"): GenericDecodedValue | null {
   if (!hex) return null;
 
   try {
@@ -114,15 +116,15 @@ export function decodeScValFromHex(hex: string): GenericDecodedValue | null {
       case 13: // scvBytes
         return decodeBytes(clean);
       case 14: // scvString
-        return decodeString(clean);
+        return decodeString(clean, lang);
       case 15: // scvSymbol
-        return decodeSymbol(clean);
+        return decodeSymbol(clean, lang);
       case 16: // scvVec
-        return decodeVec(clean);
+        return decodeVec(clean, lang);
       case 17: // scvMap
-        return decodeMap(clean);
+        return decodeMap(clean, lang);
       case 18: // scvAddress
-        return decodeAddress(clean);
+        return decodeAddress(clean, lang);
       default:
         // Unknown type — return hex
         return {
@@ -239,7 +241,8 @@ function decodeBytes(clean: string): GenericDecodedValue {
 }
 
 /** Decodes a string (type 14): discriminant + length (4 bytes) + UTF-8 data. */
-function decodeString(clean: string): GenericDecodedValue {
+function decodeString(clean: string, lang: Language = "en"): GenericDecodedValue {
+  const t = getTranslation(lang);
   const lengthHex = clean.slice(8, 16);
   const length = parseInt(lengthHex, 16);
   const dataStart = 16;
@@ -247,7 +250,7 @@ function decodeString(clean: string): GenericDecodedValue {
   if (dataEnd > clean.length) {
     return {
       type: "string",
-      value: "[invalid string length]",
+      value: t.generic.invalidStringLength,
     };
   }
   const data = clean.slice(dataStart, dataEnd);
@@ -261,14 +264,15 @@ function decodeString(clean: string): GenericDecodedValue {
   } catch {
     return {
       type: "string",
-      value: "[invalid UTF-8]",
+      value: t.generic.invalidUtf8,
       hex: "0x" + data,
     };
   }
 }
 
 /** Decodes a symbol (type 15): similar to string but for Soroban symbols. */
-function decodeSymbol(clean: string): GenericDecodedValue {
+function decodeSymbol(clean: string, lang: Language = "en"): GenericDecodedValue {
+  const t = getTranslation(lang);
   const lengthHex = clean.slice(8, 16);
   const length = parseInt(lengthHex, 16);
   const dataStart = 16;
@@ -276,7 +280,7 @@ function decodeSymbol(clean: string): GenericDecodedValue {
   if (dataEnd > clean.length) {
     return {
       type: "symbol",
-      value: "[invalid symbol length]",
+      value: t.generic.invalidSymbolLength,
     };
   }
   const data = clean.slice(dataStart, dataEnd);
@@ -289,14 +293,14 @@ function decodeSymbol(clean: string): GenericDecodedValue {
   } catch {
     return {
       type: "symbol",
-      value: "[invalid UTF-8]",
+      value: t.generic.invalidUtf8,
       hex: "0x" + data,
     };
   }
 }
 
 /** Decodes a Vec (type 16): discriminant + length (4 bytes) + elements. */
-function decodeVec(clean: string): GenericDecodedValue {
+function decodeVec(clean: string, lang: Language = "en"): GenericDecodedValue {
   const lengthHex = clean.slice(8, 16);
   const length = parseInt(lengthHex, 16);
 
@@ -310,7 +314,7 @@ function decodeVec(clean: string): GenericDecodedValue {
   for (let i = 0; i < length && offset < clean.length; i++) {
     try {
       const remaining = clean.slice(offset);
-      const decoded = decodeScValFromHex(remaining);
+      const decoded = decodeScValFromHex(remaining, lang);
       if (decoded) {
         elements.push(decoded.value);
         // Estimate next offset (this is approximate)
@@ -326,7 +330,7 @@ function decodeVec(clean: string): GenericDecodedValue {
 }
 
 /** Decodes a Map (type 17): discriminant + length (4 bytes) + key-value pairs. */
-function decodeMap(clean: string): GenericDecodedValue {
+function decodeMap(clean: string, lang: Language = "en"): GenericDecodedValue {
   const lengthHex = clean.slice(8, 16);
   const length = parseInt(lengthHex, 16);
 
@@ -341,14 +345,14 @@ function decodeMap(clean: string): GenericDecodedValue {
     try {
       // Decode key
       const keyRemaining = clean.slice(offset);
-      const keyDecoded = decodeScValFromHex(keyRemaining);
+      const keyDecoded = decodeScValFromHex(keyRemaining, lang);
       if (!keyDecoded) break;
       const key = String(keyDecoded.value || `key_${i}`);
       offset += 8;
 
       // Decode value
       const valueRemaining = clean.slice(offset);
-      const valueDecoded = decodeScValFromHex(valueRemaining);
+      const valueDecoded = decodeScValFromHex(valueRemaining, lang);
       if (valueDecoded) {
         entries[key] = valueDecoded.value;
         offset += 8;
@@ -362,7 +366,8 @@ function decodeMap(clean: string): GenericDecodedValue {
 }
 
 /** Decodes an address (type 18): discriminant + address discriminant + key data. */
-function decodeAddress(clean: string): GenericDecodedValue {
+function decodeAddress(clean: string, lang: Language = "en"): GenericDecodedValue {
+  const t = getTranslation(lang);
   const addressTypeHex = clean.slice(8, 16);
   const addressType = parseInt(addressTypeHex, 16);
 
@@ -394,7 +399,7 @@ function decodeAddress(clean: string): GenericDecodedValue {
 
   return {
     type: "address",
-    value: "[unknown address]",
+    value: t.generic.unknownAddress,
   };
 }
 

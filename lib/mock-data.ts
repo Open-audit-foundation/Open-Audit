@@ -1,3 +1,4 @@
+
 /**
  * Mock data for Open-Audit development and demonstration.
  *
@@ -10,8 +11,7 @@ import type { RawEvent } from "./translator/types";
 
 const NOW = Math.floor(Date.now() / 1000);
 
-/** Mock raw events — a mix of translatable and cryptic events. */
-export const MOCK_RAW_EVENTS: RawEvent[] = [
+const MOCK_DATA_INTERNAL: RawEvent[] = [
   // ── Translated: SAC USDC Transfer ──────────────────────────────────────────
   {
     id: "0000001-0",
@@ -27,22 +27,22 @@ export const MOCK_RAW_EVENTS: RawEvent[] = [
     txHash: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
   },
 
-  // ── Translated: SAC XLM Transfer ───────────────────────────────────────────
+  // ── Translated: SAC XLM Transfer ──────────────────────────────────────────
   {
     id: "0000001-1",
     contractId: "CBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
     topics: [
       "0x0000000000000000000000000000000000000000000000000000000074726e73", // "transfer"
       "0x000000000000000000000000GDEF9012CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC00",
-      "0x000000000000000000000000GHIJ3456DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD00",
+      "0x000000000000000000000000GIJK9012NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN00",
     ],
     data: "0x000000000000000000000000000000000000000002FAF080", // 50 XLM
     ledger: 52_341_002,
     timestamp: NOW - 120,
-    txHash: "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3",
+    txHash: "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c4",
   },
 
-  // ── Cryptic: Unknown contract (no blueprint) ───────────────────────────────
+  // ── Cryptic: Unknown contract (no blueprint) ────────────────────────────────
   {
     id: "0000001-2",
     contractId: "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
@@ -53,7 +53,7 @@ export const MOCK_RAW_EVENTS: RawEvent[] = [
     data: "0xdeadbeef000000000000000000000000000000000000000000000000000000ff",
     ledger: 52_341_003,
     timestamp: NOW - 200,
-    txHash: "c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
+    txHash: "c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d5",
   },
 
   // ── Translated: SAC USDC Mint ──────────────────────────────────────────────
@@ -68,7 +68,7 @@ export const MOCK_RAW_EVENTS: RawEvent[] = [
     data: "0x0000000000000000000000000000000000000000017D7840", // 250 USDC
     ledger: 52_341_004,
     timestamp: NOW - 310,
-    txHash: "d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5",
+    txHash: "d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e6",
   },
 
   // ── Cryptic: Soroswap Router (no blueprint yet — GFI-003) ──────────────────
@@ -82,7 +82,7 @@ export const MOCK_RAW_EVENTS: RawEvent[] = [
     data: "0x000000000000000000000000000000000000000000000000000000000000ABCD",
     ledger: 52_341_005,
     timestamp: NOW - 450,
-    txHash: "e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6",
+    txHash: "e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e7",
   },
 
   // ── Translated: SAC XLM Burn ───────────────────────────────────────────────
@@ -96,7 +96,7 @@ export const MOCK_RAW_EVENTS: RawEvent[] = [
     data: "0x00000000000000000000000000000000000000000017D784", // 25 XLM
     ledger: 52_341_006,
     timestamp: NOW - 600,
-    txHash: "f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1",
+    txHash: "f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e8",
   },
 
   // ── Cryptic: Blend Protocol (no blueprint yet) ─────────────────────────────
@@ -110,7 +110,7 @@ export const MOCK_RAW_EVENTS: RawEvent[] = [
     data: "0x000000000000000000000000000000000000000000000000000000000000BEEF",
     ledger: 52_341_007,
     timestamp: NOW - 720,
-    txHash: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b3",
+    txHash: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b3",
   },
 
   // ── Translated: SAC USDC Transfer (large amount) ──────────────────────────
@@ -158,8 +158,12 @@ export const MOCK_RAW_EVENTS: RawEvent[] = [
   },
 ];
 
+export const USE_MOCK_DATA = process.env.NEXT_PUBLIC_USE_MOCK_DATA === "true";
+
+export const MOCK_RAW_EVENTS: RawEvent[] = MOCK_DATA_INTERNAL;
+
 /** A subset of events for a specific contract search demo. */
 export function getMockEventsForContract(contractId: string): RawEvent[] {
-  const filtered = MOCK_RAW_EVENTS.filter((e) => e.contractId === contractId);
-  return filtered.length > 0 ? filtered : MOCK_RAW_EVENTS.slice(0, 5);
+  const filtered = MOCK_DATA_INTERNAL.filter((e) => e.contractId === contractId);
+  return filtered.length > 0 ? filtered : MOCK_DATA_INTERNAL.slice(0, 5);
 }
