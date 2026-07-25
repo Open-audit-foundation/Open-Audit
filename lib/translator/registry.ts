@@ -20,6 +20,8 @@
 import { createAllSacBlueprints } from "./blueprints/sac-transfer";
 import { createSacMintBurnBlueprint } from "./blueprints/sac-mint-burn";
 import { createAllSdexBlueprints } from "./blueprints/sdex-orderbook";
+import { createAllSoroswapRouterBlueprints } from "./blueprints/soroswap-router";
+import { createAllBlendPoolBlueprints } from "./blueprints/blend-pool";
 import {
   registryCacheHitsTotal,
   registryCacheMissesTotal,
@@ -223,6 +225,16 @@ function buildRegistry(): BlueprintRegistry {
 
   // 3. Load SDEX (Stellar Classic Order Book) Blueprints
   for (const blueprint of createAllSdexBlueprints()) {
+    register(blueprint);
+  }
+
+  // 4. Load Soroswap Router Blueprints
+  for (const blueprint of createAllSoroswapRouterBlueprints()) {
+    register(blueprint);
+  }
+
+  // 5. Load Blend Protocol Pool Blueprints
+  for (const blueprint of createAllBlendPoolBlueprints()) {
     register(blueprint);
   }
 
