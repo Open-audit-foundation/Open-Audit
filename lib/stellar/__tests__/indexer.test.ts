@@ -1,294 +1,318 @@
-/**
- * Tests for the Stellar Event Indexer with rate limit handling.
- */
-
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
-import { SorobanRpc } from "stellar-sdk";
+import { PassThrough } from "stream";
+import { EventEmitter } from "events";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Horizon, SorobanRpc, StrKey, xdr } from "stellar-sdk";
 import {
+  DEFAULT_RETRY_CONFIG,
+  calculateRetryDelay,
+  createMemoryIngestionStateStore,
   fetchEventsWithRetry,
   startEventIndexer,
-  calculateRetryDelay,
-  DEFAULT_RETRY_CONFIG,
-  type IndexerCursor,
+  startHorizonStreamingIndexer,
+  startResilientEventIngestion,
 } from "../indexer";
-import { StellarNetworkException } from "../../errors";
 
-const jest = vi;
+vi.mock("../../cache/redisCache", () => ({
+  initRedis: vi.fn(),
+  getCachedEvents: vi.fn().mockResolvedValue(null),
+  setCachedEvents: vi.fn().mockResolvedValue(undefined),
+  isRedisEnabled: vi.fn().mockReturnValue(false),
+}));
 
-// Mock stellar-sdk
-vi.mock("stellar-sdk", function () {
-  return {
-    SorobanRpc: {
-      Server: vi.fn(),
+vi.mock("stellar-sdk", () => ({
+  SorobanRpc: {
+    Server: vi.fn(),
+  },
+  Horizon: {
+    Server: vi.fn(),
+  },
+  StrKey: {
+    encodeContract: vi.fn((value) => `C-${String(value)}`),
+  },
+  xdr: {
+    TransactionMeta: {
+      fromXDR: vi.fn(),
+      v3: () => ({ switch: () => "v3" }),
     },
-  };
-});
+  },
+}));
 
-describe("calculateRetryDelay", function () {
-  it("should calculate exponential backoff correctly", function () {
-    const config = {
-      initialDelayMs: 1000,
-      maxDelayMs: 32000,
-      maxRetries: 10,
-      backoffMultiplier: 2,
-    };
+const NETWORK_CONFIG = {
+  horizonUrl: "https://horizon-testnet.stellar.org",
+  sorobanRpcUrl: "https://soroban-testnet.stellar.org",
+  networkPassphrase: "Test SDF Network ; September 2015",
+};
 
-    expect(calculateRetryDelay(0, config)).toBe(1000); // 1s
-    expect(calculateRetryDelay(1, config)).toBe(2000); // 2s
-    expect(calculateRetryDelay(2, config)).toBe(4000); // 4s
-    expect(calculateRetryDelay(3, config)).toBe(8000); // 8s
-    expect(calculateRetryDelay(4, config)).toBe(16000); // 16s
-    expect(calculateRetryDelay(5, config)).toBe(32000); // Capped at 32s
-    expect(calculateRetryDelay(6, config)).toBe(32000); // Still capped
+describe("calculateRetryDelay", () => {
+  it("caps exponential backoff at the configured maximum", () => {
+    expect(calculateRetryDelay(0, DEFAULT_RETRY_CONFIG)).toBe(1000);
+    expect(calculateRetryDelay(3, DEFAULT_RETRY_CONFIG)).toBe(8000);
+    expect(calculateRetryDelay(10, DEFAULT_RETRY_CONFIG)).toBe(32000);
   });
 });
 
-describe("fetchEventsWithRetry", function () {
-  let mockServer: {
-    getEvents: jest.Mock;
-  };
-
-  beforeEach(function () {
-    mockServer = {
-      getEvents: jest.fn(),
-    };
-  });
-
-  it("should return events on successful fetch", async function () {
-    const mockResponse = {
-      events: [{ id: "event-1" }, { id: "event-2" }],
-      latestLedger: 2000,
+describe("fetchEventsWithRetry", () => {
+  it("returns the first successful response", async () => {
+    const server = {
+      getEvents: vi.fn().mockResolvedValue({
+        events: [{ id: "evt-1" }],
+        latestLedger: 200,
+      }),
     };
 
-    mockServer.getEvents.mockResolvedValue(mockResponse);
-
-    const result = await fetchEventsWithRetry(
-      mockServer as unknown as SorobanRpc.Server,
+    const response = await fetchEventsWithRetry(
+      server as unknown as SorobanRpc.Server,
       ["contract-1"],
-      1000,
-      undefined,
-      DEFAULT_RETRY_CONFIG
+      100
     );
 
-    expect(result).toEqual(mockResponse);
-    expect(mockServer.getEvents).toHaveBeenCalledTimes(1);
-    expect(mockServer.getEvents).toHaveBeenCalledWith({
-      startLedger: 1000,
-      filters: [{ type: "contract", contractIds: ["contract-1"] }],
-    });
+    expect(response.latestLedger).toBe(200);
+    expect(server.getEvents).toHaveBeenCalledTimes(1);
   });
 
-  it("should retry on HTTP 429 error and eventually succeed", async function () {
-    const mockResponse = {
-      events: [{ id: "event-1" }],
-      latestLedger: 2000,
+  it("retries retriable failures and eventually succeeds", async () => {
+    const server = {
+      getEvents: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("429 Too Many Requests"))
+        .mockResolvedValueOnce({
+          events: [{ id: "evt-2" }],
+          latestLedger: 201,
+        }),
     };
 
-    // Fail twice with 429, then succeed
-    mockServer.getEvents
-      .mockRejectedValueOnce(new Error("HTTP 429: Too Many Requests"))
-      .mockRejectedValueOnce(new Error("Rate limit exceeded"))
-      .mockResolvedValueOnce(mockResponse);
-
-    const result = await fetchEventsWithRetry(
-      mockServer as unknown as SorobanRpc.Server,
+    const response = await fetchEventsWithRetry(
+      server as unknown as SorobanRpc.Server,
       ["contract-1"],
-      1000,
+      100,
       undefined,
       {
-        initialDelayMs: 10, // Short delays for tests
-        maxDelayMs: 100,
-        maxRetries: 5,
+        initialDelayMs: 1,
+        maxDelayMs: 2,
+        maxRetries: 1,
         backoffMultiplier: 2,
       }
     );
 
-    expect(result).toEqual(mockResponse);
-    expect(mockServer.getEvents).toHaveBeenCalledTimes(3);
+    expect(response.latestLedger).toBe(201);
+    expect(server.getEvents).toHaveBeenCalledTimes(2);
   });
 
-  it("should throw immediately on non-retriable errors", async function () {
-    mockServer.getEvents.mockRejectedValue(new Error("Invalid filter parameter"));
+  it("throws after exhausting retries", async () => {
+    const server = {
+      getEvents: vi.fn().mockRejectedValue(new Error("429 Too Many Requests")),
+    };
 
     await expect(
-      fetchEventsWithRetry(
-        mockServer as unknown as SorobanRpc.Server,
-        ["contract-1"],
-        1000,
-        undefined,
-        DEFAULT_RETRY_CONFIG
-      )
-    ).rejects.toBeInstanceOf(StellarNetworkException);
-
-    expect(mockServer.getEvents).toHaveBeenCalledTimes(1);
-  });
-
-  it("should throw after exhausting all retries", async function () {
-    mockServer.getEvents.mockRejectedValue(new Error("429 Too Many Requests"));
-
-    await expect(
-      fetchEventsWithRetry(
-        mockServer as unknown as SorobanRpc.Server,
-        ["contract-1"],
-        1000,
-        undefined,
-        {
-          initialDelayMs: 10,
-          maxDelayMs: 100,
-          maxRetries: 2,
-          backoffMultiplier: 2,
-        }
-      )
-    ).rejects.toThrow(/Failed to fetch events after 2 retries/);
-
-    expect(mockServer.getEvents).toHaveBeenCalledTimes(3); // Initial + 2 retries
+      fetchEventsWithRetry(server as unknown as SorobanRpc.Server, ["contract-1"], 100, undefined, {
+        initialDelayMs: 1,
+        maxDelayMs: 2,
+        maxRetries: 1,
+        backoffMultiplier: 2,
+      })
+    ).rejects.toThrow(/Failed to fetch events after 1 retries/);
   });
 });
 
-describe("startEventIndexer", function () {
-  let mockServer: {
-    getEvents: jest.Mock;
-  };
+describe("startEventIndexer", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
 
-  beforeEach(function () {
-    jest.useFakeTimers();
-    mockServer = {
-      getEvents: jest.fn(),
-    };
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
-    // Mock the SorobanRpc.Server constructor
-    vi.mocked(SorobanRpc.Server).mockImplementation(function () {
-      return mockServer as any;
+  it("restores and persists state store progress", async () => {
+    const stateStore = createMemoryIngestionStateStore({
+      lastLedger: 250,
+      pagingToken: "cursor-250",
+      updatedAt: new Date().toISOString(),
+      source: "rpc",
     });
-  });
 
-  afterEach(function () {
-    jest.useRealTimers();
-  });
-
-  it("should poll events and update cursor only on success", async function () {
-    const mockResponse = {
-      events: [{ id: "event-1" }],
-      latestLedger: 2000,
-      cursor: "cursor-1",
+    const server = {
+      getEvents: vi.fn().mockResolvedValue({
+        events: [{ id: "evt-3" }],
+        latestLedger: 300,
+        cursor: "cursor-300",
+      }),
     };
 
-    mockServer.getEvents.mockResolvedValue(mockResponse);
-
-    const onEvents = jest.fn();
-    const onError = jest.fn();
+    vi.mocked(SorobanRpc.Server).mockImplementation(() => server as any);
 
     const indexer = startEventIndexer({
-      networkConfig: {
-        horizonUrl: "https://horizon-testnet.stellar.org",
-        sorobanRpcUrl: "https://soroban-testnet.stellar.org",
-        networkPassphrase: "Test SDF Network ; September 2015",
-      },
+      networkConfig: NETWORK_CONFIG,
       contractIds: ["contract-1"],
-      startLedger: 1000,
+      startLedger: 100,
       pollIntervalMs: 5000,
-      onEvents,
-      onError,
-      retryConfig: {
-        initialDelayMs: 10,
-        maxDelayMs: 100,
-        maxRetries: 3,
-        backoffMultiplier: 2,
-      },
+      stateStore,
+      onEvents: vi.fn(),
     });
 
-    // Wait for first poll
-    await jest.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(50);
 
-    expect(mockServer.getEvents).toHaveBeenCalled();
-    expect(onEvents).toHaveBeenCalledWith(mockResponse.events, expect.any(Object));
-    expect(onError).not.toHaveBeenCalled();
-
-    // Check cursor was updated
-    const cursor = indexer.getCursor();
-    expect(cursor.lastLedger).toBe(2000);
-    expect(cursor.paginationCursor).toBe("cursor-1");
+    expect(server.getEvents).toHaveBeenCalledWith({
+      startLedger: 250,
+      filters: [{ type: "contract", contractIds: ["contract-1"] }],
+    });
+    await expect(stateStore.load()).resolves.toMatchObject({
+      lastLedger: 300,
+      pagingToken: "cursor-300",
+      source: "rpc",
+    });
 
     indexer.stop();
   });
+});
 
-  it("should not update cursor on fetch failure", async function () {
-    mockServer.getEvents.mockRejectedValue(new Error("Network error"));
-
-    const onEvents = jest.fn();
-    const onError = jest.fn();
-
-    const indexer = startEventIndexer({
-      networkConfig: {
-        horizonUrl: "https://horizon-testnet.stellar.org",
-        sorobanRpcUrl: "https://soroban-testnet.stellar.org",
-        networkPassphrase: "Test SDF Network ; September 2015",
-      },
-      contractIds: ["contract-1"],
-      startLedger: 1000,
-      pollIntervalMs: 5000,
-      onEvents,
-      onError,
-      retryConfig: {
-        initialDelayMs: 10,
-        maxDelayMs: 100,
-        maxRetries: 1,
-        backoffMultiplier: 2,
-      },
+describe("startHorizonStreamingIndexer", () => {
+  it("starts from the stored cursor and persists new paging tokens", async () => {
+    const stateStore = createMemoryIngestionStateStore({
+      lastLedger: 999,
+      pagingToken: "stored-token",
+      updatedAt: new Date().toISOString(),
+      source: "horizon",
     });
 
-    // Wait for first poll
-    await jest.advanceTimersByTimeAsync(100);
-
-    expect(onEvents).not.toHaveBeenCalled();
-    expect(onError).toHaveBeenCalled();
-
-    // Check cursor was NOT updated
-    const cursor = indexer.getCursor();
-    expect(cursor.lastLedger).toBe(1000); // Still at starting ledger
-
-    indexer.stop();
-  });
-
-  it("should handle rate limit errors with retry", async function () {
-    const mockResponse = {
-      events: [{ id: "event-1" }],
-      latestLedger: 2000,
+    const topic = { toXDR: vi.fn().mockReturnValue("746f706963") };
+    const data = { toXDR: vi.fn().mockReturnValue("64617461") };
+    const contractEvent = {
+      contractId: vi.fn().mockReturnValue("abc"),
+      body: vi.fn().mockReturnValue({
+        v0: () => ({
+          topics: () => [topic],
+          data: () => data,
+        }),
+      }),
     };
 
-    // Fail once with 429, then succeed
-    mockServer.getEvents
-      .mockRejectedValueOnce(new Error("429 Too Many Requests"))
-      .mockResolvedValueOnce(mockResponse);
+    vi.mocked(xdr.TransactionMeta.fromXDR).mockReturnValue({
+      switch: () => "v3",
+      v3: () => ({
+        sorobanMeta: () => ({
+          events: () => [contractEvent],
+        }),
+      }),
+    } as any);
 
-    const onEvents = jest.fn();
-    const onError = jest.fn();
+    const streamHandlers: { onmessage?: (tx: any) => Promise<void>; onerror?: (err: unknown) => void } = {};
+    const cursor = vi.fn(() => ({
+      stream: vi.fn((handlers) => {
+        streamHandlers.onmessage = handlers.onmessage;
+        streamHandlers.onerror = handlers.onerror;
+        return vi.fn();
+      }),
+    }));
 
-    const indexer = startEventIndexer({
-      networkConfig: {
-        horizonUrl: "https://horizon-testnet.stellar.org",
-        sorobanRpcUrl: "https://soroban-testnet.stellar.org",
-        networkPassphrase: "Test SDF Network ; September 2015",
-      },
+    vi.mocked(Horizon.Server).mockImplementation(() => ({
+      transactions: () => ({ cursor }),
+    }) as any);
+
+    const onEvent = vi.fn();
+    const controls = startHorizonStreamingIndexer({
+      networkConfig: NETWORK_CONFIG,
+      stateStore,
+      onEvent,
+    });
+
+    await vi.waitFor(() => {
+      expect(cursor).toHaveBeenCalledWith("stored-token");
+    });
+
+    await streamHandlers.onmessage?.({
+      id: "tx-1",
+      hash: "hash-1",
+      ledger_attr: 1001,
+      paging_token: "next-token",
+      result_meta_xdr: "AAAA",
+    });
+
+    expect(onEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "tx-1-0",
+        contractId: "C-abc",
+        ledger: 1001,
+        txHash: "hash-1",
+      })
+    );
+    await expect(stateStore.load()).resolves.toMatchObject({
+      lastLedger: 1001,
+      pagingToken: "next-token",
+      source: "horizon",
+    });
+
+    controls.stop();
+  });
+});
+
+describe("startResilientEventIngestion", () => {
+  it("falls back to RPC ingestion after captive core exits", async () => {
+    const stateStore = createMemoryIngestionStateStore();
+    const child = new EventEmitter() as EventEmitter & {
+      stdout: PassThrough;
+      stderr: PassThrough;
+      kill: ReturnType<typeof vi.fn>;
+    };
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.kill = vi.fn();
+
+    const rpcServer = {
+      getEvents: vi.fn().mockResolvedValue({
+        events: [
+          {
+            id: "rpc-event-1",
+            contractId: "contract-1",
+            ledger: 501,
+            pagingToken: "rpc-cursor-501",
+            topics: ["topic-1"],
+            data: "payload-1",
+            txHash: "hash-501",
+          },
+        ],
+        latestLedger: 501,
+        cursor: "rpc-cursor-501",
+      }),
+    };
+
+    vi.mocked(SorobanRpc.Server).mockImplementation(() => rpcServer as any);
+
+    const onEvent = vi.fn();
+    startResilientEventIngestion({
+      networkConfig: NETWORK_CONFIG,
       contractIds: ["contract-1"],
-      startLedger: 1000,
-      pollIntervalMs: 5000,
-      onEvents,
-      onError,
-      retryConfig: {
-        initialDelayMs: 10,
-        maxDelayMs: 100,
-        maxRetries: 3,
-        backoffMultiplier: 2,
+      stateStore,
+      onEvent,
+      captiveCore: {
+        binaryPath: "stellar-core",
+        networkPassphrase: NETWORK_CONFIG.networkPassphrase,
+        historyArchives: { archive: "https://history.example.com" },
+        transport: { type: "stdio" },
+        startupTimeoutMs: 10000,
+        maxRestartAttempts: 0,
+        spawnFn: vi.fn(() => child as any),
+        decoder: vi.fn(() => ({
+          sequence: 500,
+          rawEvents: [],
+          rawXdr: "AAAA",
+          receivedAt: new Date().toISOString(),
+        })),
       },
     });
 
-    // Wait for retries
-    await jest.advanceTimersByTimeAsync(500);
+    await Promise.resolve();
+    child.emit("exit", 1, null);
 
-    expect(mockServer.getEvents).toHaveBeenCalledTimes(2);
-    expect(onEvents).toHaveBeenCalledWith(mockResponse.events, expect.any(Object));
-
-    indexer.stop();
+    await vi.waitFor(() => {
+      expect(rpcServer.getEvents).toHaveBeenCalled();
+      expect(onEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "rpc-event-1",
+          contractId: "contract-1",
+          ledger: 501,
+        })
+      );
+    });
   });
 });

@@ -1,5 +1,5 @@
 import { db } from "./client";
-import { RawEvent } from "@/lib/stellar/types";
+import { RawEvent } from "@/lib/translator/types";
 
 /**
  * Initialize database connection and run migrations
@@ -60,13 +60,12 @@ export async function batchUpsertEvents(
 ): Promise<number> {
   let upsertedCount = 0;
 
-  // Process in chunks to avoid overwhelming the database
   const chunkSize = 100;
   for (let i = 0; i < events.length; i += chunkSize) {
     const chunk = events.slice(i, i + chunkSize);
 
     const results = await Promise.all(
-      chunk.map((event) =>
+      chunk.map(async (event) =>
         db.event
           .upsert({
             where: { id: event.id },
@@ -183,27 +182,4 @@ export async function deleteOldEvents(beforeDate: Date): Promise<number> {
     },
   });
   return result.count;
-}
-
-/**
- * Get reconciliation statistics
- */
-export async function getReconciliationStats(): Promise<{
-  totalEvents: number;
-  verifiedEvents: number;
-  pendingVerification: number;
-  lastCursor: number;
-}> {
-  const [totalEvents, verifiedEvents, lastCursor] = await Promise.all([
-    db.event.count(),
-    db.event.count({ where: { rpcVerified: true } }),
-    getCursor(),
-  ]);
-
-  return {
-    totalEvents,
-    verifiedEvents,
-    pendingVerification: totalEvents - verifiedEvents,
-    lastCursor,
-  };
 }

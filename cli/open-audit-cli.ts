@@ -17,7 +17,12 @@ import { Command } from "commander";
 import { readFileSync, existsSync } from "fs";
 import { resolve } from "path";
 import { parse as parseYaml } from "yaml";
-import type { RawEvent, TranslationBlueprint, Language } from "../lib/translator/types";
+import type {
+  RawEvent,
+  TranslationBlueprint,
+  Language,
+  VersionedTranslationBlueprint,
+} from "../lib/translator/types";
 
 // ============================================================================
 // CLI Configuration
@@ -333,7 +338,7 @@ function loadSpecification(
   return buildBlueprint(spec);
 }
 
-function buildBlueprint(spec: BlueprintSpec): TranslationBlueprint {
+function buildBlueprint(spec: BlueprintSpec): VersionedTranslationBlueprint {
   return {
     contractId: spec.contractId,
     contractName: spec.contractName,
@@ -520,12 +525,16 @@ function executeTranslation(
       };
     }
 
+    const schemaVersion = "version" in blueprint && typeof blueprint.version === "string"
+      ? blueprint.version
+      : undefined;
+
     return {
       success: true,
       description: result.description,
       eventType: result.eventType,
       blueprintName: blueprint.contractName,
-      schemaVersion: blueprint.version,
+      schemaVersion,
     };
   } catch (error) {
     return {

@@ -13,6 +13,7 @@
 import { toErrorResponse, validationErrorResponse } from "@/lib/api/error-response";
 import { ingestHistoricalRange } from "@/lib/stellar/historical-ingester";
 import { getNetworkConfig } from "@/lib/stellar/client";
+import { bufferEvents, flushEvents, updateCursorCH } from "@/lib/db/clickhouse-ingest";
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateAndRateLimit } from "@/lib/api/middleware";
 
@@ -79,7 +80,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const networkConfig = getNetworkConfig();
-    const events: unknown[] = [];
+    let totalEvents = 0;
     let totalChunks = 0;
 
     await ingestHistoricalRange({
@@ -89,9 +90,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       endSequence: body.endSequence,
       chunkSize,
       onChunkComplete: async (result) => {
-        events.push(...result.events);
+        // Buffer into ClickHouse; auto-flushes at every 10 000 rows.
+        await bufferEvents(result.events as any[]);
+        totalEvents += result.eventCount;
       },
-      onComplete: async (_totalEvents, chunks) => {
+      onComplete: async (_total, chunks) => {
+        // Drain any remainder that didn't fill a full batch.
+        await flushEvents();
+        await updateCursorCH(body.endSequence);
         totalChunks = chunks;
       },
     });
@@ -99,15 +105,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({
       success: true,
       contractId: body.contractId,
-      range: {
-        start: body.startSequence,
-        end: body.endSequence,
-      },
-      results: {
-        totalEvents: events.length,
-        totalChunks,
-        events,
-      },
+      range: { start: body.startSequence, end: body.endSequence },
+      results: { totalEvents, totalChunks },
     });
   } catch (error) {
     return toErrorResponse(error, {
