@@ -9,6 +9,7 @@ import type { RawEvent, TranslatedEvent } from "./types";
 import { translateEvent } from "./registry";
 import { batchUpsertEvents } from "@/lib/db/utils";
 import { db } from "@/lib/db/client";
+import { triggerWebhooksForEvent } from "@/lib/jobs/queue";
 
 /**
  * Translates and persists a single event
@@ -21,7 +22,7 @@ export async function translateAndPersistEvent(
 
     if (translated) {
       // Save to database
-      await db.event.upsert({
+      const savedEvent = await db.event.upsert({
         where: { id: rawEvent.id },
         update: {
           description: translated.description,
@@ -43,6 +44,22 @@ export async function translateAndPersistEvent(
           blueprintName: translated.blueprintName,
           eventType: translated.eventType,
         },
+      });
+
+      // Dispatch webhooks in background (do not block persistence)
+      void triggerWebhooksForEvent({
+        id: savedEvent.id,
+        contractId: savedEvent.contractId,
+        ledger: savedEvent.ledger,
+        timestamp: savedEvent.timestamp,
+        txHash: savedEvent.txHash,
+        topics: savedEvent.topics,
+        data: savedEvent.data,
+        description: savedEvent.description,
+        status: savedEvent.status,
+        blueprintName: savedEvent.blueprintName,
+        eventType: savedEvent.eventType,
+        createdAt: savedEvent.createdAt,
       });
     }
 

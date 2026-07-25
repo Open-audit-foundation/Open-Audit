@@ -77,7 +77,6 @@
     "yaml": "^2.3.4"
   },
   "devDependencies": {
-    "@types/bull": "^4.10.8",
     "@types/ioredis": "^4.28.10",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20",

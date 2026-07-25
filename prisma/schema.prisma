@@ -107,3 +107,37 @@ model ReconciliationConfig {
   
   updatedAt       DateTime @updatedAt
 }
+
+// Webhook subscription management
+model WebhookSubscription {
+  id           String   @id @default(cuid())
+  url          String
+  contractId   String?
+  secretHash   String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  deliveries   WebhookDelivery[]
+
+  @@index([url])
+  @@index([contractId])
+  @@index([isActive])
+}
+
+// Webhook delivery telemetry
+model WebhookDelivery {
+  id             String   @id @default(cuid())
+  subscriptionId String
+  eventId        String
+  httpStatus     Int?
+  succeeded      Boolean
+  attempts       Int      @default(1)
+  createdAt      DateTime @default(now())
+
+  subscription   WebhookSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId])
+  @@index([eventId])
+  @@index([succeeded])
+}
