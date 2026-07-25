@@ -131,7 +131,13 @@ export function useLiveFeed(onEvent: (event: TranslatedEvent) => void): LiveFeed
       setNewEventIds((prev) => new Set(prev).add(event.raw.id));
 
       // Remove the highlight badge after the animation completes (600 ms).
-      setTimeout(() => {
+      // `timeoutId` is declared with `let` (rather than `const`) so it can be
+      // referenced inside the setTimeout callback closure before the
+      // assignment below has completed — using `const` here would leave the
+      // callback capturing a binding that is still in the temporal dead zone
+      // when the timer fires, throwing a ReferenceError.
+      let timeoutId: ReturnType<typeof setTimeout>;
+      timeoutId = setTimeout(() => {
         setNewEventIds((prev) => {
           const next = new Set(prev);
           next.delete(event.raw.id);

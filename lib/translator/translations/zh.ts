@@ -1,4 +1,6 @@
-export const ZH_TRANSLATIONS = {
+import type { TranslationMap } from "../types";
+
+export const ZH_TRANSLATIONS: TranslationMap = {
   sac: {
     transfer: (from: string, amount: string, symbol: string, to: string) =>
       `公钥 [${from}] 向 [${to}] 转账了 ${amount} ${symbol}`,
@@ -24,5 +26,17 @@ export const ZH_TRANSLATIONS = {
       ManageSellOffer: "管理卖出报价",
       OfferFilled: "报价成交",
     },
+  },
+  generic: {
+    unregisteredContractName: "未注册的合约",
+    unregisteredContractDescription: (payload: string) => `[未注册的合约] ${payload}`,
+    unknownEventNoBlueprint: (contractId: string, data: string) =>
+      `[未知事件：合约 ${contractId} 没有注册的蓝图。十六进制数据：${data}]`,
+    unknownEventNoBlueprintApplicable: (contractId: string, ledger: number, data: string) =>
+      `[未知事件：合约 ${contractId} 在账本 ${ledger} 没有适用的蓝图。十六进制数据：${data}]`,
+    invalidStringLength: "[无效的字符串长度]",
+    invalidUtf8: "[无效的 UTF-8]",
+    invalidSymbolLength: "[无效的符号长度]",
+    unknownAddress: "[未知地址]",
   },
 };

@@ -1,4 +1,6 @@
-export const EN_TRANSLATIONS = {
+import type { TranslationMap } from "../types";
+
+export const EN_TRANSLATIONS: TranslationMap = {
   sac: {
     transfer: (from: string, amount: string, symbol: string, to: string) =>
       `Public Key [${from}] transferred ${amount} ${symbol} to [${to}]`,
@@ -24,5 +26,17 @@ export const EN_TRANSLATIONS = {
       ManageSellOffer: "Manage Sell Offer",
       OfferFilled: "Offer Filled",
     },
+  },
+  generic: {
+    unregisteredContractName: "Unregistered Contract",
+    unregisteredContractDescription: (payload: string) => `[Unregistered Contract] ${payload}`,
+    unknownEventNoBlueprint: (contractId: string, data: string) =>
+      `[Unknown Event: No blueprint registered for contract ${contractId}. Hex Data: ${data}]`,
+    unknownEventNoBlueprintApplicable: (contractId: string, ledger: number, data: string) =>
+      `[Unknown Event: No blueprint applicable for contract ${contractId} at ledger ${ledger}. Hex Data: ${data}]`,
+    invalidStringLength: "[invalid string length]",
+    invalidUtf8: "[invalid UTF-8]",
+    invalidSymbolLength: "[invalid symbol length]",
+    unknownAddress: "[unknown address]",
   },
 };

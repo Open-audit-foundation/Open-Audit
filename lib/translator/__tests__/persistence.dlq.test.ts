@@ -1,19 +1,24 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { RawEvent, TranslatedEvent } from "../types";
 import * as Persistence from "../persistence";
-import { db } from "@/lib/db/client";
-import { translateEvent } from "../registry";
+import { db } from "../../db/client";
+import { translateWithCache } from "../registry";
+import { triggerWebhooksForEvent } from "../../jobs/queue";
+import { isRedisEnabled } from "../../cache/redisCache";
 
 vi.mock("../registry", async () => {
-  const actual = await vi.importActual<typeof import("../registry")>("../registry");
   return {
-    ...actual,
-    translateEvent: vi.fn(),
+    translateWithCache: vi.fn(),
   };
 });
 
-vi.mock("@/lib/jobs/queue", () => ({
+vi.mock("../../jobs/queue", () => ({
   triggerWebhooksForEvent: vi.fn(),
+}));
+
+vi.mock("../../cache/redisCache", () => ({
+  isRedisEnabled: vi.fn(),
+  setCachedTranslation: vi.fn(),
 }));
 
 vi.mock("@/lib/ipfs/offloader", () => ({
@@ -24,7 +29,9 @@ vi.mock("@/lib/ipfs/offloader", () => ({
   })),
 }));
 
-const mockedTranslateEvent = translateEvent as unknown as vi.MockedFunction<typeof translateEvent>;
+const mockedTranslateWithCache = vi.mocked(translateWithCache);
+const mockedTriggerWebhooksForEvent = vi.mocked(triggerWebhooksForEvent);
+const mockedIsRedisEnabled = vi.mocked(isRedisEnabled);
 
 const event: RawEvent = {
   id: "dead-letter-1",
@@ -39,13 +46,15 @@ const event: RawEvent = {
 describe("translateAndPersistEvent DLQ", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    mockedTriggerWebhooksForEvent.mockResolvedValue(undefined);
+    mockedIsRedisEnabled.mockReturnValue(false);
   });
 
   it("writes a DeadLetterEvent when translation fails", async () => {
     const testError = new Error("Invalid XDR payload");
-    mockedTranslateEvent.mockRejectedValueOnce(testError as any);
+    mockedTranslateWithCache.mockRejectedValueOnce(testError);
 
-    const createSpy = vi.spyOn(db.deadLetterEvent, "create");
+    const createSpy = vi.spyOn(db.deadLetterEvent, "create").mockResolvedValue({} as never);
 
     const result = await Persistence.translateAndPersistEvent(event);
 
@@ -60,5 +69,71 @@ describe("translateAndPersistEvent DLQ", () => {
         errorMessage: "Invalid XDR payload",
       }),
     });
+  });
+
+  it("limits in-flight persistence operations to BATCH_CONCURRENCY", async () => {
+    const previousConcurrency = process.env.BATCH_CONCURRENCY;
+    process.env.BATCH_CONCURRENCY = "3";
+
+    const rawEvents = Array.from({ length: 10 }, (_, index) => ({
+      ...event,
+      id: `batch-event-${index}`,
+      txHash: `tx-${index}`,
+    }));
+
+    mockedTranslateWithCache.mockImplementation(async (rawEvent) => ({
+      raw: rawEvent,
+      description: `Translated ${rawEvent.id}`,
+      status: "translated",
+      blueprintName: "Test Blueprint",
+      eventType: "Test Event",
+      schemaVersion: null,
+    }));
+
+    let started = 0;
+    let inFlight = 0;
+    let maxInFlight = 0;
+
+    let releaseUpserts: (() => void) | undefined;
+    const upsertGate = new Promise<void>((resolve) => {
+      releaseUpserts = resolve;
+    });
+
+    const upsertSpy = vi.spyOn(db.event, "upsert").mockImplementation(async ({ create }) => {
+      started += 1;
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+
+      await upsertGate;
+
+      inFlight -= 1;
+
+      return {
+        ...create,
+        updatedAt: new Date(),
+      } as never;
+    });
+
+    try {
+      const batchPromise = Persistence.translateAndPersistBatch(rawEvents);
+
+      await vi.waitFor(() => {
+        expect(started).toBe(3);
+      });
+
+      expect(maxInFlight).toBe(3);
+
+      releaseUpserts?.();
+
+      const result = await batchPromise;
+
+      expect(result.successful).toBe(rawEvents.length);
+      expect(result.failed).toBe(0);
+      expect(result.translated).toHaveLength(rawEvents.length);
+      expect(upsertSpy).toHaveBeenCalledTimes(rawEvents.length);
+      expect(maxInFlight).toBeLessThanOrEqual(3);
+    } finally {
+      process.env.BATCH_CONCURRENCY = previousConcurrency;
+    }
   });
 });
