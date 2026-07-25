@@ -4,21 +4,25 @@
  *
  * This is an isolated, standalone process that:
  * 1. Polls/streams Stellar blockchain for contract events
- * 2. Processes and translates events
- * 3. Publishes events to Redis Pub/Sub for consumption by WebSocket server
- *
- * This worker is completely decoupled from the Next.js server and can run
- * independently in its own container/process.
+ * 2. Reads the last indexed ledger from the database on startup and resumes
+ *    from there (using lib/stellar/indexer-persistent.ts / lib/db/utils.ts).
+ * 3. Writes the cursor back to the database after every successfully
+ *    processed event batch so restarts are cheap.
+ * 4. On SIGTERM, waits for any in-flight batch to finish, writes the final
+ *    cursor, and exits cleanly.
+ * 5. Publishes translated events to Redis Pub/Sub for consumption by the
+ *    WebSocket server.
  *
  * Run with: ts-node --project tsconfig.server.json src/worker/indexer.ts
  * Or: npm run worker:indexer
  */
 
 import Redis from "ioredis";
-import { startHorizonStreamingIndexer } from "../../lib/stellar/indexer";
+import { startHorizonStreamingIndexer, startEventIndexer } from "../../lib/stellar/indexer";
 import { getNetworkConfig } from "../../lib/stellar/client";
 import { translateEvent } from "../../lib/translator/registry";
-import { fetchContractEventsResilient } from "../../lib/stellar/resilient-stellar-client";
+import { getCursor, updateCursor } from "../../lib/db/utils";
+import { eventResponseToRawEvent } from "../../lib/stellar/events";
 import type { RawEvent } from "../../lib/translator/types";
 
 // ============================================================================
@@ -31,11 +35,14 @@ const WORKER_ID = process.env.WORKER_ID || `worker-${process.pid}`;
 const INDEXER_MODE = process.env.INDEXER_MODE || "stream"; // "stream" or "poll"
 const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || "5000", 10);
 const CONTRACT_IDS = process.env.CONTRACT_IDS
-  ? process.env.CONTRACT_IDS.split(",")
+  ? process.env.CONTRACT_IDS.split(",").map((id) => id.trim()).filter(Boolean)
   : undefined;
 
-// Resilience settings (for polling mode)
-const ENABLE_RESILIENCE = process.env.ENABLE_RESILIENCE !== "false";
+/**
+ * Fallback ledger to start from on first run (when no cursor exists in the DB).
+ * Set START_LEDGER in the environment to override.
+ */
+const START_LEDGER = parseInt(process.env.START_LEDGER || "0", 10);
 
 // Health check interval
 const HEALTH_CHECK_INTERVAL_MS = parseInt(
@@ -50,41 +57,39 @@ const HEALTH_CHECK_INTERVAL_MS = parseInt(
 class RedisPublisher {
   private client: Redis | null = null;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 10;
-  private reconnectDelayMs = 1000;
+  private readonly maxReconnectAttempts = 10;
+  private readonly reconnectDelayMs = 1000;
   private isConnected = false;
   private publishQueue: Array<{ channel: string; message: string }> = [];
-  private maxQueueSize = 1000;
+  private readonly maxQueueSize = 1000;
 
-  constructor(private url: string) {}
+  constructor(private readonly url: string) {}
 
   /**
-   * Initialize Redis connection with auto-reconnect
+   * Initialize Redis connection with auto-reconnect.
    */
   async connect(): Promise<void> {
     try {
       console.log(`[${WORKER_ID}] Connecting to Redis at ${this.url}...`);
 
       this.client = new Redis(this.url, {
-        // Retry strategy with exponential backoff
         retryStrategy: (times) => {
           if (times > this.maxReconnectAttempts) {
             console.error(
               `[${WORKER_ID}] Max Redis reconnection attempts reached. Giving up.`
             );
-            return null; // Stop retrying
+            return null;
           }
-
           const delay = Math.min(times * this.reconnectDelayMs, 10000);
-          console.log(`[${WORKER_ID}] Redis reconnecting in ${delay}ms (attempt ${times})...`);
+          console.log(
+            `[${WORKER_ID}] Redis reconnecting in ${delay}ms (attempt ${times})...`
+          );
           return delay;
         },
-        // Auto-reconnect on connection loss
         enableReadyCheck: true,
         maxRetriesPerRequest: 3,
       });
 
-      // Connection event handlers
       this.client.on("connect", () => {
         console.log(`[${WORKER_ID}] Redis connected`);
       });
@@ -93,7 +98,7 @@ class RedisPublisher {
         console.log(`[${WORKER_ID}] Redis ready`);
         this.isConnected = true;
         this.reconnectAttempts = 0;
-        this.flushQueue();
+        void this.flushQueue();
       });
 
       this.client.on("error", (error) => {
@@ -108,17 +113,15 @@ class RedisPublisher {
 
       this.client.on("reconnecting", () => {
         this.reconnectAttempts++;
-        console.log(`[${WORKER_ID}] Redis reconnecting (attempt ${this.reconnectAttempts})...`);
+        console.log(
+          `[${WORKER_ID}] Redis reconnecting (attempt ${this.reconnectAttempts})...`
+        );
       });
 
-      // Wait for ready state
       await new Promise<void>((resolve, reject) => {
         if (!this.client) return reject(new Error("Redis client not initialized"));
-
         this.client.once("ready", () => resolve());
         this.client.once("error", reject);
-
-        // Timeout after 10 seconds
         setTimeout(() => reject(new Error("Redis connection timeout")), 10000);
       });
 
@@ -130,20 +133,20 @@ class RedisPublisher {
   }
 
   /**
-   * Publish an event to Redis channel
-   * Queues messages if Redis is temporarily disconnected
+   * Publish a message to a Redis channel.
+   * Queues messages while Redis is temporarily disconnected.
    */
   async publish(channel: string, message: string): Promise<void> {
     if (!this.client) {
       throw new Error("Redis client not initialized. Call connect() first.");
     }
 
-    // If not connected, queue the message
     if (!this.isConnected) {
       if (this.publishQueue.length < this.maxQueueSize) {
         this.publishQueue.push({ channel, message });
         console.warn(
-          `[${WORKER_ID}] Redis disconnected. Queued message (${this.publishQueue.length}/${this.maxQueueSize})`
+          `[${WORKER_ID}] Redis disconnected. Queued message ` +
+            `(${this.publishQueue.length}/${this.maxQueueSize})`
         );
       } else {
         console.error(
@@ -160,7 +163,6 @@ class RedisPublisher {
       );
     } catch (error) {
       console.error(`[${WORKER_ID}] Failed to publish to Redis:`, error);
-      // Queue for retry
       if (this.publishQueue.length < this.maxQueueSize) {
         this.publishQueue.push({ channel, message });
       }
@@ -168,13 +170,13 @@ class RedisPublisher {
     }
   }
 
-  /**
-   * Flush queued messages when connection is restored
-   */
+  /** Drain the in-memory publish queue once the connection is restored. */
   private async flushQueue(): Promise<void> {
     if (this.publishQueue.length === 0) return;
 
-    console.log(`[${WORKER_ID}] Flushing ${this.publishQueue.length} queued messages...`);
+    console.log(
+      `[${WORKER_ID}] Flushing ${this.publishQueue.length} queued messages...`
+    );
 
     const queue = [...this.publishQueue];
     this.publishQueue = [];
@@ -184,15 +186,12 @@ class RedisPublisher {
         await this.publish(channel, message);
       } catch (error) {
         console.error(`[${WORKER_ID}] Failed to flush queued message:`, error);
-        // Re-queue if failed
         this.publishQueue.push({ channel, message });
       }
     }
   }
 
-  /**
-   * Graceful disconnect
-   */
+  /** Graceful disconnect. */
   async disconnect(): Promise<void> {
     if (this.client) {
       console.log(`[${WORKER_ID}] Disconnecting Redis publisher...`);
@@ -202,14 +201,7 @@ class RedisPublisher {
     }
   }
 
-  /**
-   * Get connection status
-   */
-  getStatus(): {
-    connected: boolean;
-    queueSize: number;
-    reconnectAttempts: number;
-  } {
+  getStatus(): { connected: boolean; queueSize: number; reconnectAttempts: number } {
     return {
       connected: this.isConnected,
       queueSize: this.publishQueue.length,
@@ -224,61 +216,145 @@ class RedisPublisher {
 
 class StellarIndexerWorker {
   private publisher: RedisPublisher;
-  private indexer: ReturnType<typeof startHorizonStreamingIndexer> | null = null;
+  private indexer:
+    | ReturnType<typeof startHorizonStreamingIndexer>
+    | ReturnType<typeof startEventIndexer>
+    | null = null;
+
   private isRunning = false;
   private processedCount = 0;
   private errorCount = 0;
   private lastProcessedTime: number | null = null;
   private healthCheckInterval: NodeJS.Timeout | null = null;
 
+  /**
+   * Tracks the ledger number of the batch currently being processed.
+   * Held while an in-flight batch is in progress so SIGTERM can wait for it.
+   */
+  private currentLedger = 0;
+
+  /**
+   * Promise that resolves when the in-flight batch completes.
+   * Set to a pending promise at the start of each batch and resolved when done.
+   */
+  private inflight: Promise<void> = Promise.resolve();
+  private resolveInflight!: () => void;
+
   constructor() {
     this.publisher = new RedisPublisher(REDIS_URL);
+    this.resetInflight();
   }
 
-  /**
-   * Initialize the worker
-   */
+  /** Replace the inflight sentinel with a fresh pending promise. */
+  private resetInflight(): void {
+    this.inflight = new Promise<void>((resolve) => {
+      this.resolveInflight = resolve;
+    });
+    // Mark it as immediately resolved by default (no batch in flight).
+    this.resolveInflight();
+  }
+
+  // --------------------------------------------------------------------------
+  // Lifecycle
+  // --------------------------------------------------------------------------
+
   async start(): Promise<void> {
-    try {
-      console.log(`[${WORKER_ID}] Starting Stellar Indexer Worker...`);
-      console.log(`[${WORKER_ID}] Mode: ${INDEXER_MODE}`);
-      console.log(`[${WORKER_ID}] Network: ${process.env.NEXT_PUBLIC_NETWORK || "testnet"}`);
-      console.log(`[${WORKER_ID}] Redis Channel: ${REDIS_CHANNEL}`);
-      console.log(`[${WORKER_ID}] Resilience: ${ENABLE_RESILIENCE ? "enabled" : "disabled"}`);
+    console.log(`[${WORKER_ID}] Starting Stellar Indexer Worker...`);
+    console.log(`[${WORKER_ID}] Mode: ${INDEXER_MODE}`);
+    console.log(`[${WORKER_ID}] Network: ${process.env.NEXT_PUBLIC_NETWORK || "testnet"}`);
+    console.log(`[${WORKER_ID}] Redis Channel: ${REDIS_CHANNEL}`);
 
-      if (CONTRACT_IDS) {
-        console.log(`[${WORKER_ID}] Filtering contracts: ${CONTRACT_IDS.join(", ")}`);
-      }
-
-      // Connect to Redis
-      await this.publisher.connect();
-
-      // Start the indexer based on mode
-      if (INDEXER_MODE === "stream") {
-        this.startStreamingIndexer();
-      } else {
-        this.startPollingIndexer();
-      }
-
-      this.isRunning = true;
-
-      // Start health check reporter
-      this.startHealthCheck();
-
-      console.log(`[${WORKER_ID}] ✅ Worker started successfully`);
-    } catch (error) {
-      console.error(`[${WORKER_ID}] Failed to start worker:`, error);
-      throw error;
+    if (CONTRACT_IDS) {
+      console.log(`[${WORKER_ID}] Filtering contracts: ${CONTRACT_IDS.join(", ")}`);
     }
+
+    // Read the persisted cursor.  Fall back to START_LEDGER on first run.
+    const storedLedger = await getCursor();
+    const resumeLedger = storedLedger > 0 ? storedLedger : START_LEDGER;
+    this.currentLedger = resumeLedger;
+
+    if (storedLedger > 0) {
+      console.log(
+        `[${WORKER_ID}] Resuming from ledger ${resumeLedger} (read from database)`
+      );
+    } else {
+      console.log(
+        `[${WORKER_ID}] No stored cursor found. Starting from ledger ${resumeLedger} (START_LEDGER)`
+      );
+    }
+
+    await this.publisher.connect();
+
+    if (INDEXER_MODE === "stream") {
+      this.startStreamingIndexer(resumeLedger);
+    } else {
+      await this.startPollingIndexer(resumeLedger);
+    }
+
+    this.isRunning = true;
+    this.startHealthCheck();
+
+    console.log(`[${WORKER_ID}] ✅ Worker started successfully`);
   }
 
   /**
-   * Start streaming indexer (real-time via Horizon SSE)
+   * Graceful shutdown:
+   * 1. Stop accepting new work from the underlying indexer.
+   * 2. Wait for the in-flight batch (if any) to complete.
+   * 3. Persist the final cursor so the next startup resumes cleanly.
+   * 4. Tear down Redis and the health-check timer.
    */
-  private startStreamingIndexer(): void {
+  async stop(): Promise<void> {
+    console.log(`[${WORKER_ID}] Shutting down gracefully...`);
+    this.isRunning = false;
+
+    // Stop the health-check timer so it doesn't fire during shutdown.
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
+    }
+
+    // Signal the underlying indexer to stop producing new events.
+    if (this.indexer) {
+      this.indexer.stop();
+      this.indexer = null;
+    }
+
+    // Wait for any in-flight batch to finish before writing the cursor.
+    console.log(`[${WORKER_ID}] Waiting for in-flight batch to complete...`);
+    await this.inflight;
+
+    // Persist the final cursor.
+    if (this.currentLedger > 0) {
+      try {
+        await updateCursor(this.currentLedger);
+        console.log(
+          `[${WORKER_ID}] Final cursor persisted at ledger ${this.currentLedger}`
+        );
+      } catch (err) {
+        console.error(`[${WORKER_ID}] Failed to persist final cursor:`, err);
+      }
+    }
+
+    await this.publisher.disconnect();
+    console.log(`[${WORKER_ID}] ✅ Shutdown complete`);
+  }
+
+  // --------------------------------------------------------------------------
+  // Indexer modes
+  // --------------------------------------------------------------------------
+
+  /**
+   * Real-time streaming indexer via Horizon SSE.
+   * The streaming mode doesn't naturally expose a per-ledger cursor, so we
+   * persist after every event using the event's ledger number.
+   */
+  private startStreamingIndexer(resumeLedger: number): void {
     const networkConfig = getNetworkConfig();
 
-    console.log(`[${WORKER_ID}] Starting real-time streaming indexer...`);
+    console.log(
+      `[${WORKER_ID}] Starting streaming indexer from ledger ${resumeLedger}...`
+    );
 
     this.indexer = startHorizonStreamingIndexer({
       networkConfig,
@@ -286,7 +362,7 @@ class StellarIndexerWorker {
       workerCount: parseInt(process.env.INDEXER_WORKER_COUNT || "4", 10),
       maxQueueSize: parseInt(process.env.INDEXER_MAX_QUEUE_SIZE || "1000", 10),
       onEvent: async (rawEvent) => {
-        await this.handleEvent(rawEvent);
+        await this.handleStreamEvent(rawEvent);
       },
       onError: (error) => {
         this.handleError(error);
@@ -295,25 +371,97 @@ class StellarIndexerWorker {
   }
 
   /**
-   * Start polling indexer (batch polling)
+   * Batch-polling indexer via Soroban RPC getEvents.
+   * Reads a ledger range on each tick, calls updateCursor after every
+   * successful batch, and respects the in-flight sentinel for SIGTERM.
    */
-  private startPollingIndexer(): void {
-    console.log(`[${WORKER_ID}] Starting polling indexer (interval: ${POLL_INTERVAL_MS}ms)...`);
+  private async startPollingIndexer(resumeLedger: number): Promise<void> {
+    const networkConfig = getNetworkConfig();
 
-    // Implementation for polling mode
-    // (Can be extended based on requirements)
-    console.warn(`[${WORKER_ID}] Polling mode not fully implemented in this version`);
+    if (!CONTRACT_IDS || CONTRACT_IDS.length === 0) {
+      console.warn(
+        `[${WORKER_ID}] Polling mode requires CONTRACT_IDS to be set. Worker will idle.`
+      );
+      return;
+    }
+
+    console.log(
+      `[${WORKER_ID}] Starting polling indexer from ledger ${resumeLedger} ` +
+        `(interval: ${POLL_INTERVAL_MS}ms)...`
+    );
+
+    this.indexer = startEventIndexer({
+      networkConfig,
+      contractIds: CONTRACT_IDS,
+      startLedger: resumeLedger,
+      pollIntervalMs: POLL_INTERVAL_MS,
+      onEvents: async (events, cursor) => {
+        // Mark batch as in-flight before any async work.
+        let batchResolve!: () => void;
+        this.inflight = new Promise<void>((resolve) => {
+          batchResolve = resolve;
+        });
+
+        try {
+          for (const rawEvent of events) {
+            const converted = eventResponseToRawEvent(rawEvent, CONTRACT_IDS![0]);
+            await this.handleEvent(converted);
+          }
+
+          // Persist cursor after every successfully processed batch.
+          if (cursor.lastLedger > 0) {
+            this.currentLedger = cursor.lastLedger;
+            await updateCursor(cursor.lastLedger);
+            console.log(
+              `[${WORKER_ID}] Cursor persisted at ledger ${cursor.lastLedger}`
+            );
+          }
+        } finally {
+          // Always resolve so SIGTERM is never blocked indefinitely.
+          batchResolve();
+        }
+      },
+      onError: (error) => {
+        this.handleError(error);
+      },
+    });
+  }
+
+  // --------------------------------------------------------------------------
+  // Event handling
+  // --------------------------------------------------------------------------
+
+  /**
+   * Handle a single event from the streaming indexer.
+   * Persists the cursor after each event so restarts have high granularity.
+   */
+  private async handleStreamEvent(rawEvent: RawEvent): Promise<void> {
+    // Mark as in-flight.
+    let batchResolve!: () => void;
+    this.inflight = new Promise<void>((resolve) => {
+      batchResolve = resolve;
+    });
+
+    try {
+      await this.handleEvent(rawEvent);
+
+      // Persist cursor for the streaming mode (per-event granularity).
+      if (rawEvent.ledger > 0) {
+        this.currentLedger = rawEvent.ledger;
+        await updateCursor(rawEvent.ledger);
+      }
+    } finally {
+      batchResolve();
+    }
   }
 
   /**
-   * Handle an event from the indexer
+   * Core event processing: translate and publish to Redis.
    */
   private async handleEvent(rawEvent: RawEvent): Promise<void> {
     try {
-      // Translate the event
       const translatedEvent = translateEvent(rawEvent);
 
-      // Prepare the message payload
       const message = JSON.stringify({
         type: "event",
         timestamp: Date.now(),
@@ -322,10 +470,8 @@ class StellarIndexerWorker {
         translated: translatedEvent,
       });
 
-      // Publish to Redis
       await this.publisher.publish(REDIS_CHANNEL, message);
 
-      // Update metrics
       this.processedCount++;
       this.lastProcessedTime = Date.now();
 
@@ -333,79 +479,54 @@ class StellarIndexerWorker {
         console.log(`[${WORKER_ID}] Processed ${this.processedCount} events so far`);
       }
     } catch (error) {
-      console.error(`[${WORKER_ID}] Error handling event:`, error);
+      console.error(`[${WORKER_ID}] Error handling event ${rawEvent.id}:`, error);
       this.errorCount++;
-      console.error('[indexer.ts] Error:', error instanceof Error ? error : new Error(String(error)));
     }
   }
 
-  /**
-   * Handle indexer errors
-   */
   private handleError(error: Error): void {
     console.error(`[${WORKER_ID}] Indexer error:`, error.message);
     this.errorCount++;
-    console.error('[indexer.ts] Error:', error);
   }
 
-  /**
-   * Start periodic health check reporting
-   */
+  // --------------------------------------------------------------------------
+  // Health check
+  // --------------------------------------------------------------------------
+
   private startHealthCheck(): void {
     this.healthCheckInterval = setInterval(() => {
-      const status = this.getStatus();
-      console.log(`[${WORKER_ID}] Health Check:`, JSON.stringify(status, null, 2));
+      console.log(
+        `[${WORKER_ID}] Health Check:`,
+        JSON.stringify(this.getStatus(), null, 2)
+      );
     }, HEALTH_CHECK_INTERVAL_MS);
   }
 
-  /**
-   * Get worker status
-   */
   getStatus(): {
     workerId: string;
     running: boolean;
     mode: string;
+    currentLedger: number;
     processedCount: number;
     errorCount: number;
     lastProcessedTime: number | null;
     redis: ReturnType<RedisPublisher["getStatus"]>;
-    indexerMetrics?: any;
+    indexerMetrics?: ReturnType<ReturnType<typeof startHorizonStreamingIndexer>["getMetrics"]>;
   } {
     return {
       workerId: WORKER_ID,
       running: this.isRunning,
       mode: INDEXER_MODE,
+      currentLedger: this.currentLedger,
       processedCount: this.processedCount,
       errorCount: this.errorCount,
       lastProcessedTime: this.lastProcessedTime,
       redis: this.publisher.getStatus(),
-      indexerMetrics: this.indexer?.getMetrics(),
+      indexerMetrics:
+        this.indexer && "getMetrics" in this.indexer
+          ? (this.indexer as ReturnType<typeof startHorizonStreamingIndexer>).getMetrics()
+          : undefined,
     };
-  }
-
-  /**
-   * Graceful shutdown
-   */
-  async stop(): Promise<void> {
-    console.log(`[${WORKER_ID}] Shutting down gracefully...`);
-    this.isRunning = false;
-
-    // Stop health check
-    if (this.healthCheckInterval) {
-      clearInterval(this.healthCheckInterval);
-      this.healthCheckInterval = null;
-    }
-
-    // Stop indexer
-    if (this.indexer) {
-      this.indexer.stop();
-      this.indexer = null;
-    }
-
-    // Disconnect Redis
-    await this.publisher.disconnect();
-
-    console.log(`[${WORKER_ID}] ✅ Shutdown complete`);
   }
 }
 
@@ -415,33 +536,42 @@ class StellarIndexerWorker {
 
 const worker = new StellarIndexerWorker();
 
-// Graceful shutdown handlers
-process.on("SIGTERM", async () => {
+/**
+ * SIGTERM: wait for the in-flight batch and write the final cursor before exit.
+ * This is the graceful shutdown path used by Docker / PM2 / Kubernetes.
+ */
+process.on("SIGTERM", () => {
   console.log(`[${WORKER_ID}] Received SIGTERM signal`);
-  await worker.stop();
-  process.exit(0);
+  worker
+    .stop()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      console.error(`[${WORKER_ID}] Error during SIGTERM shutdown:`, err);
+      process.exit(1);
+    });
 });
 
-process.on("SIGINT", async () => {
+process.on("SIGINT", () => {
   console.log(`[${WORKER_ID}] Received SIGINT signal`);
-  await worker.stop();
-  process.exit(0);
+  worker
+    .stop()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      console.error(`[${WORKER_ID}] Error during SIGINT shutdown:`, err);
+      process.exit(1);
+    });
 });
 
-// Handle uncaught errors
 process.on("uncaughtException", (error) => {
   console.error(`[${WORKER_ID}] Uncaught exception:`, error);
-  console.error('[indexer.ts] Error:', error);
   process.exit(1);
 });
 
 process.on("unhandledRejection", (reason) => {
   console.error(`[${WORKER_ID}] Unhandled rejection:`, reason);
-  console.error('[indexer.ts] Error:', new Error(String(reason)));
   process.exit(1);
 });
 
-// Start the worker
 worker
   .start()
   .then(() => {
