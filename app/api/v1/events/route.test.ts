@@ -32,6 +32,7 @@ type Row = {
   status: string;
   blueprintName: string | null;
   eventType: string | null;
+  schemaVersion: string | null;
 };
 
 function makeRow(overrides: Partial<Row> & Pick<Row, "id" | "ledger">): Row {
@@ -45,6 +46,7 @@ function makeRow(overrides: Partial<Row> & Pick<Row, "id" | "ledger">): Row {
     status: "translated",
     blueprintName: "Stellar Asset Contract (SAC)",
     eventType: "Transfer",
+    schemaVersion: "1.0.0",
     ...overrides,
   };
 }
@@ -114,6 +116,22 @@ describe("GET /api/v1/events", () => {
     expect(body.events).toHaveLength(2);
     expect(body.events[0].ledger).toBe(102); // ledger desc
     expect(body.pagination).toEqual({ page: 1, limit: 2, total: 3, hasMore: true });
+  });
+
+  it("includes schemaVersion in each returned event", async () => {
+    installTable([
+      makeRow({ id: "e-1", ledger: 100, schemaVersion: "1.0.0" }),
+      makeRow({ id: "e-2", ledger: 101, schemaVersion: "2.0.0" }),
+      makeRow({ id: "e-3", ledger: 102, schemaVersion: null }),
+    ]);
+
+    const res = await GET(request(""));
+    const body = await res.json();
+
+    const byId = Object.fromEntries(body.events.map((e: any) => [e.id, e.schemaVersion]));
+    expect(byId["e-1"]).toBe("1.0.0");
+    expect(byId["e-2"]).toBe("2.0.0");
+    expect(byId["e-3"]).toBeNull();
   });
 
   it("returns the second page and reports no more pages once exhausted", async () => {
