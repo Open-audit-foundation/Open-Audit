@@ -97,7 +97,7 @@
     "swagger-ui-react": "^5.32.6",
     "tailwind-merge": "^2.3.0",
     "tailwindcss-animate": "^1.0.7",
-    "ws": "^8.21.0",
+    "ws": "^8.21.1",
     "yaml": "^2.8.1"
   },
   "devDependencies": {
@@ -136,7 +136,7 @@
     "util-deprecate": "^1.0.2",
     "vitest": "^3.2.7",
     "vitest-axe": "^0.1.0",
-    "ws": "^8.18.0"
+    "ws": "^8.21.1"
   },
   "overrides": {
     "form-data": "^4.0.6",
