@@ -43,6 +43,30 @@ export interface TranslationMap {
       OfferFilled: string;
     };
   };
+  soroswap: {
+    swap: (to: string, amountIn: string, tokenIn: string, amountOut: string, tokenOut: string) => string;
+    addLiquidity: (to: string, amountA: string, tokenA: string, amountB: string, tokenB: string, liquidity: string) => string;
+    removeLiquidity: (to: string, amountA: string, tokenA: string, amountB: string, tokenB: string, liquidity: string) => string;
+    eventTypes: {
+      Swap: string;
+      AddLiquidity: string;
+      RemoveLiquidity: string;
+    };
+  };
+  blend: {
+    supply: (from: string, amount: string, asset: string) => string;
+    borrow: (from: string, amount: string, asset: string) => string;
+    repay: (from: string, amount: string, asset: string) => string;
+    withdraw: (from: string, amount: string, asset: string) => string;
+    liquidate: (user: string, filler: string, amount: string) => string;
+    eventTypes: {
+      Supply: string;
+      Borrow: string;
+      Repay: string;
+      Withdraw: string;
+      Liquidate: string;
+    };
+  };
   generic: {
     /** Fallback contract name shown when an unregistered contract has no custom ABI name. */
     unregisteredContractName: string;
