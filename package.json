@@ -90,7 +90,7 @@
     "react-dom": "^18",
     "react-force-graph-3d": "^1.25.0",
     "react-syntax-highlighter": "^16.1.1",
-    "redis": "^4.6.12",
+    "redis": "^6.1.0",
     "rettime": "^0.11.11",
     "sha.js": "^2.4.12",
     "stellar-sdk": "^12.1.0",
