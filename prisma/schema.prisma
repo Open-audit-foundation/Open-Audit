@@ -22,6 +22,7 @@ model Event {
   status          String   // "translated" | "cryptic"
   blueprintName   String?  // Contract name from blueprint
   eventType       String?  // Event type (transfer, mint, burn, etc.)
+  schemaVersion   String?  // Blueprint schema version that translated this event (e.g. "v2", "1.0.0")
 
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -31,6 +32,7 @@ model Event {
   @@index([txHash])
   @@index([contractId, ledger])
   @@index([timestamp])
+  @@index([schemaVersion])
 }
 
 model DeadLetterEvent {

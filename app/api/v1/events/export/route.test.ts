@@ -29,6 +29,7 @@ type Row = {
   status: string;
   blueprintName: string | null;
   eventType: string | null;
+  schemaVersion: string | null;
 };
 
 function makeRow(overrides: Partial<Row> & Pick<Row, "id" | "ledger">): Row {
@@ -42,6 +43,7 @@ function makeRow(overrides: Partial<Row> & Pick<Row, "id" | "ledger">): Row {
     status: "translated",
     blueprintName: "Stellar Asset Contract (SAC)",
     eventType: "Transfer",
+    schemaVersion: "1.0.0",
     ...overrides,
   };
 }
@@ -89,7 +91,7 @@ describe("GET /api/v1/events/export", () => {
   it("streams CSV rows sourced from the database", async () => {
     installTable([
       makeRow({ id: "e-1", ledger: 100 }),
-      makeRow({ id: "e-2", ledger: 101, eventType: "Mint", description: "Minted 5 USDC" }),
+      makeRow({ id: "e-2", ledger: 101, eventType: "Mint", description: "Minted 5 USDC", schemaVersion: "2.0.0" }),
     ]);
 
     const res = await GET(request("?format=csv"));
@@ -98,14 +100,33 @@ describe("GET /api/v1/events/export", () => {
 
     expect(res.headers.get("Content-Type")).toContain("text/csv");
     expect(lines[0]).toBe(
-      "timestamp,ledger_id,contract_id,tx_hash,event_name,status,plain_english_translation,proof_url"
+      "timestamp,ledger_id,contract_id,tx_hash,event_name,status,plain_english_translation,proof_url,schema_version"
     );
     expect(lines).toHaveLength(3); // header + 2 rows
     expect(lines[1]).toContain("Transfer");
     expect(lines[1]).toContain("Transferred 100 USDC");
+    expect(lines[1]).toContain("1.0.0");
     expect(lines[2]).toContain("Mint");
+    expect(lines[2]).toContain("2.0.0");
     // The route must never fall back to fabricated mock data.
     expect(findMany).toHaveBeenCalled();
+  });
+
+  it("includes schema_version in JSON and NDJSON exports", async () => {
+    installTable([
+      makeRow({ id: "e-1", ledger: 100, schemaVersion: "1.0.0" }),
+      makeRow({ id: "e-2", ledger: 101, schemaVersion: null }),
+    ]);
+
+    const jsonRes = await GET(request("?format=json"));
+    const parsed = JSON.parse(await jsonRes.text());
+    expect(parsed[0].schema_version).toBe("1.0.0");
+    expect(parsed[1].schema_version).toBe("");
+
+    const ndjsonRes = await GET(request("?format=ndjson"));
+    const lines = (await ndjsonRes.text()).trim().split("\n").filter(Boolean);
+    expect(JSON.parse(lines[0]).schema_version).toBe("1.0.0");
+    expect(JSON.parse(lines[1]).schema_version).toBe("");
   });
 
   it("emits a valid JSON array", async () => {
