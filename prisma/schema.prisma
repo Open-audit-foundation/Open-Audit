@@ -62,3 +62,36 @@ model IndexerCursor {
   lastProcessed   DateTime @default(now())
   updatedAt       DateTime @updatedAt
 }
+
+// Webhook subscription registered by an external consumer
+model WebhookSubscription {
+  id          String   @id @default(cuid())
+  url         String
+  contractId  String?  // null = subscribe to all contracts
+  secretHash  String   // HMAC secret stored as scrypt-derived hash
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  deliveries  WebhookDelivery[]
+
+  @@index([isActive])
+  @@index([contractId])
+}
+
+// Record of each delivery attempt for auditing and debugging
+model WebhookDelivery {
+  id             String   @id @default(cuid())
+  subscriptionId String
+  eventId        String
+  httpStatus     Int?     // null when delivery failed before a response
+  succeeded      Boolean
+  attempts       Int      @default(1)
+  createdAt      DateTime @default(now())
+
+  subscription   WebhookSubscription @relation(fields: [subscriptionId], references: [id])
+
+  @@index([subscriptionId])
+  @@index([eventId])
+  @@index([subscriptionId, eventId])
+}
