@@ -78,7 +78,7 @@ export function validateTextField(value: string, maxLength: number = 256): boole
 }
 // ─── Template interpolation ───────────────────────────────────────────────────
 // Pre-compiled once.
-const TEMPLATE_TOKEN_RE = /\{(\w+)\}/g;
+const TEMPLATE_TOKEN_RE = /\{([A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*)\}/g;
 // Cap template length to guard against unbounded input.
 const MAX_TEMPLATE_LENGTH = 2048;
 /**
@@ -172,6 +172,17 @@ function makeDecodedAddress(publicKey: string): DecodedAddress {
  * parsed as an address, so callers always receive a usable G-prefixed string.
  */
 export function decodeAddress(hex: string): DecodedAddress {
+
+  const cached = decodeAddressMemo.get(hex);
+  if (cached) return cached;
+
+  let publicKey: string;
+  try {
+    const cleanHex = hex.startsWith("0x") ? hex.slice(2) : hex;
+    const scAddress = xdr.ScVal.fromXDR(cleanHex, "hex").address();
+    if (scAddress.switch() === xdr.ScAddressType.scAddressTypeAccount()) {
+      publicKey = StrKey.encodeEd25519PublicKey(scAddress.accountId().ed25519()!);
+
   // Check memo cache first.
   const cached = decodeAddressMemo.get(hex);
   if (cached) return cached;
@@ -183,11 +194,27 @@ export function decodeAddress(hex: string): DecodedAddress {
     let publicKey: string;
     if (scAddress.switch() === xdr.ScAddressType.scAddressTypeAccount()) {
       publicKey = StrKey.encodeEd25519PublicKey(scAddress.accountId().ed25519());
+
     } else if (scAddress.switch() === xdr.ScAddressType.scAddressTypeContract()) {
       publicKey = StrKey.encodeContract(scAddress.contractId());
     } else {
       throw new Error("Unsupported address type");
     }
+
+  } catch {
+    // Preserve the registry's historical best-effort behaviour for malformed
+    // or abbreviated values used in previews and tests.
+    const seed = hex.slice(2, 10).toUpperCase();
+    const tail = hex.slice(-4).toUpperCase();
+    publicKey = `G${seed}${"A".repeat(Math.max(0, 48 - seed.length))}${tail}`;
+  }
+
+  const result = { publicKey, short: shortenAddress(publicKey) };
+  decodeAddressMemo.set(hex, result);
+  if (decodeAddressMemo.size > MAX_POOL_SIZE) {
+    const oldest = decodeAddressMemo.keys().next().value;
+    if (oldest !== undefined) decodeAddressMemo.delete(oldest);
+
     result = makeDecodedAddress(publicKey);
   } catch {
     // Fallback to a deterministic placeholder when parsing fails.
@@ -207,6 +234,7 @@ export function decodeAddress(hex: string): DecodedAddress {
         decodedAddressPool.push(removed);
       }
     }
+
   }
   return result;
 }
@@ -313,6 +341,7 @@ export function decodeMap(hex: string): DecodedMap {
       const value = decodeScValInternal(entry.val());
       return { key, value };
     });
+
     return {
       type: "Map",
       entries: decodedEntries,
@@ -320,6 +349,7 @@ export function decodeMap(hex: string): DecodedMap {
     };
   } catch {
     return { type: "Map", entries: [], summary: "Invalid map data" };
+
   }
 }
 

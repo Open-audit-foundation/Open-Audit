@@ -20,6 +20,14 @@
 import { createAllSacBlueprints } from "./blueprints/sac-transfer";
 import { createSacMintBurnBlueprint } from "./blueprints/sac-mint-burn";
 import { createAllSdexBlueprints } from "./blueprints/sdex-orderbook";
+
+import {
+  decodeAddress,
+  decodeAmount,
+  decodeEventName,
+  interpolateTemplate,
+  sanitizeTextField,
+
 import { createAllSoroswapRouterBlueprints } from "./blueprints/soroswap-router";
 import { createAllBlendPoolBlueprints } from "./blueprints/blend-pool";
 import {
@@ -33,6 +41,7 @@ import {
   decodeAddress,
   decodeAmount,
   interpolateTemplate,
+
 } from "./core";
 import { decodeGenericEventPayload, formatGenericValue } from "./generic-fallback-decoder";
 import { getTranslation } from "./translations";
@@ -47,6 +56,8 @@ import type {
   ContractSchema,
   ContractRegistryEntry,
   TranslationResult,
+  EventMappingDefinition,
+  EventMappingField,
 } from "./types";
 
 /** The registry maps contract IDs to their versioned entries. */
@@ -241,57 +252,92 @@ function buildRegistry(): BlueprintRegistry {
   return registry;
 }
 
-/**
- * Builds a `translate` function from a single event-mapping declaration.
- * Called by registerUpgrade (eventMappings). Required for the module to load.
- */
-function createTranslateFromMapping(
-  mapping: any
-): (event: RawEvent, lang: Language) => TranslationResult | null {
-  const matchNames: string[] = Array.isArray(mapping.topics) ? mapping.topics : [];
-  const topicFields: any[] = mapping.event_structure?.topics ?? [];
-  const dataField: any = mapping.event_structure?.data ?? null;
-  const template: string = mapping.english_template ?? "";
+/** Function shape required by TranslationBlueprint.translate. */
+type MappingTranslator = (
+  event: RawEvent,
+  lang: Language
+) => TranslationResult | null;
 
-  return (event: RawEvent, _lang: Language): TranslationResult | null => {
+interface DecodedMappingField {
+  full: string;
+  short: string;
+  formatted: string;
+}
+
+/** Builds a blueprint-compatible translator from one typed event mapping. */
+function createTranslateFromMapping(
+  mapping: EventMappingDefinition
+): MappingTranslator {
+  const eventNameToMatch = mapping.topics[0];
+
+  return (event: RawEvent, lang: Language): TranslationResult | null => {
     const eventName = decodeEventName(event.topics[0] ?? "");
-    if (matchNames.length > 0 && !matchNames.includes(eventName)) return null;
+    if (eventNameToMatch && eventName !== eventNameToMatch) return null;
 
     const params: Record<string, string> = {};
-    topicFields.forEach((field: any, idx: number) => {
-      const hex = event.topics[idx + 1] ?? "";
-      const decoded = decodeField(hex, field.type);
-      params[field.name] = decoded.full;
-      params[`${field.name}.short`] = decoded.short;
+    mapping.event_structure.topics.forEach((field, index) => {
+      addFieldParams(params, field, event.topics[index + 1] ?? "");
     });
-    if (dataField) {
-      const decoded = decodeField(event.data ?? "", dataField.type);
-      params[dataField.name] = decoded.full;
-      params[`${dataField.name}.short`] = decoded.short;
-    }
 
-    const description = interpolateTemplate(template, params);
-    if (!description) return null;
-    return { description, eventType: matchNames[0] ?? eventName };
+    const dataField = mapping.event_structure.data;
+    if (dataField) addFieldParams(params, dataField, event.data ?? "");
+
+    const template =
+      mapping.templates?.[lang] ??
+      mapping.templates?.en ??
+      mapping.english_template ??
+      "";
+    if (!template) return null;
+
+    return {
+      description: interpolateTemplate(template, params),
+      eventType: eventNameToMatch || eventName,
+    };
   };
 }
 
-function decodeField(hex: string, type: string): { full: string; short: string } {
-  switch (type) {
+function addFieldParams(
+  params: Record<string, string>,
+  field: EventMappingField,
+  hex: string
+): void {
+  const decoded = decodeMappingField(hex, field.type);
+  params[field.name] = decoded.full;
+  params[`${field.name}.short`] = decoded.short;
+  params[`${field.name}.formatted`] = decoded.formatted;
+}
+
+function decodeMappingField(
+  hex: string,
+  type: EventMappingField["type"]
+): DecodedMappingField {
+  switch (type.toLowerCase()) {
     case "address": {
-      const addr = decodeAddress(hex);
-      return { full: addr.publicKey, short: addr.short };
+      const address = decodeAddress(hex);
+      return {
+        full: address.publicKey,
+        short: address.short,
+        formatted: address.publicKey,
+      };
     }
     case "i128":
     case "i64":
     case "u64":
     case "u128":
     case "amount": {
-      const amt = decodeAmount(hex);
-      return { full: `${amt.formatted} ${amt.symbol}`.trim(), short: amt.formatted };
+      const amount = decodeAmount(hex);
+      return {
+        full: amount.formatted,
+        short: amount.formatted,
+        formatted: amount.formatted,
+      };
     }
     default:
-      return { full: hex, short: hex.slice(0, 10) };
+      return {
+        full: hex,
+        short: hex.length > 10 ? `${hex.slice(0, 10)}…` : hex,
+        formatted: hex,
+      };
   }
 }
 
@@ -303,17 +349,21 @@ export function registerUpgrade(
   contractId: string,
   version: string,
   fromLedger: number,
-  eventMappings: any[]
-) {
+  eventMappings: readonly EventMappingDefinition[]
+): void {
   const entry = REGISTRY.get(contractId);
   if (!entry) return;
 
-  const blueprint: TranslationBlueprint = {
+  // Compile declarations once at registration rather than once per event.
+  const translators = eventMappings.map(createTranslateFromMapping);
+  const blueprint: VersionedTranslationBlueprint = {
     contractId,
     contractName: entry.contractName,
+    version,
+    validFromLedger: fromLedger,
     translate: (event, lang) => {
-      for (const mapping of eventMappings) {
-        const result = createTranslateFromMapping(mapping)(event, lang);
+      for (const translate of translators) {
+        const result = translate(event, lang);
         if (result) return result;
       }
       return null;
@@ -468,8 +518,25 @@ function applyBlueprint(event: RawEvent, blueprint: TranslationBlueprint, lang: 
     status: "translated",
     blueprintName: blueprint.contractName,
     eventType: result.eventType ? sanitizeTextField(result.eventType, { maxLength: 64 }) : null,
-    schemaVersion: (blueprint as any).version ?? null,
+    schemaVersion: getBlueprintVersion(blueprint),
   };
+}
+
+function getBlueprintVersion(blueprint: TranslationBlueprint): string | null {
+  if ("version" in blueprint && typeof blueprint.version === "string") {
+    return blueprint.version;
+  }
+  return null;
+}
+
+function getBlueprintStartLedger(blueprint: TranslationBlueprint): number {
+  if (
+    "validFromLedger" in blueprint &&
+    typeof blueprint.validFromLedger === "number"
+  ) {
+    return blueprint.validFromLedger;
+  }
+  return 1;
 }
 
 /**
@@ -609,7 +676,7 @@ export function registerBlueprint(...blueprints: TranslationBlueprint[]): void {
   for (const blueprint of blueprints) {
     const schema: ContractSchema = {
       version: "1.0.0",
-      validFromLedger: blueprint.validFromLedger ?? 1,
+      validFromLedger: getBlueprintStartLedger(blueprint),
       validToLedger: null,
       blueprint,
     };

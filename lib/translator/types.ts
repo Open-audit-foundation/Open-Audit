@@ -155,6 +155,50 @@ export interface TranslationBlueprint {
   translate: (event: RawEvent, lang: Language) => TranslationResult | null;
 }
 
+/** Soroban value types supported by runtime upgrade mappings. */
+export type EventMappingFieldType =
+  | "address"
+  | "i128"
+  | "u128"
+  | "i64"
+  | "u64"
+  | "u32"
+  | "amount"
+  | "symbol"
+  | "bool"
+  | "bytes";
+
+/** A named field decoded from an upgraded contract event. */
+export interface EventMappingField {
+  /** Template parameter name, e.g. "from" or "amount". */
+  name: string;
+  /** Soroban value type used by the mapping decoder. */
+  type: EventMappingFieldType;
+}
+
+/** Positional layout of an upgraded contract event. */
+export interface EventMappingStructure {
+  /** Fields mapped to event topics[1..] in order. */
+  topics: EventMappingField[];
+  /** Optional field mapped to the event data payload. */
+  data?: EventMappingField;
+}
+
+/**
+ * Declarative event mapping accepted by {@link registerUpgrade}.
+ *
+ * `topics[0]` is the decoded event name. Remaining topic labels are optional
+ * documentation; positional decoding is controlled by `event_structure`.
+ */
+export interface EventMappingDefinition {
+  topics: string[];
+  event_structure: EventMappingStructure;
+  /** Legacy single-language template retained for API compatibility. */
+  english_template?: string;
+  /** Language-specific templates. English is used as the fallback. */
+  templates?: Partial<Record<Language, string>>;
+}
+
 /**
  * A versioned schema for a contract, valid for a specific ledger range.
  */
