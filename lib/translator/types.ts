@@ -6,7 +6,14 @@
  * TranslationBlueprint — the contract-specific translation logic.
  */
 
-/** Supported languages. */
+/**
+ * Supported languages.
+ *
+ * This is the single source of truth for the `Language` type. All locale
+ * files, hooks, and translation functions must import it from here rather
+ * than redeclaring it, so that adding a new locale only requires changing
+ * this declaration.
+ */
 export type Language = "en" | "es" | "fr" | "zh";
 
 /**
@@ -34,6 +41,30 @@ export interface TranslationMap {
       ManageBuyOffer: string;
       ManageSellOffer: string;
       OfferFilled: string;
+    };
+  };
+  soroswap: {
+    swap: (to: string, amountIn: string, tokenIn: string, amountOut: string, tokenOut: string) => string;
+    addLiquidity: (to: string, amountA: string, tokenA: string, amountB: string, tokenB: string, liquidity: string) => string;
+    removeLiquidity: (to: string, amountA: string, tokenA: string, amountB: string, tokenB: string, liquidity: string) => string;
+    eventTypes: {
+      Swap: string;
+      AddLiquidity: string;
+      RemoveLiquidity: string;
+    };
+  };
+  blend: {
+    supply: (from: string, amount: string, asset: string) => string;
+    borrow: (from: string, amount: string, asset: string) => string;
+    repay: (from: string, amount: string, asset: string) => string;
+    withdraw: (from: string, amount: string, asset: string) => string;
+    liquidate: (user: string, filler: string, amount: string) => string;
+    eventTypes: {
+      Supply: string;
+      Borrow: string;
+      Repay: string;
+      Withdraw: string;
+      Liquidate: string;
     };
   };
   generic: {

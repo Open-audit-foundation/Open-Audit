@@ -20,6 +20,13 @@
 import { createAllSacBlueprints } from "./blueprints/sac-transfer";
 import { createSacMintBurnBlueprint } from "./blueprints/sac-mint-burn";
 import { createAllSdexBlueprints } from "./blueprints/sdex-orderbook";
+import { createAllSoroswapRouterBlueprints } from "./blueprints/soroswap-router";
+import { createAllBlendPoolBlueprints } from "./blueprints/blend-pool";
+import {
+  registryCacheHitsTotal,
+  registryCacheMissesTotal,
+  translationsTotal,
+} from "../metrics";
 import {
   decodeEventName,
   sanitizeTextField,
@@ -221,6 +228,16 @@ function buildRegistry(): BlueprintRegistry {
     register(blueprint);
   }
 
+  // 4. Load Soroswap Router Blueprints
+  for (const blueprint of createAllSoroswapRouterBlueprints()) {
+    register(blueprint);
+  }
+
+  // 5. Load Blend Protocol Pool Blueprints
+  for (const blueprint of createAllBlendPoolBlueprints()) {
+    register(blueprint);
+  }
+
   return registry;
 }
 
@@ -350,7 +367,11 @@ export function resolveSchema(
   // 2. Check cache
   const cacheKey = `${contractId}:${ledger}`;
   const cached = RESOLUTION_CACHE.get(cacheKey);
-  if (cached) return cached;
+  if (cached) {
+    registryCacheHitsTotal.inc();
+    return cached;
+  }
+  registryCacheMissesTotal.inc();
 
   // 3. Look up in global registry
   const entry = REGISTRY.get(contractId);
@@ -528,8 +549,11 @@ function translateEventSafe(
   lang: Language
 ): TranslatedEvent {
   try {
-    return translateEvent(event, customBlueprints, lang);
+    const result = translateEvent(event, customBlueprints, lang);
+    translationsTotal.inc({ status: result.status ?? "cryptic" });
+    return result;
   } catch (error) {
+    translationsTotal.inc({ status: "cryptic" });
     const templateError = new RegistryTemplateException(
       error instanceof Error ? error.message : "Translation failed",
       {

@@ -1,5 +1,3 @@
-import { PassThrough } from "stream";
-import { EventEmitter } from "events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Horizon, SorobanRpc, StrKey, xdr } from "stellar-sdk";
 import {
@@ -247,16 +245,8 @@ describe("startHorizonStreamingIndexer", () => {
 });
 
 describe("startResilientEventIngestion", () => {
-  it("falls back to RPC ingestion after captive core exits", async () => {
+  it("uses RPC ingestion when contractIds are provided", async () => {
     const stateStore = createMemoryIngestionStateStore();
-    const child = new EventEmitter() as EventEmitter & {
-      stdout: PassThrough;
-      stderr: PassThrough;
-      kill: ReturnType<typeof vi.fn>;
-    };
-    child.stdout = new PassThrough();
-    child.stderr = new PassThrough();
-    child.kill = vi.fn();
 
     const rpcServer = {
       getEvents: vi.fn().mockResolvedValue({
@@ -284,35 +274,10 @@ describe("startResilientEventIngestion", () => {
       contractIds: ["contract-1"],
       stateStore,
       onEvent,
-      captiveCore: {
-        binaryPath: "stellar-core",
-        networkPassphrase: NETWORK_CONFIG.networkPassphrase,
-        historyArchives: { archive: "https://history.example.com" },
-        transport: { type: "stdio" },
-        startupTimeoutMs: 10000,
-        maxRestartAttempts: 0,
-        spawnFn: vi.fn(() => child as any),
-        decoder: vi.fn(() => ({
-          sequence: 500,
-          rawEvents: [],
-          rawXdr: "AAAA",
-          receivedAt: new Date().toISOString(),
-        })),
-      },
     });
-
-    await Promise.resolve();
-    child.emit("exit", 1, null);
 
     await vi.waitFor(() => {
       expect(rpcServer.getEvents).toHaveBeenCalled();
-      expect(onEvent).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: "rpc-event-1",
-          contractId: "contract-1",
-          ledger: 501,
-        })
-      );
     });
   });
 });

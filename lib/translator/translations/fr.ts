@@ -27,6 +27,38 @@ export const FR_TRANSLATIONS: TranslationMap = {
       OfferFilled: "Offre Exécutée",
     },
   },
+  soroswap: {
+    swap: (to: string, amountIn: string, tokenIn: string, amountOut: string, tokenOut: string) =>
+      `Le compte [${to}] a échangé ${amountIn} de l'actif [${tokenIn}] contre ${amountOut} de l'actif [${tokenOut}]`,
+    addLiquidity: (to: string, amountA: string, tokenA: string, amountB: string, tokenB: string, liquidity: string) =>
+      `Le compte [${to}] a ajouté ${amountA} de l'actif [${tokenA}] et ${amountB} de l'actif [${tokenB}] au pool, recevant ${liquidity} jetons de liquidité`,
+    removeLiquidity: (to: string, amountA: string, tokenA: string, amountB: string, tokenB: string, liquidity: string) =>
+      `Le compte [${to}] a retiré ${amountA} de l'actif [${tokenA}] et ${amountB} de l'actif [${tokenB}] du pool, brûlant ${liquidity} jetons de liquidité`,
+    eventTypes: {
+      Swap: "Échange",
+      AddLiquidity: "Ajout de Liquidité",
+      RemoveLiquidity: "Retrait de Liquidité",
+    },
+  },
+  blend: {
+    supply: (from: string, amount: string, asset: string) =>
+      `Le compte [${from}] a fourni ${amount} de l'actif [${asset}] au pool`,
+    borrow: (from: string, amount: string, asset: string) =>
+      `Le compte [${from}] a emprunté ${amount} de l'actif [${asset}] au pool`,
+    repay: (from: string, amount: string, asset: string) =>
+      `Le compte [${from}] a remboursé ${amount} de l'actif [${asset}] au pool`,
+    withdraw: (from: string, amount: string, asset: string) =>
+      `Le compte [${from}] a retiré ${amount} de l'actif [${asset}] du pool`,
+    liquidate: (user: string, filler: string, amount: string) =>
+      `Le compte [${filler}] a liquidé ${amount} de garantie du compte [${user}]`,
+    eventTypes: {
+      Supply: "Approvisionnement",
+      Borrow: "Emprunt",
+      Repay: "Remboursement",
+      Withdraw: "Retrait",
+      Liquidate: "Liquidation",
+    },
+  },
   generic: {
     unregisteredContractName: "Contrat non enregistré",
     unregisteredContractDescription: (payload: string) => `[Contrat non enregistré] ${payload}`,

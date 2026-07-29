@@ -35,13 +35,14 @@ type ExportEventRow = {
   status: string;
   blueprintName: string | null;
   eventType: string | null;
+  schemaVersion: string | null;
 };
 
 const CHUNK_SIZE = 500; // rows fetched from the DB and flushed per tick
 const MAX_LIMIT = 1_000_000;
 const DEFAULT_LIMIT = 100_000;
 
-const CSV_HEADER = "timestamp,ledger_id,contract_id,tx_hash,event_name,status,plain_english_translation,proof_url\r\n";
+const CSV_HEADER = "timestamp,ledger_id,contract_id,tx_hash,event_name,status,plain_english_translation,proof_url,schema_version\r\n";
 
 function escapeCSV(val: string | number): string {
   const s = String(val);
@@ -68,7 +69,7 @@ function rowToTranslatedEvent(row: ExportEventRow): TranslatedEvent {
     status: (row.status as TranslationStatus) ?? "cryptic",
     blueprintName: row.blueprintName,
     eventType: row.eventType,
-    schemaVersion: null,
+    schemaVersion: row.schemaVersion,
   };
 }
 
@@ -93,6 +94,7 @@ function toRow(event: TranslatedEvent) {
     proof_url: event.raw.txHash
       ? `/api/v1/events/proof?txHash=${event.raw.txHash}&ledger=${event.raw.ledger}`
       : "",
+    schema_version: event.schemaVersion ?? "",
   };
 }
 
@@ -106,6 +108,7 @@ function rowToCSVLine(row: ReturnType<typeof toRow>): string {
     row.status,
     escapeCSV(row.plain_english_translation),
     escapeCSV(row.proof_url),
+    escapeCSV(row.schema_version),
   ].join(",") + "\r\n";
 }
 
@@ -142,6 +145,7 @@ async function* fetchEventPages(
         status: true,
         blueprintName: true,
         eventType: true,
+        schemaVersion: true,
       },
     })) as ExportEventRow[];
 

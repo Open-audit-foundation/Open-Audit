@@ -28,7 +28,6 @@ import { useLanguage } from "@/lib/hooks/useLanguage";
 import { useNetwork } from "@/lib/hooks/useNetwork";
 import { useDashboardPrefs } from "@/lib/hooks/useDashboardPrefs";
 import { useEventFilters } from "@/lib/hooks/useEventFilters";
-import { MOCK_RAW_EVENTS, USE_MOCK_DATA } from "@/lib/mock-data";
 import {
   buildCustomBlueprints,
   loadCustomAbis,
@@ -38,12 +37,20 @@ import {
 import type { TranslatedEvent, RawEvent, CustomAbi } from "@/lib/translator/types";
 import { translateEvents } from "@/lib/translator/registry";
 
-export function DashboardClient(): React.JSX.Element {
-  const [rawEvents, setRawEvents] = useState<RawEvent[]>([]);
+interface DashboardClientProps {
+  /** Events fetched server-side (from the database, or mock data as a fallback). */
+  initialEvents: RawEvent[];
+  /** True when initialEvents is mock data because DATABASE_URL isn't configured. */
+  usingMockData: boolean;
+}
+
+export function DashboardClient({
+  initialEvents,
+  usingMockData,
+}: DashboardClientProps): React.JSX.Element {
+  const [rawEvents] = useState<RawEvent[]>(initialEvents);
   const [liveEvents, setLiveEvents] = useState<TranslatedEvent[]>([]);
   const [customAbis, setCustomAbis] = useState<CustomAbi[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [searchValue, setSearchValue] = useState("");
@@ -58,34 +65,6 @@ export function DashboardClient(): React.JSX.Element {
 
   useEffect(() => {
     setCustomAbis(loadCustomAbis());
-  }, []);
-
-  useEffect(() => {
-    const fetchEvents = async () => {
-      setIsLoading(true);
-      setError(null);
-
-      if (USE_MOCK_DATA) {
-        setRawEvents(MOCK_RAW_EVENTS);
-        setIsLoading(false);
-        return;
-      }
-
-      try {
-        const res = await fetch("/api/v1/events?limit=100");
-        if (!res.ok) {
-          throw new Error(`Failed to fetch events: ${res.statusText}`);
-        }
-        const events: RawEvent[] = await res.json();
-        setRawEvents(events);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "An unknown error occurred");
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchEvents();
   }, []);
 
   const customBlueprints = useMemo(
@@ -115,8 +94,9 @@ export function DashboardClient(): React.JSX.Element {
   );
 
   const translatedEvents = useMemo(
-    () => translateEvents(sourceEvents, customBlueprints, language),
-    [sourceEvents, customBlueprints, language]
+    () =>
+      resolveDisplayEvents(USE_MOCK_DATA, rawEvents, dbEvents, customBlueprints, language),
+    [rawEvents, dbEvents, customBlueprints, language]
   );
 
   const allEvents = useMemo(
@@ -247,30 +227,16 @@ export function DashboardClient(): React.JSX.Element {
     ? prefs.favorites.includes(filters.contractId)
     : false;
 
-  const LoadingSkeleton = () => (
-    <div className="space-y-4 animate-pulse">
-      {[1, 2, 3, 4, 5].map((i) => (
-        <div key={i} className="h-16 bg-muted rounded-lg" />
-      ))}
-    </div>
-  );
-
-  const ErrorState = () => (
+  const MockDataBanner = () => (
     <div
-      role="alert"
-      className="flex items-start gap-3 rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive"
+      role="status"
+      className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-300"
     >
       <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
-      <div className="flex flex-col gap-2">
-        <p>{error}</p>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => window.location.reload()}
-        >
-          Try Again
-        </Button>
-      </div>
+      <p>
+        Showing sample data — <code>DATABASE_URL</code> is not configured, so events
+        can&apos;t be loaded from the database.
+      </p>
     </div>
   );
 
@@ -332,7 +298,7 @@ export function DashboardClient(): React.JSX.Element {
         </div>
       </section>
 
-      {error && <ErrorState />}
+      {usingMockData && <MockDataBanner />}
 
       <section aria-label="Custom ABIs" className="flex flex-wrap items-center gap-2">
         <Button variant="outline" size="sm" onClick={() => setIsUploadOpen(true)}>
@@ -373,7 +339,7 @@ export function DashboardClient(): React.JSX.Element {
               size="sm"
               className="h-7 px-3 text-xs border-violet-300 text-violet-700 hover:bg-violet-50 dark:border-violet-700 dark:text-violet-400 dark:hover:bg-violet-950"
               onClick={() => setIsExportOpen(true)}
-              disabled={isLoading || allEvents.length === 0}
+              disabled={allEvents.length === 0}
               aria-label="Export filtered event data"
             >
               <Download className="h-3.5 w-3.5 mr-1.5" />
@@ -420,11 +386,10 @@ export function DashboardClient(): React.JSX.Element {
           </div>
         </div>
 
-        {isLoading && <LoadingSkeleton />}
-        {ready && !isLoading && !error && (
+        {ready && (
           <EventFeedTable
             events={filteredEvents}
-            isLoading={isLoading}
+            isLoading={false}
             newEventIds={newEventIds}
             columns={prefs.columns}
             density={prefs.density}
