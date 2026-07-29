@@ -150,6 +150,27 @@ app.prepare().then(async () => {
     networkConfig: getNetworkConfig(),
     stateStore,
     coldStartLookbackLedgers: Number(process.env.INGESTION_COLD_START_LOOKBACK_LEDGERS ?? "100"),
+    captiveCore: process.env.STELLAR_CORE_BINARY
+      ? {
+          binaryPath: process.env.STELLAR_CORE_BINARY,
+          networkPassphrase: getNetworkConfig().networkPassphrase,
+          historyArchives: parseHistoryArchives(),
+          startLedger: Number(process.env.INGESTION_START_LEDGER ?? "0"),
+          transport:
+            process.env.STELLAR_CORE_TRANSPORT === "tcp"
+              ? {
+                  type: "tcp",
+                  host: process.env.STELLAR_CORE_STREAM_HOST ?? "127.0.0.1",
+                  port: process.env.STELLAR_CORE_STREAM_PORT
+                    ? Number(process.env.STELLAR_CORE_STREAM_PORT)
+                    : undefined,
+                }
+              : { type: "stdio" },
+          heartbeatTimeoutMs: Number(process.env.STELLAR_CORE_HEARTBEAT_TIMEOUT_MS ?? "30000"),
+          restartDelayMs: Number(process.env.STELLAR_CORE_RESTART_DELAY_MS ?? "5000"),
+          maxRestartAttempts: Number(process.env.STELLAR_CORE_MAX_RESTARTS ?? "2"),
+        }
+      : undefined,
     onEvent: async (rawEvent) => {
       console.log(`[Indexer] New event: ${rawEvent.id} from contract ${rawEvent.contractId}`);
 

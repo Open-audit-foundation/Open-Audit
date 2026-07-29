@@ -6,7 +6,7 @@
  * to handle HTTP 429 (Too Many Requests) errors gracefully.
  */
 
-import { SorobanRpc, Horizon, xdr, StrKey } from "stellar-sdk";
+import { SorobanRpc, Horizon, xdr, scValToNative, StrKey } from "stellar-sdk";
 import {
   initRedis,
   getCachedEvents,
@@ -17,9 +17,8 @@ import { StellarNetworkException, XdrParsingException } from "../errors";
 import { createIngestionPool, DEFAULT_WORKER_COUNT, type IngestionPoolMetrics } from "./ingestion-pool";
 import type { StellarNetworkConfig } from "./client";
 import type { RawEvent } from "../translator/types";
-import { type IngestionStateStore } from "./ingestion-state";
-import { eventResponseToRawEvent } from "./events";
-export { createMemoryIngestionStateStore, createFileIngestionStateStore } from "./ingestion-state";
+import { reconstructDagFromMetaXdr } from "../dag/engine";
+import type { ExecutionDag } from "../dag/types";
 
 /** Configuration for the indexer retry mechanism. */
 export interface IndexerRetryConfig {
@@ -400,6 +399,9 @@ export function startEventIndexer(options: IndexerOptions): IndexerControls {
         if (response.latestLedger) {
           cursor = {
             lastLedger: response.latestLedger,
+            // stellar-sdk v12 does not expose a pagination cursor on GetEventsResponse;
+            // retain the previous cursor value until a newer SDK version adds it.
+            paginationCursor: (response as unknown as Record<string, unknown>).cursor as string | undefined ?? cursor.paginationCursor,
             paginationCursor: (response as unknown as Record<string, unknown>).cursor as string | undefined,
           };
           await stateStore?.save({
@@ -489,15 +491,11 @@ export interface StreamingIndexerOptions {
    */
   maxQueueSize?: number;
   /**
-   * Optional durable state store for resuming from the last processed paging
-   * token between restarts.
+   * Optional callback invoked once per transaction when a Soroban execution
+   * DAG is successfully reconstructed from DiagnosticEvents.
+   * Called on the consumer thread — safe to perform async work.
    */
-  stateStore?: IngestionStateStore;
-  /**
-   * How many ledgers to look back from the current ledger tip on a cold start
-   * (i.e. when no prior ingestion state exists).
-   */
-  coldStartLookbackLedgers?: number;
+  onDag?: (dag: ExecutionDag) => void | Promise<void>;
 }
 
 /**
@@ -555,7 +553,7 @@ export function startHorizonStreamingIndexer(options: StreamingIndexerOptions): 
   stop: () => void;
   getMetrics: () => IngestionPoolMetrics;
 } {
-  const { networkConfig, contractIds, onEvent, onError, workerCount, maxQueueSize, stateStore, coldStartLookbackLedgers } = options;
+  const { networkConfig, contractIds, onEvent, onError, workerCount, maxQueueSize, onDag } = options;
   const server = new Horizon.Server(networkConfig.horizonUrl);
 
   let isRunning = true;
@@ -620,6 +618,27 @@ export function startHorizonStreamingIndexer(options: StreamingIndexerOptions): 
               } else if (meta.switch() === 4) {
                 // @ts-ignore - v4 might not be in all types yet
                 events = meta.v4().sorobanMeta().events();
+              }
+
+              // ── DAG reconstruction from DiagnosticEvents ─────────────────
+              // Runs independently of contract-event filtering so the DAG is
+              // always reconstructed for Soroban transactions, regardless of
+              // which contractIds are being monitored.
+              if (onDag && tx.result_meta_xdr) {
+                try {
+                  const dag = reconstructDagFromMetaXdr(
+                    tx.result_meta_xdr,
+                    tx.hash,
+                    tx.ledger_attr,
+                    Math.floor(Date.now() / 1000)
+                  );
+                  if (dag !== null) {
+                    await onDag(dag);
+                  }
+                } catch (dagErr) {
+                  // Never let DAG errors affect the main event pipeline.
+                  console.warn("[streaming-indexer] DAG reconstruction error:", dagErr);
+                }
               }
 
               for (let eventIndex = 0; eventIndex < events.length; eventIndex++) {
@@ -713,6 +732,10 @@ export function startHorizonStreamingIndexer(options: StreamingIndexerOptions): 
 }
 
 export interface ResilientStreamingOptions extends StreamingIndexerOptions {
+  captiveCore?: Omit<
+    CaptiveCoreSupervisorOptions,
+    "stateStore" | "contractIds" | "onEvent" | "onError"
+  >;
   fallbackMode?: "horizon" | "rpc";
   fallbackPollIntervalMs?: number;
   retryConfig?: IndexerRetryConfig;
@@ -720,7 +743,7 @@ export interface ResilientStreamingOptions extends StreamingIndexerOptions {
 
 export interface ResilientStreamingControls {
   stop: () => Promise<void>;
-  getMode: () => "horizon" | "rpc" | "stopped";
+  getMode: () => "captive-core" | "horizon" | "rpc" | "stopped";
   getMetrics: () => IngestionPoolMetrics | null;
 }
 
@@ -728,6 +751,7 @@ export function startResilientEventIngestion(
   options: ResilientStreamingOptions
 ): ResilientStreamingControls {
   const {
+    captiveCore,
     fallbackMode = options.contractIds && options.contractIds.length > 0 ? "rpc" : "horizon",
     fallbackPollIntervalMs = 5000,
     onEvent,
@@ -736,12 +760,13 @@ export function startResilientEventIngestion(
     stateStore,
   } = options;
 
-  let mode: "horizon" | "rpc" | "stopped" = fallbackMode;
+  let mode: "captive-core" | "horizon" | "rpc" | "stopped" = captiveCore ? "captive-core" : fallbackMode;
   let fallbackStarted = false;
   let fallbackControls:
     | ReturnType<typeof startHorizonStreamingIndexer>
     | IndexerControls
     | null = null;
+  let captiveControls: CaptiveCoreControls | null = null;
 
   const startFallback = () => {
     if (fallbackStarted) {
@@ -780,11 +805,31 @@ export function startResilientEventIngestion(
     });
   };
 
-  startFallback();
+  if (!captiveCore) {
+    startFallback();
+  } else {
+    void startCaptiveCoreIndexer({
+      ...captiveCore,
+      contractIds,
+      stateStore,
+      onEvent,
+      onError,
+      onExhausted: (error) => {
+        onError?.(error);
+        startFallback();
+      },
+    }).then((controls) => {
+      captiveControls = controls;
+    }).catch((error) => {
+      onError?.(error instanceof Error ? error : new Error(String(error)));
+      startFallback();
+    });
+  }
 
   return {
     stop: async () => {
       mode = "stopped";
+      await captiveControls?.stop();
       if (fallbackControls) {
         if ("stop" in fallbackControls) {
           await Promise.resolve(fallbackControls.stop());
