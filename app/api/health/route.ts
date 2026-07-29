@@ -76,9 +76,14 @@ export async function GET(request: NextRequest) {
         healthStatus.status = metrics.healthy ? "healthy" : "degraded";
       }
     } catch (dbError) {
-      console.warn("[health] Database check skipped:", dbError.message);
-      // Database is optional in microservices architecture
-      // Don't fail the health check if database libraries are not available
+      console.warn("[health] Database check failed:", dbError.message);
+      healthStatus.database = {
+        connected: false,
+        error: dbError.message,
+      };
+      if (process.env.DATABASE_URL) {
+        healthStatus.status = "degraded";
+      }
     }
 
     // Return 200 OK if we got this far
