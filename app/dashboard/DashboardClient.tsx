@@ -38,11 +38,12 @@ import {
   removeCustomAbi,
   saveCustomAbi,
 } from "@/lib/translator/custom-abi";
-import { translateEvents } from "@/lib/translator/registry";
+import { resolveDisplayEvents } from "@/lib/dashboard/resolve-events";
 import type { TranslatedEvent, RawEvent, CustomAbi } from "@/lib/translator/types";
 
 export function DashboardClient(): React.JSX.Element {
   const [rawEvents, setRawEvents] = useState<RawEvent[]>([]);
+  const [dbEvents, setDbEvents] = useState<TranslatedEvent[]>([]);
   const [customAbis, setCustomAbis] = useState<CustomAbi[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -76,8 +77,8 @@ export function DashboardClient(): React.JSX.Element {
         if (!res.ok) {
           throw new Error(`Failed to fetch events: ${res.statusText}`);
         }
-        const events: RawEvent[] = await res.json();
-        setRawEvents(events);
+        const events: TranslatedEvent[] = await res.json();
+        setDbEvents(events);
       } catch (err) {
         setError(err instanceof Error ? err.message : "An unknown error occurred");
       } finally {
@@ -94,8 +95,9 @@ export function DashboardClient(): React.JSX.Element {
   );
 
   const translatedEvents = useMemo(
-    () => translateEvents(rawEvents, customBlueprints, language),
-    [rawEvents, customBlueprints, language]
+    () =>
+      resolveDisplayEvents(USE_MOCK_DATA, rawEvents, dbEvents, customBlueprints, language),
+    [rawEvents, dbEvents, customBlueprints, language]
   );
 
   const allEvents = useMemo(

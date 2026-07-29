@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db/client";
 import { authenticateAndRateLimit } from "@/lib/api/middleware";
 import { toErrorResponse, validationErrorResponse } from "@/lib/api/error-response";
-import type { RawEvent } from "@/lib/translator/types";
+import type { TranslatedEvent, TranslationStatus } from "@/lib/translator/types";
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
@@ -27,17 +27,24 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       },
     });
 
-    const rawEvents: RawEvent[] = events.map((event) => ({
-      id: event.id,
-      contractId: event.contractId,
-      topics: event.topics as string[],
-      data: event.data,
-      ledger: event.ledger,
-      timestamp: event.timestamp,
-      txHash: event.txHash,
+    const translatedEvents: TranslatedEvent[] = events.map((event) => ({
+      raw: {
+        id: event.id,
+        contractId: event.contractId,
+        topics: event.topics as string[],
+        data: event.data,
+        ledger: event.ledger,
+        timestamp: event.timestamp,
+        txHash: event.txHash,
+      },
+      description: event.description,
+      status: event.status as TranslationStatus,
+      blueprintName: event.blueprintName,
+      eventType: event.eventType,
+      schemaVersion: null,
     }));
 
-    return NextResponse.json(rawEvents);
+    return NextResponse.json(translatedEvents);
   } catch (error) {
     return toErrorResponse(error, { fallbackMessage: "Events query failed" });
   }
