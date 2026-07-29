@@ -12,18 +12,9 @@ const WINDOW_MS = 60_000;
 const WINDOW_SECONDS = 60;
 
 // In-memory fallback store: hashedKey -> timestamps of recent requests.
+// Entries are created on demand and removed when all timestamps fall outside
+// the sliding window, so the Map does not grow without bound.
 const buckets = new Map<string, number[]>();
-
-function getBucket(hashedKey: string): number[] {
-  const existing = buckets.get(hashedKey);
-  if (existing) {
-    return existing;
-  }
-
-  const created: number[] = [];
-  buckets.set(hashedKey, created);
-  return created;
-}
 
 let warnedFallback = false;
 function warnInMemoryFallback(reason: string): void {
@@ -48,23 +39,37 @@ export interface RateLimitResult {
 }
 
 function checkRateLimitInMemory(hashedKey: string, limit: number): RateLimitResult {
-  const bucket = getBucket(hashedKey);
+  let bucket = buckets.get(hashedKey);
   const now = Date.now();
 
-  while (bucket.length > 0 && bucket[0] <= now - WINDOW_MS) {
-    bucket.shift();
+  if (bucket) {
+    while (bucket.length > 0 && bucket[0] <= now - WINDOW_MS) {
+      bucket.shift();
+    }
+
+    if (bucket.length === 0) {
+      buckets.delete(hashedKey);
+    }
   }
 
-  const allowed = bucket.length < limit;
+  const allowed = (bucket?.length ?? 0) < limit;
   if (allowed) {
+    if (!bucket) {
+      bucket = [];
+    }
     bucket.push(now);
+    buckets.set(hashedKey, bucket);
   }
 
   return {
     allowed,
     limit,
-    remaining: Math.max(0, limit - bucket.length),
-    retryAfter: allowed ? undefined : Math.ceil((bucket[0] + WINDOW_MS - now) / 1000),
+    remaining: Math.max(0, limit - (bucket?.length ?? 0)),
+    retryAfter: allowed
+      ? undefined
+      : bucket
+        ? Math.ceil((bucket[0] + WINDOW_MS - now) / 1000)
+        : undefined,
   };
 }
 
