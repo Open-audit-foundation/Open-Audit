@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Eye, Github, Menu, Network, X } from "lucide-react";
+import { Eye, Github, GitBranch, Menu, Network, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { useNetwork, type Network } from "@/lib/hooks/useNetwork";
@@ -51,6 +51,12 @@ export function Header(): React.JSX.Element {
               <a href="/graph">
                 <Network className="h-4 w-4 mr-1.5" />
                 Graph
+              </a>
+            </Button>
+            <Button variant="ghost" size="sm" asChild>
+              <a href="/dag">
+                <GitBranch className="h-4 w-4 mr-1.5" />
+                Call Tree
               </a>
             </Button>
             <Button variant="ghost" size="sm" asChild>
@@ -124,6 +130,12 @@ export function Header(): React.JSX.Element {
               <a href="/graph" onClick={toggleMobileMenu}>
                 <Network className="h-4 w-4 mr-1.5" />
                 Graph
+              </a>
+            </Button>
+            <Button variant="ghost" size="sm" className="w-full justify-start" asChild>
+              <a href="/dag" onClick={toggleMobileMenu}>
+                <GitBranch className="h-4 w-4 mr-1.5" />
+                Call Tree
               </a>
             </Button>
             {/* Mobile network selector */}

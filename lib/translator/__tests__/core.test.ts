@@ -9,8 +9,8 @@ describe("decodeAddress", () => {
 
   // Create ScVal for account address
   const accountScVal = xdr.ScVal.scvAddress(
-    new xdr.ScAddress.scAddressTypeAccount(
-      new xdr.AccountId.accountIdTypeEd25519(
+    xdr.ScAddress.scAddressTypeAccount(
+      xdr.PublicKey.publicKeyTypeEd25519(
         StrKey.decodeEd25519PublicKey(TEST_ACCOUNT)
       )
     )
@@ -19,7 +19,7 @@ describe("decodeAddress", () => {
 
   // Create ScVal for contract address
   const contractScVal = xdr.ScVal.scvAddress(
-    new xdr.ScAddress.scAddressTypeContract(
+    xdr.ScAddress.scAddressTypeContract(
       StrKey.decodeContract(TEST_CONTRACT)
     )
   );

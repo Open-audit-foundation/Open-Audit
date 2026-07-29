@@ -9,7 +9,6 @@
  */
 
 import { StellarNetworkException } from "../errors";
-import { captureExceptionSync } from "../telemetry";
 import { eventResponseToRawEvent } from "./events";
 import type { RawEvent } from "../translator/types";
 
@@ -124,7 +123,7 @@ export async function fetchContractEvents(
       },
       { cause: error, retriable: true }
     );
-    captureExceptionSync(networkError);
+    console.error('[client.ts] Error:', networkError);
     throw networkError;
   }
 }

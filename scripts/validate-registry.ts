@@ -26,35 +26,17 @@ function main(): void {
   const ajv = new Ajv({ allErrors: true });
   const validate = ajv.compile(schema);
 
-  let valid: boolean;
-
-  if (Array.isArray(registry)) {
-    valid = registry.every(function (entry: unknown, index: number): boolean {
-      const ok = validate(entry);
-      if (!ok) {
-        console.error(`\nValidation error at index ${index}:`);
-        for (const err of validate.errors ?? []) {
-          console.error(`  - ${err.instancePath} ${err.message}`);
-        }
-      }
-      return ok;
-    });
-  } else {
-    valid = !!validate(registry);
-    if (!valid) {
-      console.error("\nValidation error:");
-      for (const err of validate.errors ?? []) {
-        console.error(`  - ${err.instancePath} ${err.message}`);
-      }
-    }
-  }
+  const valid = validate(registry);
 
   if (!valid) {
-    console.error("\nRegistry validation FAILED.");
+    console.error("\nRegistry validation FAILED:");
+    for (const err of validate.errors ?? []) {
+      console.error(`  - ${err.instancePath} ${err.message}`);
+    }
     process.exit(1);
   }
 
-  console.log("Registry validation passed.");
+  console.log("✅ Registry validation passed successfully!");
 }
 
 main();

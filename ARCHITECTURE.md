@@ -213,16 +213,37 @@ The Translation Engine is the heart of Open-Audit. It takes raw XDR events and c
 **Architecture:**
 
 #### Translation Registry (`registry.ts`)
-The central lookup table that maps contract IDs to their blueprints:
+The central lookup table that maps contract IDs to their historical versioned schemas:
 ```typescript
-Map<ContractID, TranslationBlueprint>
+Map<ContractID, ContractRegistryEntry>
+
+interface ContractRegistryEntry {
+  contractId: string;
+  contractName: string;
+  schemas: ContractSchema[];
+}
+
+interface ContractSchema {
+  version: string;
+  validFromLedger: number;
+  validToLedger: number | null;
+  blueprint: TranslationBlueprint;
+}
 ```
 
 When an event arrives:
-1. Look up contract ID in registry
-2. If found, call the blueprint's `translate()` function
-3. Return translated event with human-readable description
-4. If not found, mark as "cryptic"
+1. Look up contract ID in registry to find its `ContractRegistryEntry`.
+2. Search the `schemas` array for a version matching the event's `ledger` sequence:
+   `ledger >= validFromLedger && (validToLedger === null || ledger <= validToLedger)`
+3. If a matching schema is found, call its blueprint's `translate()` function.
+4. Return translated event with human-readable description.
+5. If not found or translation fails, mark as "cryptic".
+
+**Caching Strategy:**
+To optimize lookups, a `RESOLUTION_CACHE` maps `contractId:ledger` to the resolved `ContractSchema`, preventing repeated scans of the version list for hot contracts.
+
+**Contract Upgrades:**
+The system supports dynamic upgrades via `registerUpgrade()`. When a contract is upgraded (e.g., via `update_current_contract_wasm`), a new schema can be registered with a starting ledger, ensuring that historical events continue to decode with the old schema while new events use the updated format.
 
 #### Translation Blueprints (`blueprints/`)
 Each contract gets its own blueprint — a file that knows how to decode that contract's events.

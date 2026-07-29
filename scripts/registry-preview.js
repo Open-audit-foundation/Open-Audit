@@ -48,11 +48,15 @@ function renderEntry(entry) {
   }
 
   for (const vec of vectors) {
-    const result = interpolate(entry.english_template, vec.params ?? {});
+    const results = [];
+    for (const [lang, template] of Object.entries(entry.templates)) {
+      const result = interpolate(template, vec.params ?? {});
+      results.push(`**${lang}**: ${result}`);
+    }
     const payloadDisplay = vec.hex_payload
       ? `\`${vec.hex_payload.slice(0, 32)}…\``
       : `\`(mock)\``;
-    rows.push(`| ${entry.contract_id.slice(0, 12)}… | ${entry.topics.join(", ")} | ${payloadDisplay} | ${result} |`);
+    rows.push(`| ${entry.contract_id.slice(0, 12)}… | ${entry.topics.join(", ")} | ${payloadDisplay} | ${results.join("<br>")} |`);
   }
 
   return rows.join("\n");
@@ -106,8 +110,8 @@ function main() {
     "",
     `_Auto-generated for ${previewable.length} entr${previewable.length === 1 ? "y" : "ies"} with test vectors._`,
     "",
-    "| Contract | Topics | Raw Payload | English Result |",
-    "|----------|--------|-------------|----------------|",
+    "| Contract | Topics | Raw Payload | Translations |",
+    "|----------|--------|-------------|--------------|",
     ...tableRows,
     "",
   ];

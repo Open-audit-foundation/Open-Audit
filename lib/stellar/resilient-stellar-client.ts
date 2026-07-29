@@ -17,7 +17,6 @@ import { getResilientClientConfig } from "../resilience/config";
 import { eventResponseToRawEvent } from "./events";
 import type { RawEvent } from "../translator/types";
 import { StellarNetworkException } from "../errors";
-import { captureExceptionSync } from "../telemetry";
 
 /**
  * Singleton resilient client instance.
@@ -142,7 +141,7 @@ export async function fetchContractEventsResilient(
       },
       { cause: error, retriable: false } // Already retried by resilient client
     );
-    captureExceptionSync(networkError);
+    console.error('[resilient-stellar-client.ts] Error:', networkError);
     throw networkError;
   }
 }
@@ -173,7 +172,7 @@ export async function getLatestLedgerResilient(): Promise<{
       },
       { cause: error, retriable: false }
     );
-    captureExceptionSync(networkError);
+    console.error('[resilient-stellar-client.ts] Error:', networkError);
     throw networkError;
   }
 }

@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { RawDataDialog } from "./RawDataDialog";
+import { EventDetailsModal } from "./EventDetailsModal";
 import { ContributeDialog } from "./ContributeDialog";
 import { formatRelativeTime, truncateHex } from "@/lib/translator/decode";
 import type { TranslatedEvent, RawEvent } from "@/lib/translator/types";
@@ -40,22 +40,27 @@ function StatusBadge({ status }: { status: TranslatedEvent["status"] }): React.J
   if (status === "translated") {
     return (
       <Badge variant="success" className="gap-1 whitespace-nowrap">
-        <CheckCircle2 className="h-3 w-3" />
+        <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+        <span className="sr-only">Status: </span>
         Translated
       </Badge>
     );
   }
+
   if (status === "pending") {
     return (
       <Badge variant="secondary" className="gap-1 whitespace-nowrap">
-        <Clock className="h-3 w-3" />
+        <Clock className="h-3 w-3" aria-hidden="true" />
+        <span className="sr-only">Status: </span>
         Pending
       </Badge>
     );
   }
+
   return (
     <Badge variant="warning" className="gap-1 whitespace-nowrap">
-      <HelpCircle className="h-3 w-3" />
+      <HelpCircle className="h-3 w-3" aria-hidden="true" />
+      <span className="sr-only">Status: </span>
       Cryptic
     </Badge>
   );
@@ -84,16 +89,31 @@ export function EventFeedTable({
   onToggleColumn,
   onDensityChange,
 }: EventFeedTableProps): React.JSX.Element {
-  const [rawDialogEvent, setRawDialogEvent] = useState<RawEvent | null>(null);
+  const [detailsEvent, setDetailsEvent] = useState<TranslatedEvent | null>(null);
   const [contributeDialogEvent, setContributeDialogEvent] = useState<RawEvent | null>(null);
   const [showColMenu, setShowColMenu] = useState(false);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTableSectionElement>) => {
+    if (e.target instanceof HTMLElement && e.target.tagName === "TR") {
+      const currentRow = e.target as HTMLTableRowElement;
+      
+      if (e.key === "ArrowDown" || e.key === "j" || e.key === "J") {
+        e.preventDefault();
+        const nextRow = currentRow.nextElementSibling as HTMLTableRowElement;
+        if (nextRow) nextRow.focus();
+      } else if (e.key === "ArrowUp" || e.key === "k" || e.key === "K") {
+        e.preventDefault();
+        const prevRow = currentRow.previousElementSibling as HTMLTableRowElement;
+        if (prevRow) prevRow.focus();
+      }
+    }
+  };
 
   const cellPadding = density === "compact" ? "py-1.5" : "py-3";
   const visibleColCount = Object.values(columns).filter(Boolean).length;
 
   return (
     <>
-      {/* Toolbar */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
           <span>Density:</span>
@@ -164,7 +184,7 @@ export function EventFeedTable({
               )}
             </TableRow>
           </TableHeader>
-          <TableBody>
+          <TableBody onKeyDown={handleKeyDown}>
             {isLoading
               ? Array.from({ length: 5 }).map(function (_, i) {
                   return <SkeletonRow key={i} colCount={visibleColCount} />;
@@ -175,7 +195,9 @@ export function EventFeedTable({
                   return (
                     <TableRow
                       key={event.raw.id}
-                      className={`group transition-colors ${
+                      tabIndex={0}
+                      role="row"
+                      className={`group transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-violet-500 ${
                         newEventIds.has(event.raw.id)
                           ? "animate-slide-in bg-violet-50/60 dark:bg-violet-950/30"
                           : ""
@@ -220,8 +242,7 @@ export function EventFeedTable({
                       {columns.contract && (
                         <TableCell className={`${cellPadding} hidden md:table-cell`}>
                           <span className="font-mono text-xs text-muted-foreground">
-                            {event.raw.contractId.slice(0, 6)}...
-                            {event.raw.contractId.slice(-4)}
+                            {event.raw.contractId.slice(0, 6)}...{event.raw.contractId.slice(-4)}
                           </span>
                         </TableCell>
                       )}
@@ -233,11 +254,11 @@ export function EventFeedTable({
                               variant="ghost"
                               size="sm"
                               className="h-8 px-2 text-xs"
-                              aria-label={`View raw data for event ${event.raw.id}`}
-                              onClick={() => setRawDialogEvent(event.raw)}
+                              aria-label={`View event details for event ${event.raw.id}`}
+                              onClick={() => setDetailsEvent(event)}
                             >
                               <Eye className="h-3.5 w-3.5 mr-1" />
-                              View Raw
+                              View Details
                             </Button>
 
                             {!isTranslated && (
@@ -273,15 +294,19 @@ export function EventFeedTable({
         </Table>
       </div>
 
-      <RawDataDialog
-        event={rawDialogEvent}
-        open={rawDialogEvent !== null}
-        onOpenChange={(open) => { if (!open) setRawDialogEvent(null); }}
+      <EventDetailsModal
+        event={detailsEvent}
+        open={detailsEvent !== null}
+        onOpenChange={(open) => {
+          if (!open) setDetailsEvent(null);
+        }}
       />
       <ContributeDialog
         event={contributeDialogEvent}
         open={contributeDialogEvent !== null}
-        onOpenChange={(open) => { if (!open) setContributeDialogEvent(null); }}
+        onOpenChange={(open) => {
+          if (!open) setContributeDialogEvent(null);
+        }}
       />
     </>
   );

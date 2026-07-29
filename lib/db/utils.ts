@@ -1,6 +1,5 @@
 import { db } from "./client";
 import { RawEvent } from "@/lib/translator/types";
-import { processEventForIpfs } from "@/lib/ipfs/offloader";
 
 /**
  * Initialize database connection and run migrations
@@ -16,7 +15,7 @@ export async function initializeDatabase(): Promise<void> {
 }
 
 /**
- * Create or update an event in the database with IPFS offloading
+ * Create or update an event in the database
  */
 export async function upsertEvent(
   event: RawEvent & {
@@ -26,8 +25,6 @@ export async function upsertEvent(
     eventType?: string;
   }
 ): Promise<void> {
-  const processed = await processEventForIpfs(event);
-
   await db.event.upsert({
     where: { id: event.id },
     update: {
@@ -35,9 +32,6 @@ export async function upsertEvent(
       status: event.status,
       blueprintName: event.blueprintName,
       eventType: event.eventType,
-      data: processed.data,
-      topics: processed.topics,
-      ipfsCids: processed.cids.length > 0 ? processed.cids : undefined,
       updatedAt: new Date(),
     },
     create: {
@@ -46,19 +40,18 @@ export async function upsertEvent(
       ledger: event.ledger,
       timestamp: event.timestamp,
       txHash: event.txHash,
-      topics: processed.topics,
-      data: processed.data,
+      topics: event.topics,
+      data: event.data,
       description: event.description,
       status: event.status,
       blueprintName: event.blueprintName,
       eventType: event.eventType,
-      ipfsCids: processed.cids.length > 0 ? processed.cids : undefined,
     },
   });
 }
 
 /**
- * Batch insert events for better performance with IPFS offloading
+ * Batch insert events for better performance
  */
 export async function batchUpsertEvents(
   events: Array<
@@ -72,9 +65,8 @@ export async function batchUpsertEvents(
     const chunk = events.slice(i, i + chunkSize);
 
     const results = await Promise.all(
-      chunk.map(async (event) => {
-        const processed = await processEventForIpfs(event);
-        return db.event
+      chunk.map(async (event) =>
+        db.event
           .upsert({
             where: { id: event.id },
             update: {
@@ -82,9 +74,6 @@ export async function batchUpsertEvents(
               status: event.status,
               blueprintName: event.blueprintName,
               eventType: event.eventType,
-              data: processed.data,
-              topics: processed.topics,
-              ipfsCids: processed.cids.length > 0 ? processed.cids : undefined,
               updatedAt: new Date(),
             },
             create: {
@@ -93,20 +82,19 @@ export async function batchUpsertEvents(
               ledger: event.ledger,
               timestamp: event.timestamp,
               txHash: event.txHash,
-              topics: processed.topics,
-              data: processed.data,
+              topics: event.topics,
+              data: event.data,
               description: event.description,
               status: event.status,
               blueprintName: event.blueprintName,
               eventType: event.eventType,
-              ipfsCids: processed.cids.length > 0 ? processed.cids : undefined,
             },
           })
           .catch((err) => {
             console.error(`Failed to upsert event ${event.id}:`, err);
             return null;
-          });
-      })
+          })
+      )
     );
 
     upsertedCount += results.filter((r) => r !== null).length;
@@ -194,27 +182,4 @@ export async function deleteOldEvents(beforeDate: Date): Promise<number> {
     },
   });
   return result.count;
-}
-
-/**
- * Get reconciliation statistics
- */
-export async function getReconciliationStats(): Promise<{
-  totalEvents: number;
-  verifiedEvents: number;
-  pendingVerification: number;
-  lastCursor: number;
-}> {
-  const [totalEvents, verifiedEvents, lastCursor] = await Promise.all([
-    db.event.count(),
-    db.event.count({ where: { rpcVerified: true } }),
-    getCursor(),
-  ]);
-
-  return {
-    totalEvents,
-    verifiedEvents,
-    pendingVerification: totalEvents - verifiedEvents,
-    lastCursor,
-  };
 }

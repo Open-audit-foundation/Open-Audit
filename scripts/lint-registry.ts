@@ -24,7 +24,7 @@ interface RegistryEntry {
     topics: Array<{ name: string; type: string }>;
     data?: { name: string; type: string };
   };
-  english_template: string;
+  templates: Record<string, string>;
   test_vectors?: Array<{
     hex_payload?: string;
     params: Record<string, string | number | boolean>;
@@ -49,7 +49,7 @@ let hasErrors = false;
  */
 function extractTemplateVariables(template: string): string[] {
   const regex = /\{([a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?)\}/gi;
-  const matches = template.matchAll(regex);
+  const matches = Array.from(template.matchAll(regex));
   const variables: string[] = [];
   
   for (const match of matches) {
@@ -93,23 +93,25 @@ function validateTemplateVariables(
   index: number,
   filePath: string
 ): boolean {
-  const templateVars = extractTemplateVariables(entry.english_template);
   const availableFields = getAvailableFields(entry);
-  
   let isValid = true;
   
-  for (const varName of templateVars) {
-    if (!availableFields.includes(varName)) {
-      errors.push({
-        file: filePath,
-        index,
-        contract_id: entry.contract_id,
-        topics: entry.topics,
-        error: `Template references '{${varName}}' but event_structure only provides [${availableFields.join(', ')}]`,
-        severity: "error"
-      });
-      isValid = false;
-      hasErrors = true;
+  for (const [lang, template] of Object.entries(entry.templates)) {
+    const templateVars = extractTemplateVariables(template);
+    
+    for (const varName of templateVars) {
+      if (!availableFields.includes(varName)) {
+        errors.push({
+          file: filePath,
+          index,
+          contract_id: entry.contract_id,
+          topics: entry.topics,
+          error: `[${lang}] Template references '{${varName}}' but event_structure only provides [${availableFields.join(', ')}]`,
+          severity: "error"
+        });
+        isValid = false;
+        hasErrors = true;
+      }
     }
   }
   
@@ -163,9 +165,13 @@ function validateTestVectors(
     const vector = entry.test_vectors[i];
     const providedParams = Object.keys(vector.params);
     
-    // Check if all template variables have corresponding test params
-    const templateVars = extractTemplateVariables(entry.english_template);
-    for (const varName of templateVars) {
+    // Check if all template variables (from all languages) have corresponding test params
+    const allTemplateVars = new Set<string>();
+    for (const template of Object.values(entry.templates)) {
+      const vars = extractTemplateVariables(template);
+      vars.forEach(v => allTemplateVars.add(v));
+    }
+    for (const varName of Array.from(allTemplateVars)) {
       if (!providedParams.includes(varName)) {
         errors.push({
           file: filePath,
@@ -233,15 +239,15 @@ function validateSchema(
   schema: any,
   filePath: string
 ): boolean {
-  const ajv = new Ajv({ allErrors: true, strict: false });
+  const ajv = new Ajv({ allErrors: true } as any);
   const validate = ajv.compile(schema);
   
   const valid = validate(registry);
   
   if (!valid && validate.errors) {
-    for (const err of validate.errors) {
+    for (const err of validate.errors as any[]) {
       // Try to extract index from instancePath like "/0/contract_id"
-      const indexMatch = err.instancePath.match(/^\/(\d+)/);
+      const indexMatch = err.instancePath?.match(/^\/(\d+)/);
       const index = indexMatch ? parseInt(indexMatch[1]) : -1;
       
       errors.push({
@@ -319,11 +325,11 @@ function printErrors(): void {
   }
   
   // Print grouped errors
-  for (const [file, fileErrors] of errorsByFile) {
+  for (const [file, fileErrors] of Array.from(errorsByFile)) {
     console.error(`\n📄 File: ${path.relative(ROOT, file)}`);
     console.error("-".repeat(80));
     
-    for (const [index, indexErrors] of fileErrors) {
+    for (const [index, indexErrors] of Array.from(fileErrors)) {
       if (index >= 0) {
         console.error(`\n  Entry [${index}]:`);
         const firstError = indexErrors[0];

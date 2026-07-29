@@ -7,5 +7,5 @@
     "outDir": ".server-dist",
     "target": "es2020"
   },
-  "include": ["server.ts", "lib/**/*.ts"]
+  "include": ["server.ts", "server-decoupled.ts", "lib/**/*.ts", "src/**/*.ts"]
 }
