@@ -55,6 +55,7 @@ export function DashboardClient({
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [searchValue, setSearchValue] = useState("");
   const [searchedContract, setSearchedContract] = useState<string | null>(null);
+  const [searchResults, setSearchResults] = useState<RawEvent[] | null>(null);
 
   const { language } = useLanguage();
   const { network } = useNetwork();
@@ -71,13 +72,17 @@ export function DashboardClient({
     [customAbis]
   );
 
+  // When a contract search is active, its API results replace the initially
+  // fetched event list; clearing the search falls back to that initial list.
+  const sourceEvents = searchResults ?? rawEvents;
+
   // Derive translations from the raw events + current custom blueprints so the
   // feed re-translates instantly when an ABI is uploaded or removed.
   const translatedRawEvents = useMemo(
     function () {
-      return translateEvents(rawEvents, customBlueprints);
+      return translateEvents(sourceEvents, customBlueprints);
     },
-    [rawEvents, customBlueprints]
+    [sourceEvents, customBlueprints]
   );
 
   // Merge live-streamed events (prepended) with the translated batch.
@@ -153,11 +158,48 @@ export function DashboardClient({
   );
 
   const handleSearch = useCallback(
-    function (contractId: string): void {
+    async function (contractId: string): Promise<void> {
       const normalized = contractId.trim();
       setSearchValue(normalized);
       setSearchedContract(normalized || null);
       setFilters({ contractId: normalized });
+
+      if (!normalized) {
+        setSearchResults(null);
+        setError(null);
+        return;
+      }
+
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const res = await fetch("/api/v1/events/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contractId: normalized }),
+        });
+        if (!res.ok) {
+          throw new Error(`Search failed: ${res.statusText}`);
+        }
+        const data: { events: RawEvent[] } = await res.json();
+        setSearchResults(
+          data.events.map((event) => ({
+            id: event.id,
+            contractId: event.contractId,
+            topics: event.topics,
+            data: event.data,
+            ledger: event.ledger,
+            timestamp: event.timestamp,
+            txHash: event.txHash,
+          }))
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "An unknown error occurred");
+        setSearchResults(null);
+      } finally {
+        setIsLoading(false);
+      }
     },
     [setFilters]
   );
@@ -211,6 +253,12 @@ export function DashboardClient({
 
       <section aria-label="Event filters">
         <div className="flex flex-col gap-3">
+          <SearchBar
+            onSearch={handleSearch}
+            isLoading={isLoading}
+            defaultValue={searchValue}
+          />
+
           <FilterBuilder
             eventTypeSuggestions={Array.from(
               new Set(
