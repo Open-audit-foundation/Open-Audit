@@ -20,14 +20,31 @@
 import { createAllSacBlueprints } from "./blueprints/sac-transfer";
 import { createSacMintBurnBlueprint } from "./blueprints/sac-mint-burn";
 import { createAllSdexBlueprints } from "./blueprints/sdex-orderbook";
+
 import {
   decodeAddress,
   decodeAmount,
   decodeEventName,
   interpolateTemplate,
   sanitizeTextField,
+
+import { createAllSoroswapRouterBlueprints } from "./blueprints/soroswap-router";
+import { createAllBlendPoolBlueprints } from "./blueprints/blend-pool";
+import {
+  registryCacheHitsTotal,
+  registryCacheMissesTotal,
+  translationsTotal,
+} from "../metrics";
+import {
+  decodeEventName,
+  sanitizeTextField,
+  decodeAddress,
+  decodeAmount,
+  interpolateTemplate,
+
 } from "./core";
 import { decodeGenericEventPayload, formatGenericValue } from "./generic-fallback-decoder";
+import { getTranslation } from "./translations";
 import { RegistryTemplateException } from "../errors";
 import type {
   EventMatchCriteria,
@@ -222,6 +239,16 @@ function buildRegistry(): BlueprintRegistry {
     register(blueprint);
   }
 
+  // 4. Load Soroswap Router Blueprints
+  for (const blueprint of createAllSoroswapRouterBlueprints()) {
+    register(blueprint);
+  }
+
+  // 5. Load Blend Protocol Pool Blueprints
+  for (const blueprint of createAllBlendPoolBlueprints()) {
+    register(blueprint);
+  }
+
   return registry;
 }
 
@@ -390,7 +417,11 @@ export function resolveSchema(
   // 2. Check cache
   const cacheKey = `${contractId}:${ledger}`;
   const cached = RESOLUTION_CACHE.get(cacheKey);
-  if (cached) return cached;
+  if (cached) {
+    registryCacheHitsTotal.inc();
+    return cached;
+  }
+  registryCacheMissesTotal.inc();
 
   // 3. Look up in global registry
   const entry = REGISTRY.get(contractId);
@@ -421,13 +452,15 @@ export function translateEvent(
 
   if (!schema) {
     console.warn(`No translation blueprint found for contract ${event.contractId}`);
-    
+
+    const t = getTranslation(lang);
+
     // Try to decode the event using the generic fallback decoder
-    const genericDecoded = decodeGenericEventPayload(event);
+    const genericDecoded = decodeGenericEventPayload(event, lang);
     const description = genericDecoded
-      ? `[Unregistered Contract] ${formatGenericValue(genericDecoded)}`
-      : `[Unknown Event: No blueprint registered for contract ${event.contractId}. Hex Data: ${event.data}]`;
-    
+      ? t.generic.unregisteredContractDescription(formatGenericValue(genericDecoded))
+      : t.generic.unknownEventNoBlueprint(event.contractId, event.data);
+
     return {
       raw: event,
       description: sanitizeTextField(description, { maxLength: 512 }),
@@ -435,7 +468,7 @@ export function translateEvent(
       // Surface the custom contract name (if any) so the UI still has context.
       blueprintName: customBlueprints?.get(event.contractId)?.contractName
         ? sanitizeTextField(customBlueprints.get(event.contractId)!.contractName, { maxLength: 100 })
-        : "Unregistered Contract",
+        : t.generic.unregisteredContractName,
       eventType: null,
       schemaVersion: null,
     };
@@ -445,9 +478,10 @@ export function translateEvent(
 
   if (!blueprint) {
     console.warn(`No translation blueprint applicable for contract ${event.contractId} at ledger ${event.ledger}`);
+    const t = getTranslation(lang);
     return {
       raw: event,
-      description: `[Unknown Event: No blueprint applicable for contract ${event.contractId} at ledger ${event.ledger}. Hex Data: ${event.data}]`,
+      description: t.generic.unknownEventNoBlueprintApplicable(event.contractId, event.ledger, event.data),
       status: "cryptic",
       blueprintName: schema.blueprint.contractName,
       eventType: null,
@@ -582,8 +616,11 @@ function translateEventSafe(
   lang: Language
 ): TranslatedEvent {
   try {
-    return translateEvent(event, customBlueprints, lang);
+    const result = translateEvent(event, customBlueprints, lang);
+    translationsTotal.inc({ status: result.status ?? "cryptic" });
+    return result;
   } catch (error) {
+    translationsTotal.inc({ status: "cryptic" });
     const templateError = new RegistryTemplateException(
       error instanceof Error ? error.message : "Translation failed",
       {

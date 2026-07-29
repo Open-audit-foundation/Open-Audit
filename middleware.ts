@@ -6,7 +6,7 @@ import { checkRateLimit } from "@/lib/auth/rateLimit";
 const PROTECTED_PREFIXES = ["/api/"];
 
 // Routes that are public even under /api/
-const PUBLIC_ROUTES = new Set(["/api/ingest-historical/openapi"]);
+const PUBLIC_ROUTES = new Set(["/api/ingest-historical/openapi", "/api/v1/stats"]);
 
 export async function middleware(request: NextRequest): Promise<NextResponse> {
   const { pathname } = request.nextUrl;

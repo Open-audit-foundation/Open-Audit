@@ -3,7 +3,6 @@ import type { RawEvent, TranslatedEvent } from "../types";
 import * as Persistence from "../persistence";
 import { db } from "../../db/client";
 import { translateWithCache } from "../registry";
-import { triggerWebhooksForEvent } from "../../jobs/queue";
 import { isRedisEnabled } from "../../cache/redisCache";
 
 vi.mock("../registry", async () => {
@@ -11,10 +10,6 @@ vi.mock("../registry", async () => {
     translateWithCache: vi.fn(),
   };
 });
-
-vi.mock("../../jobs/queue", () => ({
-  triggerWebhooksForEvent: vi.fn(),
-}));
 
 vi.mock("../../cache/redisCache", () => ({
   isRedisEnabled: vi.fn(),
@@ -30,7 +25,6 @@ vi.mock("@/lib/ipfs/offloader", () => ({
 }));
 
 const mockedTranslateWithCache = vi.mocked(translateWithCache);
-const mockedTriggerWebhooksForEvent = vi.mocked(triggerWebhooksForEvent);
 const mockedIsRedisEnabled = vi.mocked(isRedisEnabled);
 
 const event: RawEvent = {
@@ -46,8 +40,11 @@ const event: RawEvent = {
 describe("translateAndPersistEvent DLQ", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    mockedTriggerWebhooksForEvent.mockResolvedValue(undefined);
     mockedIsRedisEnabled.mockReturnValue(false);
+    
+    // Stub db.webhookSubscription so the real triggerWebhooksForEvent runs
+    // but short-circuits (no matching subscriptions → no HTTP calls).
+    vi.spyOn(db.webhookSubscription, "findMany").mockResolvedValue([]);
   });
 
   it("writes a DeadLetterEvent when translation fails", async () => {
