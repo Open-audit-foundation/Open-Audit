@@ -89,8 +89,9 @@ export function DashboardClient({
   );
 
   const translatedEvents = useMemo(
-    () => translateEvents(rawEvents, customBlueprints, language),
-    [rawEvents, customBlueprints, language]
+    () =>
+      resolveDisplayEvents(USE_MOCK_DATA, rawEvents, dbEvents, customBlueprints, language),
+    [rawEvents, dbEvents, customBlueprints, language]
   );
 
   const allEvents = useMemo(
