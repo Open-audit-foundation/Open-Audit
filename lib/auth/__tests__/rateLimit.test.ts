@@ -114,6 +114,56 @@ describe("checkRateLimit", () => {
 
       const result = await checkRateLimit(hashedKey, "free");
       expect(result.allowed).toBe(true);
+      expect(result.remaining).toBe(59);
+    });
+
+    it("evicts all stale entries after window expires and reuses the same key", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(0);
+
+      const { checkRateLimit } = await import("../rateLimit");
+      const hashedKey = "eviction-key";
+
+      for (let i = 0; i < 60; i++) {
+        await checkRateLimit(hashedKey, "free");
+      }
+
+      vi.setSystemTime(61_000);
+
+      const r1 = await checkRateLimit(hashedKey, "free");
+      expect(r1.allowed).toBe(true);
+      expect(r1.remaining).toBe(59);
+
+      for (let i = 0; i < 58; i++) {
+        await checkRateLimit(hashedKey, "free");
+      }
+
+      vi.setSystemTime(61_100);
+
+      const r2 = await checkRateLimit(hashedKey, "free");
+      expect(r2.allowed).toBe(true);
+      expect(r2.remaining).toBe(59);
+    });
+
+    it("treats a key with all stale entries the same as a fresh key", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(0);
+
+      const { checkRateLimit } = await import("../rateLimit");
+
+      const freshKey = "fresh-key";
+      const freshResult = await checkRateLimit(freshKey, "free");
+      expect(freshResult.remaining).toBe(59);
+
+      vi.setSystemTime(70_000);
+
+      const staleKey = "stale-key";
+      await checkRateLimit(staleKey, "free");
+
+      vi.setSystemTime(140_000);
+
+      const staleResult = await checkRateLimit(staleKey, "free");
+      expect(staleResult.remaining).toBe(59);
     });
   });
 
