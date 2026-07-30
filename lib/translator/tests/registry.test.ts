@@ -18,6 +18,11 @@ import type {
   VersionedTranslationBlueprint,
   PersistedRawEvent,
 } from "../types";
+import { SOROSWAP_ROUTER_CONTRACT_IDS } from "../blueprints/soroswap-router";
+import {
+  BLEND_POOL_V1_CONTRACT_IDS,
+  BLEND_POOL_V2_CONTRACT_IDS,
+} from "../blueprints/blend-pool";
 
 const { mockGetCachedTranslation, mockSetCachedTranslation, mockIsRedisEnabled } =
   vi.hoisted(() => ({
@@ -637,5 +642,52 @@ describe("registry helpers", () => {
 
   it("getBlueprintCount returns a positive number", () => {
     expect(getBlueprintCount()).toBeGreaterThan(0);
+  });
+});
+
+describe("registry — Soroswap and Blend protocol coverage", () => {
+  it("registers every known Soroswap Router contract ID", () => {
+    for (const contractId of SOROSWAP_ROUTER_CONTRACT_IDS) {
+      expect(hasBlueprint(contractId)).toBe(true);
+    }
+    const contracts = getRegisteredContracts();
+    for (const contractId of SOROSWAP_ROUTER_CONTRACT_IDS) {
+      expect(contracts).toContain(contractId);
+    }
+  });
+
+  it("registers every known Blend Pool contract ID across both schema generations", () => {
+    for (const contractId of [...BLEND_POOL_V1_CONTRACT_IDS, ...BLEND_POOL_V2_CONTRACT_IDS]) {
+      expect(hasBlueprint(contractId)).toBe(true);
+    }
+  });
+
+  it("resolves a v1-generation Blend Pool schema distinctly from a v2-generation schema", () => {
+    const v1Schema = resolveSchema(BLEND_POOL_V1_CONTRACT_IDS[0], 1);
+    const v2Schema = resolveSchema(BLEND_POOL_V2_CONTRACT_IDS[0], 1);
+
+    expect(v1Schema).not.toBeNull();
+    expect(v2Schema).not.toBeNull();
+    expect(v1Schema!.version).toBe("1.0.0");
+    expect(v2Schema!.version).toBe("2.0.0");
+    expect(v1Schema!.blueprint).not.toBe(v2Schema!.blueprint);
+  });
+
+  it("resolves the Soroswap Router schema with a single genesis-valid version", () => {
+    const schema = resolveSchema(SOROSWAP_ROUTER_CONTRACT_IDS[0], 1);
+
+    expect(schema).not.toBeNull();
+    expect(schema!.version).toBe("1.0.0");
+    expect(schema!.validFromLedger).toBe(0);
+  });
+
+  it("translateEvent resolves Soroswap and Blend contract IDs to their respective blueprint names", () => {
+    const soroswapEvent = makeEvent({ contractId: SOROSWAP_ROUTER_CONTRACT_IDS[0] });
+    const soroswapResult = translateEvent(soroswapEvent);
+    expect(soroswapResult.blueprintName).toBe("Soroswap Router");
+
+    const blendEvent = makeEvent({ contractId: BLEND_POOL_V2_CONTRACT_IDS[0] });
+    const blendResult = translateEvent(blendEvent);
+    expect(blendResult.blueprintName).toBe("Blend Lending Pool");
   });
 });
