@@ -22,6 +22,7 @@ model Event {
   status          String   // "translated" | "cryptic"
   blueprintName   String?  // Contract name from blueprint
   eventType       String?  // Event type (transfer, mint, burn, etc.)
+  schemaVersion   String?  // Blueprint schema version that translated this event (e.g. "v2", "1.0.0")
 
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -31,6 +32,7 @@ model Event {
   @@index([txHash])
   @@index([contractId, ledger])
   @@index([timestamp])
+  @@index([schemaVersion])
 }
 
 model DeadLetterEvent {
@@ -59,4 +61,37 @@ model IndexerCursor {
   lastLedger      Int      @default(0)
   lastProcessed   DateTime @default(now())
   updatedAt       DateTime @updatedAt
+}
+
+// Webhook subscription registered by an external consumer
+model WebhookSubscription {
+  id          String   @id @default(cuid())
+  url         String
+  contractId  String?  // null = subscribe to all contracts
+  secretHash  String   // HMAC secret stored as scrypt-derived hash
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  deliveries  WebhookDelivery[]
+
+  @@index([isActive])
+  @@index([contractId])
+}
+
+// Record of each delivery attempt for auditing and debugging
+model WebhookDelivery {
+  id             String   @id @default(cuid())
+  subscriptionId String
+  eventId        String
+  httpStatus     Int?     // null when delivery failed before a response
+  succeeded      Boolean
+  attempts       Int      @default(1)
+  createdAt      DateTime @default(now())
+
+  subscription   WebhookSubscription @relation(fields: [subscriptionId], references: [id])
+
+  @@index([subscriptionId])
+  @@index([eventId])
+  @@index([subscriptionId, eventId])
 }

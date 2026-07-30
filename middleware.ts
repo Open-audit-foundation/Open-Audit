@@ -6,7 +6,7 @@ import { checkRateLimit } from "@/lib/auth/rateLimit";
 const PROTECTED_PREFIXES = ["/api/"];
 
 // Routes that are public even under /api/
-const PUBLIC_ROUTES = new Set(["/api/ingest-historical/openapi"]);
+const PUBLIC_ROUTES = new Set(["/api/ingest-historical/openapi", "/api/v1/stats"]);
 
 export async function middleware(request: NextRequest): Promise<NextResponse> {
   const { pathname } = request.nextUrl;
@@ -18,7 +18,7 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   if (!isProtected) return NextResponse.next();
 
   const rawKey = request.headers.get("x-api-key") ?? "";
-  const record = validateApiKey(rawKey);
+  const record = await validateApiKey(rawKey);
 
   if (!record) {
     return NextResponse.json(

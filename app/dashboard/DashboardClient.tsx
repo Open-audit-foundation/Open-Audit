@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useCallback, useEffect, useMemo } from "react";
@@ -27,7 +28,6 @@ import { useLanguage } from "@/lib/hooks/useLanguage";
 import { useNetwork } from "@/lib/hooks/useNetwork";
 import { useDashboardPrefs } from "@/lib/hooks/useDashboardPrefs";
 import { useEventFilters } from "@/lib/hooks/useEventFilters";
-import { MOCK_RAW_EVENTS } from "@/lib/mock-data";
 import {
   buildCustomBlueprints,
   loadCustomAbis,
@@ -37,27 +37,33 @@ import {
 import type { TranslatedEvent, RawEvent, CustomAbi } from "@/lib/translator/types";
 import { translateEvents } from "@/lib/translator/registry";
 
-function simulateNetworkDelay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+interface DashboardClientProps {
+  /** Events fetched server-side (from the database, or mock data as a fallback). */
+  initialEvents: RawEvent[];
+  /** True when initialEvents is mock data because DATABASE_URL isn't configured. */
+  usingMockData: boolean;
 }
 
-export function DashboardClient(): React.JSX.Element {
-  const [rawEvents] = useState<RawEvent[]>(MOCK_RAW_EVENTS);
+export function DashboardClient({
+  initialEvents,
+  usingMockData,
+}: DashboardClientProps): React.JSX.Element {
+  const [rawEvents] = useState<RawEvent[]>(initialEvents);
   const [liveEvents, setLiveEvents] = useState<TranslatedEvent[]>([]);
   const [customAbis, setCustomAbis] = useState<CustomAbi[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [searchValue, setSearchValue] = useState("");
   const [searchedContract, setSearchedContract] = useState<string | null>(null);
+  const [searchResults, setSearchResults] = useState<RawEvent[] | null>(null);
 
   const { language } = useLanguage();
   const { network } = useNetwork();
-  const { prefs, ready, update, toggleColumn, toggleFavorite } = useDashboardPrefs();
+  const { prefs, ready, update, toggleColumn, toggleFavorite } =
+    useDashboardPrefs();
   const { filters, setFilters } = useEventFilters();
 
-  useEffect(function () {
+  useEffect(() => {
     setCustomAbis(loadCustomAbis());
   }, []);
 
@@ -66,13 +72,17 @@ export function DashboardClient(): React.JSX.Element {
     [customAbis]
   );
 
+  // When a contract search is active, its API results replace the initially
+  // fetched event list; clearing the search falls back to that initial list.
+  const sourceEvents = searchResults ?? rawEvents;
+
   // Derive translations from the raw events + current custom blueprints so the
   // feed re-translates instantly when an ABI is uploaded or removed.
   const translatedRawEvents = useMemo(
     function () {
-      return translateEvents(rawEvents, customBlueprints);
+      return translateEvents(sourceEvents, customBlueprints);
     },
-    [rawEvents, customBlueprints]
+    [sourceEvents, customBlueprints]
   );
 
   // Merge live-streamed events (prepended) with the translated batch.
@@ -84,8 +94,9 @@ export function DashboardClient(): React.JSX.Element {
   );
 
   const translatedEvents = useMemo(
-    () => translateEvents(rawEvents, customBlueprints, language),
-    [rawEvents, customBlueprints, language]
+    () =>
+      resolveDisplayEvents(USE_MOCK_DATA, rawEvents, dbEvents, customBlueprints, language),
+    [rawEvents, dbEvents, customBlueprints, language]
   );
 
   const allEvents = useMemo(
@@ -109,17 +120,27 @@ export function DashboardClient(): React.JSX.Element {
         }
 
         if (filters.minAmount !== undefined) {
-          const amount = Number(event.raw.data ? BigInt("0x" + event.raw.data.slice(2).replace(/[^0-9a-fA-F]/g, "0")) : 0n);
+          const amount = Number(
+            event.raw.data
+              ? BigInt("0x" + event.raw.data.slice(2).replace(/[^0-9a-fA-F]/g, "0"))
+              : 0n
+          );
           if (Number(amount) < filters.minAmount) {
             return false;
           }
         }
 
-        if (filters.startLedger !== undefined && event.raw.ledger < filters.startLedger) {
+        if (
+          filters.startLedger !== undefined &&
+          event.raw.ledger < filters.startLedger
+        ) {
           return false;
         }
 
-        if (filters.endLedger !== undefined && event.raw.ledger > filters.endLedger) {
+        if (
+          filters.endLedger !== undefined &&
+          event.raw.ledger > filters.endLedger
+        ) {
           return false;
         }
 
@@ -129,7 +150,7 @@ export function DashboardClient(): React.JSX.Element {
   );
 
   const handleNewEvent = useCallback(
-    function (event: TranslatedEvent): void {
+    (event: TranslatedEvent): void => {
       if (filters.contractId && event.raw.contractId !== filters.contractId) return;
       setLiveEvents((prev) => [event, ...prev]);
     },
@@ -137,11 +158,48 @@ export function DashboardClient(): React.JSX.Element {
   );
 
   const handleSearch = useCallback(
-    function (contractId: string): void {
+    async function (contractId: string): Promise<void> {
       const normalized = contractId.trim();
       setSearchValue(normalized);
       setSearchedContract(normalized || null);
       setFilters({ contractId: normalized });
+
+      if (!normalized) {
+        setSearchResults(null);
+        setError(null);
+        return;
+      }
+
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const res = await fetch("/api/v1/events/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contractId: normalized }),
+        });
+        if (!res.ok) {
+          throw new Error(`Search failed: ${res.statusText}`);
+        }
+        const data: { events: RawEvent[] } = await res.json();
+        setSearchResults(
+          data.events.map((event) => ({
+            id: event.id,
+            contractId: event.contractId,
+            topics: event.topics,
+            data: event.data,
+            ledger: event.ledger,
+            timestamp: event.timestamp,
+            txHash: event.txHash,
+          }))
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "An unknown error occurred");
+        setSearchResults(null);
+      } finally {
+        setIsLoading(false);
+      }
     },
     [setFilters]
   );
@@ -149,17 +207,17 @@ export function DashboardClient(): React.JSX.Element {
   const { isLive, isPaused, newEventIds, toggleLive, togglePause } =
     useLiveFeed(handleNewEvent);
 
-  const handleAbiUpload = useCallback(function (abi: CustomAbi): void {
+  const handleAbiUpload = useCallback((abi: CustomAbi): void => {
     setCustomAbis(saveCustomAbi(abi));
     setIsUploadOpen(false);
   }, []);
 
-  const handleAbiRemove = useCallback(function (contractId: string): void {
+  const handleAbiRemove = useCallback((contractId: string): void => {
     setCustomAbis(removeCustomAbi(contractId));
   }, []);
 
   const handleFavoriteSelect = useCallback(
-    function (contractId: string): void {
+    (contractId: string): void => {
       setFilters({ contractId });
     },
     [setFilters]
@@ -169,9 +227,21 @@ export function DashboardClient(): React.JSX.Element {
     ? prefs.favorites.includes(filters.contractId)
     : false;
 
+  const MockDataBanner = () => (
+    <div
+      role="status"
+      className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-300"
+    >
+      <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+      <p>
+        Showing sample data — <code>DATABASE_URL</code> is not configured, so events
+        can&apos;t be loaded from the database.
+      </p>
+    </div>
+  );
+
   return (
     <div className="space-y-6">
-      {/* Pinned contracts sidebar */}
       {ready && (
         <FavoritesSidebar
           favorites={prefs.favorites}
@@ -181,9 +251,14 @@ export function DashboardClient(): React.JSX.Element {
         />
       )}
 
-      {/* Search + favorite toggle */}
       <section aria-label="Event filters">
         <div className="flex flex-col gap-3">
+          <SearchBar
+            onSearch={handleSearch}
+            isLoading={isLoading}
+            defaultValue={searchValue}
+          />
+
           <FilterBuilder
             eventTypeSuggestions={Array.from(
               new Set(
@@ -215,45 +290,16 @@ export function DashboardClient(): React.JSX.Element {
                   }`}
                 />
               </Button>
-              <span className="text-sm text-muted-foreground">Filtered contract is pinned / unpinned by toggle.</span>
+              <span className="text-sm text-muted-foreground">
+                Filtered contract is pinned / unpinned by toggle.
+              </span>
             </div>
           )}
         </div>
       </section>
 
-      {/* Error state */}
-      {error && (
-        <div
-          role="alert"
-          className="flex items-start gap-3 rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive"
-        >
-          <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
-          <p>{error}</p>
-        </div>
-      )}
+      {usingMockData && <MockDataBanner />}
 
-      {/* Active filter indicator */}
-      {searchedContract && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
-          <span>Showing events for:</span>
-          <code className="font-mono text-xs bg-muted px-2 py-1 rounded">
-            {searchedContract.slice(0, 10)}...{searchedContract.slice(-6)}
-          </code>
-          <button
-            type="button"
-            onClick={() => {
-              setSearchValue("");
-              handleSearch("");
-            }}
-            className="text-violet-600 dark:text-violet-400 hover:underline text-xs"
-            aria-label="Clear contract filter"
-          >
-            Clear all filters
-          </button>
-        </div>
-      )}
-
-      {/* Custom ABIs */}
       <section aria-label="Custom ABIs" className="flex flex-wrap items-center gap-2">
         <Button variant="outline" size="sm" onClick={() => setIsUploadOpen(true)}>
           <Upload className="mr-2 h-4 w-4" />
@@ -280,10 +326,8 @@ export function DashboardClient(): React.JSX.Element {
         ))}
       </section>
 
-      {/* Stats */}
-      {!isLoading && <StatsBar events={allEvents} />}
+      <StatsBar events={allEvents} />
 
-      {/* Event feed */}
       <section aria-label="Event feed">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
@@ -295,7 +339,7 @@ export function DashboardClient(): React.JSX.Element {
               size="sm"
               className="h-7 px-3 text-xs border-violet-300 text-violet-700 hover:bg-violet-50 dark:border-violet-700 dark:text-violet-400 dark:hover:bg-violet-950"
               onClick={() => setIsExportOpen(true)}
-              disabled={isLoading || allEvents.length === 0}
+              disabled={allEvents.length === 0}
               aria-label="Export filtered event data"
             >
               <Download className="h-3.5 w-3.5 mr-1.5" />
@@ -345,7 +389,7 @@ export function DashboardClient(): React.JSX.Element {
         {ready && (
           <EventFeedTable
             events={filteredEvents}
-            isLoading={isLoading}
+            isLoading={false}
             newEventIds={newEventIds}
             columns={prefs.columns}
             density={prefs.density}
@@ -355,7 +399,6 @@ export function DashboardClient(): React.JSX.Element {
         )}
       </section>
 
-      {/* Contribute banner */}
       <section
         aria-label="Contribute"
         className="rounded-lg border border-violet-200 bg-violet-50 p-5 dark:border-violet-800 dark:bg-violet-950/30"
@@ -366,7 +409,8 @@ export function DashboardClient(): React.JSX.Element {
             <div>
               <p className="text-sm font-medium">Help translate more contracts</p>
               <p className="mt-0.5 text-sm text-muted-foreground">
-                Open-Audit is community-powered. Add a translation blueprint and earn Stellar Drips rewards.
+                Open-Audit is community-powered. Add a translation blueprint and earn
+                Stellar Drips rewards.
               </p>
             </div>
           </div>

@@ -15,6 +15,11 @@
       "required": ["contract_id", "topics", "event_structure", "templates"],
       "additionalProperties": false,
       "properties": {
+        "contract_id": {
+          "type": "string",
+          "description": "The Soroban contract address this entry describes",
+          "minLength": 1
+        },
         "topics": {
           "type": "array",
           "description": "Ordered list of event topic names (the first is the event discriminant)",

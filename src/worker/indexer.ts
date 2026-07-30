@@ -169,6 +169,29 @@ class RedisPublisher {
   }
 
   /**
+   * Set worker heartbeat in Redis hash
+   * Format: HSET open-audit:worker:heartbeat field value field value...
+   */
+  async setHeartbeat(data: Record<string, any>): Promise<void> {
+    if (!this.client || !this.isConnected) {
+      return; // Skip if not connected
+    }
+
+    try {
+      const key = "open-audit:worker:heartbeat";
+      const fields: string[] = [];
+      
+      for (const [field, value] of Object.entries(data)) {
+        fields.push(field, typeof value === "string" ? value : JSON.stringify(value));
+      }
+
+      await this.client.hset(key, ...fields);
+    } catch (error) {
+      console.error(`[${WORKER_ID}] Failed to set heartbeat:`, error);
+    }
+  }
+
+  /**
    * Flush queued messages when connection is restored
    */
   private async flushQueue(): Promise<void> {
@@ -349,13 +372,44 @@ class StellarIndexerWorker {
   }
 
   /**
-   * Start periodic health check reporting
+   * Start periodic health check reporting and heartbeat
    */
   private startHealthCheck(): void {
-    this.healthCheckInterval = setInterval(() => {
+    this.healthCheckInterval = setInterval(async () => {
       const status = this.getStatus();
       console.log(`[${WORKER_ID}] Health Check:`, JSON.stringify(status, null, 2));
+      
+      // Emit heartbeat to Redis for status monitoring
+      await this.emitHeartbeat();
     }, HEALTH_CHECK_INTERVAL_MS);
+  }
+
+  /**
+   * Emit worker heartbeat to Redis
+   * This allows the status endpoint to check if the worker is alive
+   */
+  private async emitHeartbeat(): Promise<void> {
+    if (!this.publisher.getStatus().connected) {
+      return; // Skip if Redis is not connected
+    }
+
+    try {
+      const timestamp = new Date().toISOString();
+      const heartbeatData = {
+        lastSeen: timestamp,
+        workerId: WORKER_ID,
+        processedCount: this.processedCount,
+        errorCount: this.errorCount,
+        uptime: process.uptime(),
+        memoryUsage: process.memoryUsage(),
+      };
+
+      // Use the publisher's client to write heartbeat
+      // We'll add a method to the publisher for this
+      await this.publisher.setHeartbeat(heartbeatData);
+    } catch (error) {
+      console.error(`[${WORKER_ID}] Failed to emit heartbeat:`, error);
+    }
   }
 
   /**
