@@ -9,7 +9,12 @@
 import { describe, it, expect } from "vitest";
 import { xdr as StellarXdr } from "stellar-sdk";
 import { translateEvent } from "../registry";
-import { createBlendPoolBlueprint, BLEND_POOL_CONTRACT_IDS } from "../blueprints/blend-pool";
+import {
+  createBlendPoolBlueprint,
+  BLEND_POOL_CONTRACT_IDS,
+  BLEND_POOL_V1_CONTRACT_IDS,
+  BLEND_POOL_V2_CONTRACT_IDS,
+} from "../blueprints/blend-pool";
 import type { RawEvent } from "../types";
 
 // ─── XDR fixture helpers ───────────────────────────────────────────────────────
@@ -99,11 +104,17 @@ const MOCK_REPAY_EVENT: RawEvent = {
   txHash: "07070707070707070707070707070707070707070707070707070707070707",
 };
 
+// POOL_TESTNET_CONTRACT ("TestnetV2") is a v2-generation pool, so
+// fill_auction's topic order is [fill_auction, auction_type, user] and its
+// data is (filler, fill_percent, auction_data) — see blueprints/blend-pool.ts
+// for the v1/v2 schema diff, verified against a live mainnet fill_auction
+// event (auction_type=2) whose second data element was a plain "100" (i.e.
+// a fill percentage, not a stroop-scaled token amount).
 const MOCK_LIQUIDATE_EVENT: RawEvent = {
   id: "0000300-4",
   contractId: POOL_TESTNET_CONTRACT,
-  topics: [symbolHex("fill_auction"), USER_TOPIC, u32Hex(0)],
-  data: vecHex([addressScVal(23), i128ScVal(750_000_000n)]),
+  topics: [symbolHex("fill_auction"), u32Hex(0), USER_TOPIC],
+  data: vecHex([addressScVal(23), i128ScVal(100n), StellarXdr.ScVal.scvU32(0)]),
   ledger: 61_000_005,
   timestamp: Math.floor(Date.now() / 1000) - 100,
   txHash: "18181818181818181818181818181818181818181818181818181818181818",
@@ -228,10 +239,62 @@ describe("Blend Pool blueprint — liquidate", () => {
     const blueprint = createBlendPoolBlueprint(POOL_TESTNET_CONTRACT);
     const badDebtAuction: RawEvent = {
       ...MOCK_LIQUIDATE_EVENT,
-      topics: [symbolHex("fill_auction"), USER_TOPIC, u32Hex(1)],
+      topics: [symbolHex("fill_auction"), u32Hex(1), USER_TOPIC],
     };
 
     expect(blueprint.translate(badDebtAuction, "en")).toBeNull();
+  });
+});
+
+// ─── v1 schema (original "Fixed"/"YieldBlox" pools) ───────────────────────────
+
+describe("Blend Pool blueprint — v1 schema", () => {
+  const POOL_V1_CONTRACT = BLEND_POOL_V1_CONTRACT_IDS[0];
+
+  // v1 fill_auction topics are ordered [fill_auction, user, auction_type] —
+  // the reverse of v2. See blueprints/blend-pool.ts for the source diff.
+  const V1_LIQUIDATE_EVENT: RawEvent = {
+    ...MOCK_LIQUIDATE_EVENT,
+    contractId: POOL_V1_CONTRACT,
+    topics: [symbolHex("fill_auction"), USER_TOPIC, u32Hex(0)],
+    data: vecHex([addressScVal(23), i128ScVal(100n)]),
+  };
+
+  it("translates a v1 fill_auction(auction_type=0) event using the v1 topic order", () => {
+    const blueprint = createBlendPoolBlueprint(POOL_V1_CONTRACT, "v1");
+    const result = blueprint.translate(V1_LIQUIDATE_EVENT, "en");
+
+    expect(result).not.toBeNull();
+    expect(result?.eventType).toBe("Liquidate");
+    expect(result?.description).toContain("liquidated");
+    expect(result?.description).toContain("100%");
+  });
+
+  it("rejects a v1-shaped liquidate event when decoded with the v2 topic order", () => {
+    const blueprint = createBlendPoolBlueprint(POOL_V1_CONTRACT, "v2");
+    // Under the v2 interpretation, topics[1] (an Address) is read as the
+    // auction_type u32 and fails to decode, so the event falls through.
+    expect(blueprint.translate(V1_LIQUIDATE_EVENT, "en")).toBeNull();
+  });
+
+  it("still translates supply/withdraw/borrow/repay identically under the v1 schema", () => {
+    const blueprint = createBlendPoolBlueprint(POOL_V1_CONTRACT, "v1");
+    const supplyEvent: RawEvent = { ...MOCK_SUPPLY_EVENT, contractId: POOL_V1_CONTRACT };
+
+    const result = blueprint.translate(supplyEvent, "en");
+    expect(result?.eventType).toBe("Supply");
+    expect(result?.description).toContain("supplied");
+  });
+
+  it("BLEND_POOL_V1_CONTRACT_IDS exports the canonical v1 pool IDs", () => {
+    expect(BLEND_POOL_V1_CONTRACT_IDS).toContain("CDVQVKOY2YSXS2IC7KN6MNASSHPAO7UN2UR2ON4OI2SKMFJNVAMDX6DP");
+    expect(BLEND_POOL_V1_CONTRACT_IDS).toContain("CBP7NO6F7FRDHSOFQBT2L2UWYIZ2PU76JKVRYAQTG3KZSQLYAOKIF2WB");
+  });
+
+  it("a v1 pool contract ID is resolvable through the global registry", () => {
+    const result = translateEvent({ ...MOCK_SUPPLY_EVENT, contractId: POOL_V1_CONTRACT });
+    expect(result.status).toBe("translated");
+    expect(result.blueprintName).toBe("Blend Lending Pool");
   });
 });
 
@@ -303,9 +366,15 @@ describe("createBlendPoolBlueprint", () => {
     expect(blueprint.matches?.(unrelatedEvent)).toBe(false);
   });
 
-  it("BLEND_POOL_CONTRACT_IDS exports the canonical mainnet and testnet pool IDs", () => {
+  it("BLEND_POOL_CONTRACT_IDS exports the canonical mainnet and testnet pool IDs across both schema generations", () => {
     expect(BLEND_POOL_CONTRACT_IDS).toContain(POOL_MAINNET_CONTRACT);
     expect(BLEND_POOL_CONTRACT_IDS).toContain(POOL_TESTNET_CONTRACT);
+    expect(BLEND_POOL_CONTRACT_IDS).toEqual([...BLEND_POOL_V1_CONTRACT_IDS, ...BLEND_POOL_V2_CONTRACT_IDS]);
+  });
+
+  it("BLEND_POOL_V2_CONTRACT_IDS exports the canonical v2 pool IDs", () => {
+    expect(BLEND_POOL_V2_CONTRACT_IDS).toContain(POOL_MAINNET_CONTRACT);
+    expect(BLEND_POOL_V2_CONTRACT_IDS).toContain(POOL_TESTNET_CONTRACT);
   });
 });
 
