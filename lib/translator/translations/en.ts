@@ -27,6 +27,38 @@ export const EN_TRANSLATIONS: TranslationMap = {
       OfferFilled: "Offer Filled",
     },
   },
+  soroswap: {
+    swap: (to: string, amountIn: string, tokenIn: string, amountOut: string, tokenOut: string) =>
+      `Account [${to}] swapped ${amountIn} of asset [${tokenIn}] for ${amountOut} of asset [${tokenOut}]`,
+    addLiquidity: (to: string, amountA: string, tokenA: string, amountB: string, tokenB: string, liquidity: string) =>
+      `Account [${to}] added ${amountA} of asset [${tokenA}] and ${amountB} of asset [${tokenB}] to the pool, receiving ${liquidity} liquidity tokens`,
+    removeLiquidity: (to: string, amountA: string, tokenA: string, amountB: string, tokenB: string, liquidity: string) =>
+      `Account [${to}] removed ${amountA} of asset [${tokenA}] and ${amountB} of asset [${tokenB}] from the pool, burning ${liquidity} liquidity tokens`,
+    eventTypes: {
+      Swap: "Swap",
+      AddLiquidity: "Add Liquidity",
+      RemoveLiquidity: "Remove Liquidity",
+    },
+  },
+  blend: {
+    supply: (from: string, amount: string, asset: string) =>
+      `Account [${from}] supplied ${amount} of asset [${asset}] to the pool`,
+    borrow: (from: string, amount: string, asset: string) =>
+      `Account [${from}] borrowed ${amount} of asset [${asset}] from the pool`,
+    repay: (from: string, amount: string, asset: string) =>
+      `Account [${from}] repaid ${amount} of asset [${asset}] to the pool`,
+    withdraw: (from: string, amount: string, asset: string) =>
+      `Account [${from}] withdrew ${amount} of asset [${asset}] from the pool`,
+    liquidate: (user: string, filler: string, amount: string) =>
+      `Account [${filler}] liquidated ${amount} of collateral from account [${user}]`,
+    eventTypes: {
+      Supply: "Supply",
+      Borrow: "Borrow",
+      Repay: "Repay",
+      Withdraw: "Withdraw",
+      Liquidate: "Liquidate",
+    },
+  },
   generic: {
     unregisteredContractName: "Unregistered Contract",
     unregisteredContractDescription: (payload: string) => `[Unregistered Contract] ${payload}`,

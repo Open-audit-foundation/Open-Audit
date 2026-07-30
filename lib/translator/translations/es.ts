@@ -27,6 +27,38 @@ export const ES_TRANSLATIONS: TranslationMap = {
       OfferFilled: "Oferta Completada",
     },
   },
+  soroswap: {
+    swap: (to: string, amountIn: string, tokenIn: string, amountOut: string, tokenOut: string) =>
+      `La cuenta [${to}] intercambió ${amountIn} del activo [${tokenIn}] por ${amountOut} del activo [${tokenOut}]`,
+    addLiquidity: (to: string, amountA: string, tokenA: string, amountB: string, tokenB: string, liquidity: string) =>
+      `La cuenta [${to}] agregó ${amountA} del activo [${tokenA}] y ${amountB} del activo [${tokenB}] al pool, recibiendo ${liquidity} tokens de liquidez`,
+    removeLiquidity: (to: string, amountA: string, tokenA: string, amountB: string, tokenB: string, liquidity: string) =>
+      `La cuenta [${to}] retiró ${amountA} del activo [${tokenA}] y ${amountB} del activo [${tokenB}] del pool, quemando ${liquidity} tokens de liquidez`,
+    eventTypes: {
+      Swap: "Intercambio",
+      AddLiquidity: "Agregar Liquidez",
+      RemoveLiquidity: "Retirar Liquidez",
+    },
+  },
+  blend: {
+    supply: (from: string, amount: string, asset: string) =>
+      `La cuenta [${from}] suministró ${amount} del activo [${asset}] al pool`,
+    borrow: (from: string, amount: string, asset: string) =>
+      `La cuenta [${from}] pidió prestado ${amount} del activo [${asset}] del pool`,
+    repay: (from: string, amount: string, asset: string) =>
+      `La cuenta [${from}] pagó ${amount} del activo [${asset}] al pool`,
+    withdraw: (from: string, amount: string, asset: string) =>
+      `La cuenta [${from}] retiró ${amount} del activo [${asset}] del pool`,
+    liquidate: (user: string, filler: string, amount: string) =>
+      `La cuenta [${filler}] liquidó ${amount} de garantía de la cuenta [${user}]`,
+    eventTypes: {
+      Supply: "Suministro",
+      Borrow: "Préstamo",
+      Repay: "Pago",
+      Withdraw: "Retiro",
+      Liquidate: "Liquidación",
+    },
+  },
   generic: {
     unregisteredContractName: "Contrato no registrado",
     unregisteredContractDescription: (payload: string) => `[Contrato no registrado] ${payload}`,

@@ -20,6 +20,13 @@
 import { createAllSacBlueprints } from "./blueprints/sac-transfer";
 import { createSacMintBurnBlueprint } from "./blueprints/sac-mint-burn";
 import { createAllSdexBlueprints } from "./blueprints/sdex-orderbook";
+import { createAllSoroswapRouterBlueprints } from "./blueprints/soroswap-router";
+import { createAllBlendPoolV1Blueprints, createAllBlendPoolV2Blueprints } from "./blueprints/blend-pool";
+import {
+  registryCacheHitsTotal,
+  registryCacheMissesTotal,
+  translationsTotal,
+} from "../metrics";
 import {
   decodeEventName,
   sanitizeTextField,
@@ -216,6 +223,31 @@ function buildRegistry(): BlueprintRegistry {
     }
   }
 
+  // 3. Load SDEX (Stellar Classic Order Book) Blueprints
+  for (const blueprint of createAllSdexBlueprints()) {
+    register(blueprint);
+  }
+
+  // 4. Load Soroswap Router Blueprints.
+  // The router's event.rs has had no schema-breaking commits since its
+  // initial Dec 2023 implementation (verified against the contract's commit
+  // history and against live mainnet swap/add/remove events), so only a
+  // single schema is registered.
+  for (const blueprint of createAllSoroswapRouterBlueprints()) {
+    register(blueprint, "1.0.0", 0);
+  }
+
+  // 5. Load Blend Protocol Pool Blueprints.
+  // v1 ("Fixed"/"YieldBlox") and v2 ("FixedV2"/"YieldBloxV2"/"TestnetV2") are
+  // separate pool deployments with a real fill_auction event-shape change
+  // between generations — see blueprints/blend-pool.ts for the schema diff.
+  for (const blueprint of createAllBlendPoolV1Blueprints()) {
+    register(blueprint, "1.0.0", 0);
+  }
+  for (const blueprint of createAllBlendPoolV2Blueprints()) {
+    register(blueprint, "2.0.0", 0);
+  }
+
   return registry;
 }
 
@@ -392,7 +424,11 @@ export function resolveSchema(
   // 2. Check cache
   const cacheKey = `${contractId}:${ledger}`;
   const cached = RESOLUTION_CACHE.get(cacheKey);
-  if (cached) return cached;
+  if (cached) {
+    registryCacheHitsTotal.inc();
+    return cached;
+  }
+  registryCacheMissesTotal.inc();
 
   // 3. Look up in global registry
   const entry = REGISTRY.get(contractId);
@@ -570,8 +606,11 @@ function translateEventSafe(
   lang: Language
 ): TranslatedEvent {
   try {
-    return translateEvent(event, customBlueprints, lang);
+    const result = translateEvent(event, customBlueprints, lang);
+    translationsTotal.inc({ status: result.status ?? "cryptic" });
+    return result;
   } catch (error) {
+    translationsTotal.inc({ status: "cryptic" });
     const templateError = new RegistryTemplateException(
       error instanceof Error ? error.message : "Translation failed",
       {

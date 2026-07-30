@@ -145,6 +145,7 @@ export async function translateAndPersistEvent(
         status: translated.status,
         blueprintName: translated.blueprintName,
         eventType: translated.eventType,
+        schemaVersion: translated.schemaVersion,
         updatedAt: new Date(),
       },
       create: {
@@ -159,6 +160,7 @@ export async function translateAndPersistEvent(
         status: translated.status,
         blueprintName: translated.blueprintName,
         eventType: translated.eventType,
+        schemaVersion: translated.schemaVersion,
       },
     });
 
