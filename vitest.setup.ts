@@ -1,9 +1,10 @@
 import { beforeAll, afterEach, afterAll, expect } from "vitest";
-import "@testing-library/jest-dom/vitest";
+import * as jestDomMatchers from "@testing-library/jest-dom/matchers";
 import * as matchers from "vitest-axe/matchers";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
 
+expect.extend(jestDomMatchers);
 expect.extend(matchers);
 
 export const handlers = [
