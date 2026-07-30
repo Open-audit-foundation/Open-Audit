@@ -38,17 +38,19 @@ export async function GET(): Promise<NextResponse> {
     return NextResponse.json(payload);
   } catch (error) {
     console.error("[stats] Failed to compute stats:", error);
+
+    const stale = await getCachedStats().catch(() => null);
+    if (stale) {
+      return NextResponse.json({
+        ...stale,
+        degraded: true,
+        error: "Serving stale data; database unreachable",
+      });
+    }
+
     return NextResponse.json(
-      {
-        totalEvents: 0,
-        translatedCount: 0,
-        crypticCount: 0,
-        translationRate: 0,
-        deadLetterQueueSize: 0,
-        lastIndexedLedger: null,
-        error: "Database unavailable",
-      },
-      { status: 200 }
+      { error: "Database unavailable" },
+      { status: 503 }
     );
   }
 }

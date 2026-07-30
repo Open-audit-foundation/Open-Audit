@@ -364,9 +364,7 @@ function determineOverallStatus(components: {
 }): OverallStatus {
   const { stellarRpc, database, redis, worker } = components;
 
-  // If critical component (Stellar RPC or Database) is down, system is down
-  if (stellarRpc.status === "down" || 
-      (database.status === "down" && database.status !== "not-configured")) {
+  if (stellarRpc.status === "down" || database.status === "down") {
     return "down";
   }
 

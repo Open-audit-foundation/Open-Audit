@@ -104,12 +104,10 @@ function determineOverallStatus(components: {
 }): OverallStatus {
   const { stellarRpc, database, redis, worker } = components;
 
-  // If critical component (Stellar RPC) is down, system is down
-  if (stellarRpc.status === "down") {
+  if (stellarRpc.status === "down" || database.status === "down") {
     return "down";
   }
 
-  // If any component is degraded or down, system is degraded
   const hasIssues =
     stellarRpc.status === "degraded" ||
     (database.status !== "healthy" && database.status !== "not-configured") ||
@@ -193,7 +191,7 @@ describe("Status System", () => {
       expect(status).toBe("healthy");
     });
 
-    test("should return degraded when database is down", () => {
+    test("should return down when database is down", () => {
       const components = {
         stellarRpc: { status: "healthy" as ComponentStatus },
         database: { status: "down" as ComponentStatus, error: "Connection failed" },
@@ -202,7 +200,7 @@ describe("Status System", () => {
       };
 
       const status = determineOverallStatus(components);
-      expect(status).toBe("degraded");
+      expect(status).toBe("down");
     });
   });
 
