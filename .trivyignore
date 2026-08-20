@@ -11,25 +11,27 @@
 # ── Node.js / npm ────────────────────────────────────────────────────────────
 
 # ---------------------------------------------------------------------------
-# GHSA-qx2v-qp2m-jg93 / GHSA-6g55-p6wh-862q / GHSA-r28c-9q8g-f849
-# PostCSS < 8.5.18 — XSS via unescaped </style>, sourceMappingURL file
-# read / path traversal
+# GHSA-qx2v-qp2m-jg93 / GHSA-6g55-p6wh-862q / GHSA-fxqj-rqcc-2cmp / GHSA-r28c-9q8g-f849
+# PostCSS <= 8.5.22 — XSS via unescaped </style>, sourceMappingURL file
+# read / path traversal (GHSA-fxqj-rqcc-2cmp is an incomplete-fix follow-up
+# to GHSA-6g55-p6wh-862q, same underlying issue)
 #
 # Root cause: next@16.2.12 (the latest 16.x release as of this review)
 # bundles postcss@8.4.31 as a private dependency inside
 # node_modules/next/node_modules/postcss. npm overrides cannot reach
 # bundled deps without risking Next's internal CSS pipeline compatibility.
 #
-# Impact assessment: all three advisories require an attacker to control
+# Impact assessment: all four advisories require an attacker to control
 # CSS source text or a sourceMappingURL comment that PostCSS parses at
 # build time. This project does not accept user-supplied CSS or build-time
 # input from untrusted sources — the attack surface is not present at runtime.
 #
 # Re-evaluate: next time `next` is upgraded (check whether the bundled
-# postcss version has moved past 8.5.17).
+# postcss version has moved past 8.5.22).
 # ---------------------------------------------------------------------------
 GHSA-qx2v-qp2m-jg93
 GHSA-6g55-p6wh-862q
+GHSA-fxqj-rqcc-2cmp
 GHSA-r28c-9q8g-f849
 
 # ---------------------------------------------------------------------------
@@ -47,3 +49,23 @@ GHSA-r28c-9q8g-f849
 # Re-evaluate: next time `next` is upgraded, or if remotePatterns is added.
 # ---------------------------------------------------------------------------
 GHSA-f88m-g3jw-g9cj
+
+# ---------------------------------------------------------------------------
+# GHSA-w5hq-g745-h8pq
+# uuid < 11.1.1 — missing buffer bounds check in v3/v5/v6 *only when the
+# caller passes an explicit `buf` argument*
+#
+# Root cause: bull, node-cron, and @opencensus/core (transitively, via
+# @opentelemetry/shim-opencensus) all pin an old uuid range. No fix is
+# available upstream without a breaking major-version bump to bull/node-cron;
+# @opencensus/core has no fix at all (unmaintained).
+#
+# Impact assessment: verified bull's actual call sites (lib/queue.js,
+# lib/timer-manager.js) call `uuid.v4()` with zero arguments — never with a
+# `buf` param — so the vulnerable code path is not exercised. Same pattern
+# expected for node-cron/opencensus (simple random-id generation).
+#
+# Re-evaluate: if bull, node-cron, or @opencensus/core are upgraded, or if
+# any new caller of uuid's v3/v5/v6 functions passes a buffer argument.
+# ---------------------------------------------------------------------------
+GHSA-w5hq-g745-h8pq
