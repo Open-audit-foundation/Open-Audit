@@ -13,18 +13,17 @@ Complete checklist for deploying Open-Audit with all features enabled.
 
 ### Configuration Files
 
-- [ ] `.env.local` or `.env` created from `.env.microservices.example`
+- [ ] `.env.local` or `.env` created from `.env.example`
 - [ ] `NEXT_PUBLIC_NETWORK` set (`testnet` or `mainnet`)
 - [ ] `NEXT_PUBLIC_HORIZON_URL` configured
 - [ ] `NEXT_PUBLIC_SOROBAN_RPC_URL` configured
-- [ ] `REDIS_URL` configured (for microservices)
+- [ ] `REDIS_URL` configured
 - [ ] `DATABASE_URL` configured (optional)
 - [ ] `PORT` set (default: 3000)
 
 ### Key Environment Variables
 
 ```env
-# Required for microservices
 REDIS_URL=redis://localhost:6379
 REDIS_CHANNEL=stellar:events
 
@@ -43,72 +42,11 @@ WORKER_ID=worker-1
 
 ---
 
-## Microservices Architecture Deployment
-
-### Option 1: Docker Compose (Recommended)
-
-#### Build & Start
-
-- [ ] Build Docker images: `npm run docker:build`
-- [ ] Start all services: `npm run docker:up`
-- [ ] Verify containers running: `docker ps`
-- [ ] Check logs: `npm run docker:logs`
-
-#### Verify Services
-
-- [ ] Redis container running: `docker ps | grep redis`
-- [ ] Web server container running: `docker ps | grep web`
-- [ ] Indexer worker container running: `docker ps | grep worker`
-- [ ] PostgreSQL container running (optional): `docker ps | grep postgres`
-
-#### Health Checks
-
-- [ ] Web server responding: `curl http://localhost:3000`
-- [ ] Health API responding: `curl http://localhost:3000/api/health`
-- [ ] Status API responding: `curl http://localhost:3000/api/status`
-- [ ] Status dashboard accessible: `http://localhost:3000/status`
-
----
-
-### Option 2: PM2 Process Manager
-
-#### Start Services
+## Deployment
 
 - [ ] Redis server running: `redis-server` or `brew services start redis`
-- [ ] Start PM2 services: `npm run start:pm2`
-- [ ] Verify processes: `pm2 status`
-- [ ] Check logs: `npm run logs:pm2`
-
-#### Verify Processes
-
-- [ ] `web-server` process running
-- [ ] `indexer-worker` process running
-- [ ] Both processes in `online` state
-- [ ] No errors in logs
-
-#### Health Checks
-
-- [ ] Web server responding: `curl http://localhost:3000`
-- [ ] Health API responding: `curl http://localhost:3000/api/health`
-- [ ] Status API responding: `curl http://localhost:3000/api/status`
-- [ ] Status dashboard accessible: `http://localhost:3000/status`
-
----
-
-### Option 3: Manual (Development)
-
-#### Start Services Manually
-
-- [ ] Redis server started: `redis-server`
-- [ ] Web server started: `npm run dev:decoupled` (Terminal 1)
-- [ ] Indexer worker started: `npm run worker:indexer` (Terminal 2)
-
-#### Verify Processes
-
-- [ ] Redis responding: `redis-cli ping` (should return `PONG`)
-- [ ] Web server logs showing "Server started"
-- [ ] Worker logs showing "Worker started successfully"
-- [ ] No connection errors in logs
+- [ ] Application built: `npm run build`
+- [ ] Server started: `npm run start` (or `npm run dev:ws` for the WebSocket-enabled server)
 
 #### Health Checks
 
@@ -153,7 +91,7 @@ WORKER_ID=worker-1
 ### 5. WebSocket Connection
 
 - [ ] WebSocket endpoint accessible: `ws://localhost:3000/ws/events`
-- [ ] Test client connects: `npm run test:websocket`
+- [ ] Test client connects: `node scripts/test-websocket-client.js`
 - [ ] Events received by client (check test output)
 - [ ] No WebSocket errors in browser console
 
@@ -281,7 +219,7 @@ WORKER_ID=worker-1
 
 #### WebSocket Connection
 
-- [ ] Connect to WebSocket: `npm run test:websocket`
+- [ ] Connect to WebSocket: `node scripts/test-websocket-client.js`
 - [ ] Receive events in real-time
 - [ ] Connection stable (no disconnects)
 - [ ] Events properly translated
@@ -344,10 +282,10 @@ WORKER_ID=worker-1
 #### Worker shows "down" in status
 
 **Solution:**
-1. Check worker logs: `pm2 logs indexer-worker` or `docker logs open-audit-worker`
+1. Check the server process logs for worker errors
 2. Verify Redis connection: `redis-cli ping`
 3. Check heartbeat: `redis-cli HGETALL open-audit:worker:heartbeat`
-4. Restart worker: `pm2 restart indexer-worker` or `docker restart open-audit-worker`
+4. Restart the server process
 
 #### Redis shows "down" or "not-configured"
 
@@ -379,34 +317,15 @@ WORKER_ID=worker-1
 
 ## Rollback Plan
 
-### Docker Compose
-
 ```bash
-# Stop all services
-npm run docker:down
-
-# Remove containers
-docker-compose -f docker-compose.microservices.yml down -v
+# Stop the running server process
 
 # Revert to previous version
 git checkout <previous-commit>
 
 # Rebuild and restart
-npm run docker:build
-npm run docker:up
-```
-
-### PM2
-
-```bash
-# Stop all services
-npm run stop:pm2
-
-# Revert to previous version
-git checkout <previous-commit>
-
-# Restart services
-npm run start:pm2
+npm run build
+npm run start
 ```
 
 ---
@@ -452,9 +371,6 @@ npm run start:pm2
 ### Documentation
 
 - [ ] Architecture documentation reviewed: `ARCHITECTURE.md`
-- [ ] Microservices guide reviewed: `MICROSERVICES_ARCHITECTURE.md`
-- [ ] Security guide reviewed: `SECURITY_HARDENING_GUIDE.md`
-- [ ] Status monitoring guide reviewed: `STATUS_MONITORING_GUIDE.md`
 - [ ] API documentation reviewed
 
 ### Team Training
