@@ -76,7 +76,7 @@ jobs:
         run: |
           curl -sfL \
             https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sh -s -- -b /usr/local/bin v0.61.0
+            | sh -s -- -b /usr/local/bin v0.74.0
           trivy --version
 
       # ── Filesystem scan — SARIF output ────────────────────────────────────
