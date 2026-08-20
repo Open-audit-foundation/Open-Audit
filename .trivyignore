@@ -9,46 +9,12 @@
 # a stale entry can silently hide a real, currently-exploitable CVE.
 #
 # ── Node.js / npm ────────────────────────────────────────────────────────────
-
-# ---------------------------------------------------------------------------
-# GHSA-qx2v-qp2m-jg93 / GHSA-6g55-p6wh-862q / GHSA-fxqj-rqcc-2cmp / GHSA-r28c-9q8g-f849
-# PostCSS <= 8.5.22 — XSS via unescaped </style>, sourceMappingURL file
-# read / path traversal (GHSA-fxqj-rqcc-2cmp is an incomplete-fix follow-up
-# to GHSA-6g55-p6wh-862q, same underlying issue)
 #
-# Root cause: next@16.2.12 (the latest 16.x release as of this review)
-# bundles postcss@8.4.31 as a private dependency inside
-# node_modules/next/node_modules/postcss. npm overrides cannot reach
-# bundled deps without risking Next's internal CSS pipeline compatibility.
-#
-# Impact assessment: all four advisories require an attacker to control
-# CSS source text or a sourceMappingURL comment that PostCSS parses at
-# build time. This project does not accept user-supplied CSS or build-time
-# input from untrusted sources — the attack surface is not present at runtime.
-#
-# Re-evaluate: next time `next` is upgraded (check whether the bundled
-# postcss version has moved past 8.5.22).
-# ---------------------------------------------------------------------------
-GHSA-qx2v-qp2m-jg93
-GHSA-6g55-p6wh-862q
-GHSA-fxqj-rqcc-2cmp
-GHSA-r28c-9q8g-f849
-
-# ---------------------------------------------------------------------------
-# GHSA-f88m-g3jw-g9cj (CVE-2026-33327, CVE-2026-33328, CVE-2026-35590, CVE-2026-35591)
-# sharp < 0.35.0 — inherited libvips image-processing vulnerabilities
-#
-# Root cause: next@16.2.12 bundles sharp@0.34.5 for its Image Optimization
-# API; npm overrides cannot reach it without risking incompatibility with
-# Next's optimizer.
-#
-# Impact assessment: next.config.mjs does not configure `images.remotePatterns`,
-# so the Image Optimization API only ever processes images already hosted on
-# this origin — it is not exposed to attacker-controlled remote image URLs.
-#
-# Re-evaluate: next time `next` is upgraded, or if remotePatterns is added.
-# ---------------------------------------------------------------------------
-GHSA-f88m-g3jw-g9cj
+# NOTE: next@16.2.12 bundles its own private postcss and sharp versions
+# (node_modules/next/node_modules/postcss, node_modules/sharp) that are older
+# than the top-level ranges this project declares. Nested npm overrides
+# (see package.json -> overrides.next) force both to current patched
+# versions without needing to bump `next` itself.
 
 # ---------------------------------------------------------------------------
 # GHSA-w5hq-g745-h8pq
