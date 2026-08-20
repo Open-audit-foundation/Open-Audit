@@ -27,7 +27,7 @@
  */
 
 import { decodeAddress, decodeVec, decodeScVal } from "../core";
-import type { TranslationBlueprint, TranslationResult, RawEvent, Language, DecodedVec } from "../types";
+import type { TranslationBlueprint, TranslationResult, RawEvent, Language, DecodedVec, DecodedValue } from "../types";
 import { getTranslation } from "../translations";
 
 // ─── Known Blend Pool contract IDs ─────────────────────────────────────────────
@@ -62,6 +62,11 @@ function decodeU32Topic(hex: string | undefined): number | null {
   return decoded.type === "U32" ? Number(decoded.value) : null;
 }
 
+/** Extracts the scalar `.value` from a decoded ScVal, or undefined for Map/Vec results. */
+function scalarValue(decoded: DecodedValue | undefined): string | undefined {
+  return decoded && "value" in decoded ? decoded.value : undefined;
+}
+
 /** Formats a raw stroop-denominated integer string as a decimal amount. */
 function formatStroops(raw: string | undefined): string {
   if (!raw) return "0.00";
@@ -89,7 +94,7 @@ function translateReserveAction(event: RawEvent, lang: Language): TranslationRes
   if (!amount) return null;
 
   const t = getTranslation(lang);
-  const formattedAmount = formatStroops(amount.value);
+  const formattedAmount = formatStroops(scalarValue(amount));
 
   switch (eventName) {
     case "supply":
@@ -118,7 +123,11 @@ function translateLiquidate(event: RawEvent, lang: Language): TranslationResult 
   if (!fillerField || !amountField) return null;
 
   const t = getTranslation(lang);
-  const description = t.blend.liquidate(user.short, fillerField.value, formatStroops(amountField.value));
+  const description = t.blend.liquidate(
+    user.short,
+    scalarValue(fillerField) ?? "unknown",
+    formatStroops(scalarValue(amountField))
+  );
 
   return {
     description,

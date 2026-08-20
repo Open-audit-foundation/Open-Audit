@@ -362,8 +362,11 @@ export function createCircuitBreaker(config: CircuitBreakerConfig): CircuitBreak
         totalFailures++;
       }
 
-      // If we just opened the circuit and have a fallback, try it
-      if (state === CircuitState.OPEN && fallback) {
+      // If we just opened the circuit and have a fallback, try it.
+      // recordFailure() above may have transitioned `state` to OPEN via
+      // transitionTo() — TS's control-flow narrowing can't see that mutation
+      // through the function call, hence the cast.
+      if ((state as CircuitState) === CircuitState.OPEN && fallback) {
         totalFallbacks++;
         console.log("[circuit-breaker] Circuit just opened, attempting fallback");
         try {

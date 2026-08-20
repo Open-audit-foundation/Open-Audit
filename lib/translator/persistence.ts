@@ -6,6 +6,7 @@
  */
 
 
+import type { Prisma } from "@prisma/client";
 import type { RawEvent, TranslatedEvent } from "./types";
 import { translateWithCache } from "./registry";
 import { db } from "../db/client";
@@ -99,7 +100,7 @@ async function saveDeadLetterEvent(rawEvent: RawEvent, payload: DeadLetterPayloa
         errorCode: payload.errorCode,
         errorMessage: payload.errorMessage,
         errorStack: payload.errorStack ?? undefined,
-        errorContext: payload.errorContext ?? undefined,
+        errorContext: (payload.errorContext ?? undefined) as Prisma.InputJsonValue | undefined,
       },
     });
   } catch (dbError) {

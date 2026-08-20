@@ -1,6 +1,6 @@
 "use client";
 
-import { Code, ExternalLink, Copy, Check, Loader2, AlertCircle } from "lucide-react";
+import { Code, ExternalLink, Copy, Check, Loader2, AlertCircle, ChevronUp, ChevronDown } from "lucide-react";
 import React, { useState, useEffect, useRef } from "react";
 import {
   Dialog,
@@ -19,7 +19,6 @@ import {
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { useToast } from "@/lib/hooks/use-toast";
-import { InclusionProofPanel } from "@/components/dashboard/InclusionProofPanel";
 import type { RawEvent } from "@/lib/translator/types";
 import { secureParseScVal } from "@/lib/translator/secure-xdr-parser";
 import { scValToNative } from "stellar-sdk";
@@ -485,9 +484,6 @@ export function RawDataDialog({
               </a>
             </Button>
           </div>
-
-          {/* ── Cryptographic inclusion proof verifier ── */}
-          <InclusionProofPanel txHash={event.txHash} ledger={event.ledger} />
         </div>
       </DialogContent>
     </Dialog>

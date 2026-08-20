@@ -11,7 +11,6 @@
  * independently in its own container/process.
  *
  * Run with: ts-node --project tsconfig.server.json src/worker/indexer.ts
- * Or: npm run worker:indexer
  */
 
 import Redis from "ioredis";

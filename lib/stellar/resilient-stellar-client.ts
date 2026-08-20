@@ -152,9 +152,9 @@ export async function fetchContractEventsResilient(
  * @returns Latest ledger information
  */
 export async function getLatestLedgerResilient(): Promise<{
+  id: string;
   sequence: number;
-  hash: string;
-  protocolVersion: number;
+  protocolVersion: string;
 }> {
   const client = getResilientClient();
 

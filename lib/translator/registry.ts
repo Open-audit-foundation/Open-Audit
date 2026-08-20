@@ -605,7 +605,7 @@ export function getBlueprintCount(): number {
  * Call this to add or upgrade a contract's translation schemas without
  * rebuilding the singleton. The blueprint list is re-sorted after insertion.
  */
-export function registerBlueprint(...blueprints: TranslationBlueprint[]): void {
+export function registerBlueprint(...blueprints: VersionedTranslationBlueprint[]): void {
   for (const blueprint of blueprints) {
     const schema: ContractSchema = {
       version: "1.0.0",

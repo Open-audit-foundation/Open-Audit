@@ -38,7 +38,7 @@ import type {
   Language,
   DecodedMap,
   DecodedVec,
-  DecodedScVal,
+  DecodedValue,
 } from "../types";
 import { getTranslation } from "../translations";
 
@@ -67,9 +67,14 @@ function decodeSymbolTopic(hex: string | undefined): string | null {
 }
 
 /** Looks up a field by name within a decoded Map's entries. */
-function getMapField(map: DecodedMap, key: string): DecodedScVal | undefined {
+function getMapField(map: DecodedMap, key: string): DecodedValue | undefined {
   return map.entries.find((entry) => entry.key.type === "Symbol" && entry.key.value === key)
     ?.value;
+}
+
+/** Extracts the scalar `.value` from a decoded ScVal, or undefined for Map/Vec results. */
+function scalarValue(decoded: DecodedValue | undefined): string | undefined {
+  return decoded && "value" in decoded ? decoded.value : undefined;
 }
 
 /** Formats a raw stroop-denominated integer string as a decimal amount. */
@@ -109,14 +114,17 @@ function translateLiquidityEvent(
   if (!tokenA || !tokenB || !amountA || !amountB || !to) return null;
 
   const t = getTranslation(lang);
-  const formattedA = formatStroops(amountA.value);
-  const formattedB = formatStroops(amountB.value);
-  const formattedLiquidity = formatStroops(liquidity?.value);
+  const formattedA = formatStroops(scalarValue(amountA));
+  const formattedB = formatStroops(scalarValue(amountB));
+  const formattedLiquidity = formatStroops(scalarValue(liquidity));
+  const toValue = scalarValue(to) ?? "unknown";
+  const tokenAValue = scalarValue(tokenA) ?? "unknown";
+  const tokenBValue = scalarValue(tokenB) ?? "unknown";
 
   const description =
     kind === "add"
-      ? t.soroswap.addLiquidity(to.value, formattedA, tokenA.value, formattedB, tokenB.value, formattedLiquidity)
-      : t.soroswap.removeLiquidity(to.value, formattedA, tokenA.value, formattedB, tokenB.value, formattedLiquidity);
+      ? t.soroswap.addLiquidity(toValue, formattedA, tokenAValue, formattedB, tokenBValue, formattedLiquidity)
+      : t.soroswap.removeLiquidity(toValue, formattedA, tokenAValue, formattedB, tokenBValue, formattedLiquidity);
 
   return {
     description,
@@ -146,11 +154,11 @@ function translateSwap(event: RawEvent, lang: Language): TranslationResult | nul
 
   const t = getTranslation(lang);
   const description = t.soroswap.swap(
-    to.value,
-    formatStroops(amountIn.value),
-    tokenIn.value,
-    formatStroops(amountOut.value),
-    tokenOut.value
+    scalarValue(to) ?? "unknown",
+    formatStroops(scalarValue(amountIn)),
+    scalarValue(tokenIn) ?? "unknown",
+    formatStroops(scalarValue(amountOut)),
+    scalarValue(tokenOut) ?? "unknown"
   );
 
   return {

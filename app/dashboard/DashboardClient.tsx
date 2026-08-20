@@ -56,6 +56,8 @@ export function DashboardClient({
   const [searchValue, setSearchValue] = useState("");
   const [searchedContract, setSearchedContract] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<RawEvent[] | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const { language } = useLanguage();
   const { network } = useNetwork();
@@ -93,16 +95,7 @@ export function DashboardClient({
     [liveEvents, translatedRawEvents]
   );
 
-  const translatedEvents = useMemo(
-    () =>
-      resolveDisplayEvents(USE_MOCK_DATA, rawEvents, dbEvents, customBlueprints, language),
-    [rawEvents, dbEvents, customBlueprints, language]
-  );
-
-  const allEvents = useMemo(
-    () => [...liveEvents, ...translatedEvents],
-    [liveEvents, translatedEvents]
-  );
+  const allEvents = events;
 
   const filteredEvents = useMemo(
     () =>
@@ -245,7 +238,7 @@ export function DashboardClient({
       {ready && (
         <FavoritesSidebar
           favorites={prefs.favorites}
-          activeContract={filters.contractId}
+          activeContract={filters.contractId ?? null}
           onSelect={handleFavoriteSelect}
           onRemove={toggleFavorite}
         />
@@ -278,7 +271,7 @@ export function DashboardClient({
                 variant="ghost"
                 size="icon"
                 className="mt-0.5 h-9 w-9 shrink-0"
-                onClick={() => toggleFavorite(filters.contractId)}
+                onClick={() => toggleFavorite(filters.contractId!)}
                 aria-label={isFavorited ? "Unpin this contract" : "Pin this contract"}
                 title={isFavorited ? "Unpin contract" : "Pin contract"}
               >

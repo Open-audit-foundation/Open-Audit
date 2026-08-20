@@ -55,7 +55,7 @@ function renderEntry(entry) {
     }
     const payloadDisplay = vec.hex_payload
       ? `\`${vec.hex_payload.slice(0, 32)}…\``
-      : `\`(mock)\``;
+      : `\`(mock)\``; 
     rows.push(`| ${entry.contract_id.slice(0, 12)}… | ${entry.topics.join(", ")} | ${payloadDisplay} | ${results.join("<br>")} |`);
   }
 

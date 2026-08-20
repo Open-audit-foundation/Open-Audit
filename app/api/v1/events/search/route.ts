@@ -4,6 +4,7 @@
  * POST /api/v1/events/search — Full-text + filter search across historical events.
  */
 import { NextRequest, NextResponse } from "next/server";
+import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db/client";
 import { authenticateAndRateLimit } from "@/lib/api/middleware";
 import { toErrorResponse, validationErrorResponse } from "@/lib/api/error-response";
@@ -83,8 +84,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     // --- Pagination ---
     const take = limit + 1; // fetch one extra to detect next page
-    const queryArgs: Record<string, unknown> = {
-      where,
+    const queryArgs: Prisma.EventFindManyArgs = {
+      where: where as Prisma.EventWhereInput,
       orderBy: [{ ledger: "desc" }, { timestamp: "desc" }],
       take,
     };

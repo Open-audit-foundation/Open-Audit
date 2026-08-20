@@ -11,11 +11,12 @@ export const runtime = "nodejs";
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const existing = await db.webhookSubscription.findUnique({
-      where: { id: params.id },
+      where: { id },
     });
 
     if (!existing) {
@@ -39,7 +40,7 @@ export async function POST(
     }
 
     const updated = await db.webhookSubscription.update({
-      where: { id: params.id },
+      where: { id },
       data: {
         isActive: false,
         updatedAt: new Date(),

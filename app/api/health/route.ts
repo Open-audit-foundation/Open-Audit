@@ -15,10 +15,28 @@
 
 import { NextRequest, NextResponse } from "next/server";
 
+interface HealthStatus {
+  status: string;
+  service: string;
+  timestamp: string;
+  uptime: number;
+  environment: string;
+  version: string;
+  redis?: { connected: boolean; error?: string };
+  database?: {
+    connected: boolean;
+    totalEvents: number;
+    verifiedEvents: number;
+    pendingVerification: number;
+    verificationRate: number;
+  };
+  indexer?: { lastLedger: number };
+}
+
 export async function GET(request: NextRequest) {
   try {
     // Basic health check - server is running and can respond
-    const healthStatus = {
+    const healthStatus: HealthStatus = {
       status: "healthy",
       service: "open-audit-web-server",
       timestamp: new Date().toISOString(),
@@ -42,10 +60,11 @@ export async function GET(request: NextRequest) {
 
         healthStatus.redis = { connected: true };
       } catch (redisError) {
-        console.warn("[health] Redis check failed:", redisError.message);
-        healthStatus.redis = { 
-          connected: false, 
-          error: redisError.message 
+        const message = redisError instanceof Error ? redisError.message : String(redisError);
+        console.warn("[health] Redis check failed:", message);
+        healthStatus.redis = {
+          connected: false,
+          error: message
         };
         // Don't fail the health check if Redis is temporarily down
         // The server can still serve static content and handle API requests
@@ -76,7 +95,8 @@ export async function GET(request: NextRequest) {
         healthStatus.status = metrics.healthy ? "healthy" : "degraded";
       }
     } catch (dbError) {
-      console.warn("[health] Database check skipped:", dbError.message);
+      const message = dbError instanceof Error ? dbError.message : String(dbError);
+      console.warn("[health] Database check skipped:", message);
       // Database is optional in microservices architecture
       // Don't fail the health check if database libraries are not available
     }

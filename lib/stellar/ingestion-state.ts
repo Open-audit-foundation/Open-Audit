@@ -43,7 +43,12 @@ export function createMemoryIngestionStateStore(
 }
 
 export function createFileIngestionStateStore(filePath: string): IngestionStateStore {
-  const resolvedPath = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath);
+  // turbopackIgnore: filePath is a runtime-supplied state-file location (env var
+  // or caller argument), not a project asset — Turbopack's file tracer otherwise
+  // treats this dynamic path.resolve() as a signal to trace the whole project.
+  const resolvedPath = path.isAbsolute(filePath)
+    ? filePath
+    : path.resolve(/*turbopackIgnore: true*/ process.cwd(), filePath);
   const directory = path.dirname(resolvedPath);
   const archiveDirectory = path.join(directory, "archive");
 
