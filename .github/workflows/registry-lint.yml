@@ -13,6 +13,10 @@ on:
       - "lib/translator/registry.json"
       - "lib/translator/registry.schema.json"
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   lint-registry:
     name: Validate Translation Registry
