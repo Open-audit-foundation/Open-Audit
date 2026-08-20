@@ -24,7 +24,7 @@ import type {
   DecodedEnum,
   DecodedMap,
   DecodedMapEntry,
-  DecodedScVal,
+  DecodedValue,
   DecodedVec,
   ScValType,
 } from "./types";
@@ -264,7 +264,7 @@ export function detectScValType(hex: string): ScValType {
   return "Bytes";
 }
 
-function decodeScValInternal(scVal: xdr.ScVal): DecodedScVal {
+function decodeScValInternal(scVal: xdr.ScVal): DecodedValue {
   const hex = `0x${scVal.toXDR("hex")}`;
   switch (scVal.switch().name) {
     case "scvBool":
@@ -328,7 +328,7 @@ export function decodeVec(hex: string): DecodedVec {
     const cleanHex = hex.startsWith("0x") ? hex.slice(2) : hex;
     const scVal = xdr.ScVal.fromXDR(cleanHex, "hex");
     const elements = scVal.vec() || [];
-    const decodedElements: DecodedScVal[] = elements.map((elem) => decodeScValInternal(elem));
+    const decodedElements: DecodedValue[] = elements.map((elem) => decodeScValInternal(elem));
     return {
       type: "Vec",
       elements: decodedElements,
@@ -358,7 +358,7 @@ export function decodeEnum(hex: string, knownVariants?: Record<string, string>):
   };
 }
 
-export function decodeScVal(hex: string): DecodedScVal {
+export function decodeScVal(hex: string): DecodedValue {
   try {
     const cleanHex = hex.startsWith("0x") ? hex.slice(2) : hex;
     const scVal = xdr.ScVal.fromXDR(cleanHex, "hex");

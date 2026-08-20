@@ -2,11 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateApiKey } from "@/lib/auth/apiKey";
 import { checkRateLimit } from "@/lib/auth/rateLimit";
 
+// This middleware depends on ioredis and prom-client (via lib/cache/redisCache
+// and lib/metrics), both Node-only packages that are incompatible with the
+// Edge runtime. Run on the Node.js runtime instead.
+export const runtime = "nodejs";
+
 // Routes that require an API key
 const PROTECTED_PREFIXES = ["/api/"];
 
 // Routes that are public even under /api/
-const PUBLIC_ROUTES = new Set(["/api/ingest-historical/openapi", "/api/v1/stats"]);
+// /api/health is used by load balancers and Kubernetes liveness/readiness
+// probes, /api/metrics is scraped by Prometheus, and /api/status is polled
+// client-side by the /status dashboard page — none of these send an API key.
+const PUBLIC_ROUTES = new Set(["/api/v1/stats", "/api/health", "/api/metrics", "/api/status"]);
 
 export async function middleware(request: NextRequest): Promise<NextResponse> {
   const { pathname } = request.nextUrl;

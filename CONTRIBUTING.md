@@ -520,7 +520,7 @@ test: add edge cases for decodeAmount with zero values
 - [ ] Unit tests written and passing (`npm test`)
 - [ ] No TypeScript errors (`npx tsc --noEmit`)
 - [ ] No lint errors (`npm run lint`)
-- [ ] Code follows [CODE_STANDARDS.md](CODE_STANDARDS.md) (standard function declarations, no `any`)
+- [ ] Code follows the project's code standards (standard function declarations, no `any`)
 - [ ] PR title follows naming conventions above
 - [ ] PR description explains what contract was added and where you found its event schema
 

@@ -1,0 +1,37 @@
+# .trivyignore — Trivy CVE suppression list for Open-Audit
+#
+# Format: one CVE ID per line, optionally followed by a comment.
+# Only suppress CVEs that have been reviewed and confirmed to be either:
+#   (a) not reachable via the code paths in this project, or
+#   (b) fixed upstream but the fix has not yet propagated to a release.
+#
+# Re-review any suppression whenever the flagged dependency is upgraded —
+# a stale entry can silently hide a real, currently-exploitable CVE.
+#
+# ── Node.js / npm ────────────────────────────────────────────────────────────
+#
+# NOTE: next@16.2.12 bundles its own private postcss and sharp versions
+# (node_modules/next/node_modules/postcss, node_modules/sharp) that are older
+# than the top-level ranges this project declares. Nested npm overrides
+# (see package.json -> overrides.next) force both to current patched
+# versions without needing to bump `next` itself.
+
+# ---------------------------------------------------------------------------
+# GHSA-w5hq-g745-h8pq
+# uuid < 11.1.1 — missing buffer bounds check in v3/v5/v6 *only when the
+# caller passes an explicit `buf` argument*
+#
+# Root cause: bull, node-cron, and @opencensus/core (transitively, via
+# @opentelemetry/shim-opencensus) all pin an old uuid range. No fix is
+# available upstream without a breaking major-version bump to bull/node-cron;
+# @opencensus/core has no fix at all (unmaintained).
+#
+# Impact assessment: verified bull's actual call sites (lib/queue.js,
+# lib/timer-manager.js) call `uuid.v4()` with zero arguments — never with a
+# `buf` param — so the vulnerable code path is not exercised. Same pattern
+# expected for node-cron/opencensus (simple random-id generation).
+#
+# Re-evaluate: if bull, node-cron, or @opencensus/core are upgraded, or if
+# any new caller of uuid's v3/v5/v6 functions passes a buffer argument.
+# ---------------------------------------------------------------------------
+GHSA-w5hq-g745-h8pq

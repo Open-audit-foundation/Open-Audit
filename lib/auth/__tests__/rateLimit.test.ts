@@ -1,45 +1,5 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import {
-  checkRateLimit,
-  pruneExpiredBuckets,
-  _getBucketsSize,
-  _clearBuckets,
-} from "../rateLimit";
-import * as redisCache from "../../cache/redisCache";
-
-describe("rateLimit", () => {
-  beforeEach(() => {
-    _clearBuckets();
-    vi.useFakeTimers();
-    vi.spyOn(redisCache, "isRedisEnabled").mockReturnValue(false);
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-    vi.restoreAllMocks();
-  });
-
-  describe("In-memory rate limiting", () => {
-    it("allows requests under the tier limit and decrements remaining", async () => {
-      const res1 = await checkRateLimit("key-1", "free");
-      expect(res1.allowed).toBe(true);
-      expect(res1.limit).toBe(60);
-      expect(res1.remaining).toBe(59);
-
-      const res2 = await checkRateLimit("key-1", "free");
-      expect(res2.allowed).toBe(true);
-      expect(res2.remaining).toBe(58);
-    });
-
-    it("enforces free tier limit (60 req/min)", async () => {
-      for (let i = 0; i < 60; i++) {
-        const res = await checkRateLimit("key-free", "free");
-        expect(res.allowed).toBe(true);
-      }
-
-      const blocked = await checkRateLimit("key-free", "free");
-      expect(blocked.allowed).toBe(false);
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import * as redisCache from "../../cache/redisCache";
 
 type FakeRedisClient = {
   zremrangebyscore: (key: string, min: number, max: number) => Promise<number>;
@@ -130,6 +90,7 @@ describe("checkRateLimit", () => {
     });
 
     it("enforces partner tier limit (5000 req/min)", async () => {
+      const { checkRateLimit } = await import("../rateLimit");
       const res = await checkRateLimit("key-partner", "partner");
       expect(res.allowed).toBe(true);
       expect(res.limit).toBe(5000);
@@ -137,6 +98,7 @@ describe("checkRateLimit", () => {
     });
 
     it("isolates rate limits between multiple callers", async () => {
+      const { checkRateLimit } = await import("../rateLimit");
       for (let i = 0; i < 60; i++) {
         await checkRateLimit("key-a", "free");
       }
@@ -150,6 +112,8 @@ describe("checkRateLimit", () => {
     });
 
     it("evicts expired timestamps and allows new requests after 60 seconds", async () => {
+      vi.useFakeTimers();
+      const { checkRateLimit } = await import("../rateLimit");
       for (let i = 0; i < 60; i++) {
         await checkRateLimit("key-expire", "free");
       }
@@ -165,6 +129,8 @@ describe("checkRateLimit", () => {
     });
 
     it("evicts empty buckets from the Map when timestamps expire (fixes memory leak)", async () => {
+      vi.useFakeTimers();
+      const { checkRateLimit, pruneExpiredBuckets, _getBucketsSize } = await import("../rateLimit");
       expect(_getBucketsSize()).toBe(0);
 
       await checkRateLimit("caller-1", "free");
@@ -182,6 +148,8 @@ describe("checkRateLimit", () => {
     });
 
     it("automatically evicts empty bucket on subsequent checkRateLimit call", async () => {
+      vi.useFakeTimers();
+      const { checkRateLimit, pruneExpiredBuckets, _getBucketsSize } = await import("../rateLimit");
       await checkRateLimit("caller-inactive", "free");
       expect(_getBucketsSize()).toBe(1);
 
@@ -194,24 +162,12 @@ describe("checkRateLimit", () => {
       // caller-inactive is evicted, only caller-new remains
       expect(_getBucketsSize()).toBe(1);
     });
-  });
 
-  describe("Redis fallback behavior", () => {
-    it("falls back to in-memory rate limiting when Redis throws an error", async () => {
-      vi.spyOn(redisCache, "isRedisEnabled").mockReturnValue(true);
-      vi.spyOn(redisCache, "getRedisClient").mockImplementation(() => {
-        throw new Error("Redis connection refused");
-      });
-
-      const res = await checkRateLimit("key-redis-fail", "free");
-      expect(res.allowed).toBe(true);
-      expect(res.remaining).toBe(59);
-      expect(_getBucketsSize()).toBe(1);
     it("tracks separate buckets per hashed key", async () => {
       const { checkRateLimit } = await import("../rateLimit");
 
-      const a = await checkRateLimit("key-a", "free");
-      const b = await checkRateLimit("key-b", "free");
+      const a = await checkRateLimit("key-a2", "free");
+      const b = await checkRateLimit("key-b2", "free");
 
       expect(a.remaining).toBe(59);
       expect(b.remaining).toBe(59);
@@ -283,6 +239,21 @@ describe("checkRateLimit", () => {
 
       const staleResult = await checkRateLimit(staleKey, "free");
       expect(staleResult.remaining).toBe(59);
+    });
+  });
+
+  describe("Redis fallback behavior", () => {
+    it("falls back to in-memory rate limiting when Redis throws an error", async () => {
+      vi.spyOn(redisCache, "isRedisEnabled").mockReturnValue(true);
+      vi.spyOn(redisCache, "getRedisClient").mockImplementation(() => {
+        throw new Error("Redis connection refused");
+      });
+
+      const { checkRateLimit, _getBucketsSize } = await import("../rateLimit");
+      const res = await checkRateLimit("key-redis-fail", "free");
+      expect(res.allowed).toBe(true);
+      expect(res.remaining).toBe(59);
+      expect(_getBucketsSize()).toBe(1);
     });
   });
 

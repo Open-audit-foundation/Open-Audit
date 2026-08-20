@@ -10,7 +10,18 @@
  * elsewhere (e.g. in tests with collectDefaultMetrics).
  */
 
-import { Counter, Gauge, Registry } from "prom-client";
+// Import directly from prom-client's submodules rather than the package root.
+// The root barrel (`prom-client`) unconditionally requires `./lib/defaultMetrics`
+// and `./lib/cluster`, which use Node-only built-ins (`fs`, `v8`, `cluster`).
+// This module is imported from isomorphic code (lib/translator/registry.ts is
+// used client-side by the sandbox page, and lib/cache/redisCache.ts is
+// imported by the Edge middleware), so pulling in the barrel breaks both the
+// Edge and browser bundles. The Counter/Gauge/Registry submodules have no such
+// dependency, so importing them directly keeps this module bundleable everywhere
+// while still recording real metrics in the Node.js server process.
+import Counter from "prom-client/lib/counter";
+import Gauge from "prom-client/lib/gauge";
+import Registry from "prom-client/lib/registry";
 
 // ---------------------------------------------------------------------------
 // Registry

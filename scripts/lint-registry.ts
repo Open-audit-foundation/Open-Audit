@@ -250,11 +250,15 @@ function validateSchema(
       const indexMatch = err.instancePath?.match(/^\/(\d+)/);
       const index = indexMatch ? parseInt(indexMatch[1]) : -1;
       
+      // `validate` is an Ajv ValidateFunction<unknown> type-guard; in this
+      // (!valid) branch TS narrows `registry` to `never` (excluding `unknown`
+      // from its known type). Cast back to the real type to access fields.
+      const typedRegistry = registry as RegistryEntry[];
       errors.push({
         file: filePath,
         index,
-        contract_id: index >= 0 ? registry[index]?.contract_id : undefined,
-        topics: index >= 0 ? registry[index]?.topics : undefined,
+        contract_id: index >= 0 ? typedRegistry[index]?.contract_id : undefined,
+        topics: index >= 0 ? typedRegistry[index]?.topics : undefined,
         error: `Schema validation failed at ${err.instancePath || 'root'}: ${err.message}`,
         severity: "error"
       });

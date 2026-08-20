@@ -15,9 +15,6 @@ const nextConfig = {
     "bull",
   ],
 
-  // Enables Dockerfile.web standalone output tracing.
-  output: "standalone",
-
   async headers() {
     return [
       {

@@ -13,9 +13,8 @@
  */
 
 import { NextResponse } from "next/server";
-import { Server as StellarSorobanRpc } from "stellar-sdk/lib/soroban";
 import Redis from "ioredis";
-import { resilientStellarClient } from "../../../lib/stellar/resilient-stellar-client";
+import { getLatestLedgerResilient, getResilientMetrics } from "../../../lib/stellar/resilient-stellar-client";
 import { CircuitState } from "../../../lib/resilience/circuit-breaker";
 
 // ============================================================================
@@ -75,9 +74,9 @@ async function checkStellarRpc(): Promise<ComponentHealthResponse> {
 
   try {
     // Get circuit breaker metrics
-    const metrics = resilientStellarClient.metrics();
+    const metrics = getResilientMetrics();
     const circuitBreakerMetrics = metrics.circuitBreakers[0]?.metrics;
-    
+
     let circuitBreakerState = "closed";
     if (circuitBreakerMetrics) {
       if (circuitBreakerMetrics.state === CircuitState.OPEN) {
@@ -89,10 +88,7 @@ async function checkStellarRpc(): Promise<ComponentHealthResponse> {
 
     // Attempt to fetch latest ledger
     await Promise.race([
-      resilientStellarClient.execute(async (url) => {
-        const server = new StellarSorobanRpc(url);
-        return await server.getLatestLedger();
-      }),
+      getLatestLedgerResilient(),
       new Promise((_, reject) =>
         setTimeout(() => reject(new Error("Timeout")), 3000)
       ),
@@ -364,6 +360,7 @@ function determineOverallStatus(components: {
 }): OverallStatus {
   const { stellarRpc, database, redis, worker } = components;
 
+  // If critical component (Stellar RPC or Database) is down, system is down
   if (stellarRpc.status === "down" || database.status === "down") {
     return "down";
   }

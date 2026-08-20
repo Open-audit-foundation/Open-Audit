@@ -326,9 +326,9 @@ export interface DecodedScVal {
 /** A decoded Map entry (key-value pair). */
 export interface DecodedMapEntry {
   /** The decoded key. */
-  key: DecodedScVal;
+  key: DecodedValue;
   /** The decoded value. */
-  value: DecodedScVal;
+  value: DecodedValue;
 }
 
 /** A decoded Soroban Map (ScMap). */
@@ -346,10 +346,18 @@ export interface DecodedVec {
   /** The type discriminator. */
   type: "Vec";
   /** Array of decoded values. */
-  elements: DecodedScVal[];
+  elements: DecodedValue[];
   /** Human-readable summary. */
   summary: string;
 }
+
+/**
+ * Any decoded ScVal, including recursively-decoded Maps and Vecs.
+ * Maps/Vecs are structurally distinct from the flat scalar shape of
+ * {@link DecodedScVal}, so this union is what decoder functions that may
+ * encounter nested collections actually return.
+ */
+export type DecodedValue = DecodedScVal | DecodedMap | DecodedVec;
 
 /** A decoded Soroban Enum (ScVal with enum variant). */
 export interface DecodedEnum {
