@@ -149,7 +149,7 @@ describe("GET /api/v1/stats", () => {
     );
   });
 
-  it("returns zeroed fallback payload when the database is unavailable", async () => {
+  it("returns 503 when the database is unavailable and no cache exists", async () => {
     mockCount.mockRejectedValueOnce(new Error("Database connection failed"));
     mockFindFirst.mockRejectedValueOnce(new Error("Database connection failed"));
     (getCachedStats as any).mockResolvedValue(null);
@@ -157,14 +157,9 @@ describe("GET /api/v1/stats", () => {
     const res = await GET(new NextRequest("http://localhost/api/v1/stats"));
     const body = (await res.json()) as any;
 
-    expect(res.status).toBe(200);
-    expect(body.totalEvents).toBe(0);
-    expect(body.translatedCount).toBe(0);
-    expect(body.crypticCount).toBe(0);
-    expect(body.translationRate).toBe(0);
-    expect(body.deadLetterQueueSize).toBe(0);
-    expect(body.lastIndexedLedger).toBeNull();
+    expect(res.status).toBe(503);
     expect(body.error).toBe("Database unavailable");
+    expect(body.totalEvents).toBeUndefined();
   });
 
   it("does not cache the fallback payload", async () => {
@@ -174,6 +169,32 @@ describe("GET /api/v1/stats", () => {
 
     await GET(new NextRequest("http://localhost/api/v1/stats"));
 
+    expect(setCachedStats).not.toHaveBeenCalled();
+  });
+
+  it("serves stale cache with degraded flag when DB fails but cache exists", async () => {
+    mockCount.mockRejectedValueOnce(new Error("Database connection failed"));
+    mockFindFirst.mockRejectedValueOnce(new Error("Database connection failed"));
+    const stale = {
+      totalEvents: 500,
+      translatedCount: 400,
+      crypticCount: 100,
+      translationRate: 80,
+      deadLetterQueueSize: 1,
+      lastIndexedLedger: 99999999,
+    };
+    (getCachedStats as any)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(stale);
+
+    const res = await GET(new NextRequest("http://localhost/api/v1/stats"));
+    const body = (await res.json()) as any;
+
+    expect(res.status).toBe(200);
+    expect(body.totalEvents).toBe(500);
+    expect(body.translationRate).toBe(80);
+    expect(body.degraded).toBe(true);
+    expect(body.error).toBe("Serving stale data; database unreachable");
     expect(setCachedStats).not.toHaveBeenCalled();
   });
 

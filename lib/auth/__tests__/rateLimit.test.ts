@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import * as redisCache from "../../cache/redisCache";
 
 type FakeRedisClient = {
   zremrangebyscore: (key: string, min: number, max: number) => Promise<number>;
@@ -88,11 +89,85 @@ describe("checkRateLimit", () => {
       expect(blocked.retryAfter).toBeGreaterThan(0);
     });
 
+    it("enforces partner tier limit (5000 req/min)", async () => {
+      const { checkRateLimit } = await import("../rateLimit");
+      const res = await checkRateLimit("key-partner", "partner");
+      expect(res.allowed).toBe(true);
+      expect(res.limit).toBe(5000);
+      expect(res.remaining).toBe(4999);
+    });
+
+    it("isolates rate limits between multiple callers", async () => {
+      const { checkRateLimit } = await import("../rateLimit");
+      for (let i = 0; i < 60; i++) {
+        await checkRateLimit("key-a", "free");
+      }
+
+      const blockedA = await checkRateLimit("key-a", "free");
+      expect(blockedA.allowed).toBe(false);
+
+      const resB = await checkRateLimit("key-b", "free");
+      expect(resB.allowed).toBe(true);
+      expect(resB.remaining).toBe(59);
+    });
+
+    it("evicts expired timestamps and allows new requests after 60 seconds", async () => {
+      vi.useFakeTimers();
+      const { checkRateLimit } = await import("../rateLimit");
+      for (let i = 0; i < 60; i++) {
+        await checkRateLimit("key-expire", "free");
+      }
+
+      expect((await checkRateLimit("key-expire", "free")).allowed).toBe(false);
+
+      // Advance time by 61 seconds
+      vi.advanceTimersByTime(61_000);
+
+      const resAfter = await checkRateLimit("key-expire", "free");
+      expect(resAfter.allowed).toBe(true);
+      expect(resAfter.remaining).toBe(59);
+    });
+
+    it("evicts empty buckets from the Map when timestamps expire (fixes memory leak)", async () => {
+      vi.useFakeTimers();
+      const { checkRateLimit, pruneExpiredBuckets, _getBucketsSize } = await import("../rateLimit");
+      expect(_getBucketsSize()).toBe(0);
+
+      await checkRateLimit("caller-1", "free");
+      await checkRateLimit("caller-2", "free");
+      expect(_getBucketsSize()).toBe(2);
+
+      // Advance time by 61 seconds (all requests expire)
+      vi.advanceTimersByTime(61_000);
+
+      // Explicit prune
+      pruneExpiredBuckets();
+
+      // Buckets should be completely evicted from the Map
+      expect(_getBucketsSize()).toBe(0);
+    });
+
+    it("automatically evicts empty bucket on subsequent checkRateLimit call", async () => {
+      vi.useFakeTimers();
+      const { checkRateLimit, pruneExpiredBuckets, _getBucketsSize } = await import("../rateLimit");
+      await checkRateLimit("caller-inactive", "free");
+      expect(_getBucketsSize()).toBe(1);
+
+      vi.advanceTimersByTime(61_000);
+
+      // Caller inactive gets pruned when another caller checks or caller inactive checks
+      await checkRateLimit("caller-new", "free");
+      pruneExpiredBuckets();
+
+      // caller-inactive is evicted, only caller-new remains
+      expect(_getBucketsSize()).toBe(1);
+    });
+
     it("tracks separate buckets per hashed key", async () => {
       const { checkRateLimit } = await import("../rateLimit");
 
-      const a = await checkRateLimit("key-a", "free");
-      const b = await checkRateLimit("key-b", "free");
+      const a = await checkRateLimit("key-a2", "free");
+      const b = await checkRateLimit("key-b2", "free");
 
       expect(a.remaining).toBe(59);
       expect(b.remaining).toBe(59);
@@ -114,6 +189,71 @@ describe("checkRateLimit", () => {
 
       const result = await checkRateLimit(hashedKey, "free");
       expect(result.allowed).toBe(true);
+      expect(result.remaining).toBe(59);
+    });
+
+    it("evicts all stale entries after window expires and reuses the same key", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(0);
+
+      const { checkRateLimit } = await import("../rateLimit");
+      const hashedKey = "eviction-key";
+
+      for (let i = 0; i < 60; i++) {
+        await checkRateLimit(hashedKey, "free");
+      }
+
+      vi.setSystemTime(61_000);
+
+      const r1 = await checkRateLimit(hashedKey, "free");
+      expect(r1.allowed).toBe(true);
+      expect(r1.remaining).toBe(59);
+
+      for (let i = 0; i < 58; i++) {
+        await checkRateLimit(hashedKey, "free");
+      }
+
+      vi.setSystemTime(61_100);
+
+      const r2 = await checkRateLimit(hashedKey, "free");
+      expect(r2.allowed).toBe(true);
+      expect(r2.remaining).toBe(59);
+    });
+
+    it("treats a key with all stale entries the same as a fresh key", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(0);
+
+      const { checkRateLimit } = await import("../rateLimit");
+
+      const freshKey = "fresh-key";
+      const freshResult = await checkRateLimit(freshKey, "free");
+      expect(freshResult.remaining).toBe(59);
+
+      vi.setSystemTime(70_000);
+
+      const staleKey = "stale-key";
+      await checkRateLimit(staleKey, "free");
+
+      vi.setSystemTime(140_000);
+
+      const staleResult = await checkRateLimit(staleKey, "free");
+      expect(staleResult.remaining).toBe(59);
+    });
+  });
+
+  describe("Redis fallback behavior", () => {
+    it("falls back to in-memory rate limiting when Redis throws an error", async () => {
+      vi.spyOn(redisCache, "isRedisEnabled").mockReturnValue(true);
+      vi.spyOn(redisCache, "getRedisClient").mockImplementation(() => {
+        throw new Error("Redis connection refused");
+      });
+
+      const { checkRateLimit, _getBucketsSize } = await import("../rateLimit");
+      const res = await checkRateLimit("key-redis-fail", "free");
+      expect(res.allowed).toBe(true);
+      expect(res.remaining).toBe(59);
+      expect(_getBucketsSize()).toBe(1);
     });
   });
 

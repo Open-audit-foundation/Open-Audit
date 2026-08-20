@@ -25,10 +25,11 @@ interface HealthStatus {
   redis?: { connected: boolean; error?: string };
   database?: {
     connected: boolean;
-    totalEvents: number;
-    verifiedEvents: number;
-    pendingVerification: number;
-    verificationRate: number;
+    totalEvents?: number;
+    verifiedEvents?: number;
+    pendingVerification?: number;
+    verificationRate?: number;
+    error?: string;
   };
   indexer?: { lastLedger: number };
 }
@@ -96,9 +97,14 @@ export async function GET(request: NextRequest) {
       }
     } catch (dbError) {
       const message = dbError instanceof Error ? dbError.message : String(dbError);
-      console.warn("[health] Database check skipped:", message);
-      // Database is optional in microservices architecture
-      // Don't fail the health check if database libraries are not available
+      console.warn("[health] Database check failed:", message);
+      healthStatus.database = {
+        connected: false,
+        error: message,
+      };
+      if (process.env.DATABASE_URL) {
+        healthStatus.status = "degraded";
+      }
     }
 
     // Return 200 OK if we got this far

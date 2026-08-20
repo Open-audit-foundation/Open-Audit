@@ -21,7 +21,7 @@ import { createAllSacBlueprints } from "./blueprints/sac-transfer";
 import { createSacMintBurnBlueprint } from "./blueprints/sac-mint-burn";
 import { createAllSdexBlueprints } from "./blueprints/sdex-orderbook";
 import { createAllSoroswapRouterBlueprints } from "./blueprints/soroswap-router";
-import { createAllBlendPoolBlueprints } from "./blueprints/blend-pool";
+import { createAllBlendPoolV1Blueprints, createAllBlendPoolV2Blueprints } from "./blueprints/blend-pool";
 import {
   registryCacheHitsTotal,
   registryCacheMissesTotal,
@@ -228,14 +228,24 @@ function buildRegistry(): BlueprintRegistry {
     register(blueprint);
   }
 
-  // 4. Load Soroswap Router Blueprints
+  // 4. Load Soroswap Router Blueprints.
+  // The router's event.rs has had no schema-breaking commits since its
+  // initial Dec 2023 implementation (verified against the contract's commit
+  // history and against live mainnet swap/add/remove events), so only a
+  // single schema is registered.
   for (const blueprint of createAllSoroswapRouterBlueprints()) {
-    register(blueprint);
+    register(blueprint, "1.0.0", 0);
   }
 
-  // 5. Load Blend Protocol Pool Blueprints
-  for (const blueprint of createAllBlendPoolBlueprints()) {
-    register(blueprint);
+  // 5. Load Blend Protocol Pool Blueprints.
+  // v1 ("Fixed"/"YieldBlox") and v2 ("FixedV2"/"YieldBloxV2"/"TestnetV2") are
+  // separate pool deployments with a real fill_auction event-shape change
+  // between generations — see blueprints/blend-pool.ts for the schema diff.
+  for (const blueprint of createAllBlendPoolV1Blueprints()) {
+    register(blueprint, "1.0.0", 0);
+  }
+  for (const blueprint of createAllBlendPoolV2Blueprints()) {
+    register(blueprint, "2.0.0", 0);
   }
 
   return registry;

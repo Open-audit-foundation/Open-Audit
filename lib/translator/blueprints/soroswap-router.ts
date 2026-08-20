@@ -13,7 +13,10 @@
  * Every Soroswap Router event is a two-part topic tuple followed by a
  * struct-typed data payload (encoded as an XDR Map keyed by field name):
  *
- *   topics[0] = Symbol("SoroswapRouter")   — constant contract tag
+ *   topics[0] = "SoroswapRouter"   — constant contract tag. XDR-encoded as
+ *               SCV_STRING on live mainnet events (not SCV_SYMBOL — the
+ *               14-character tag exceeds what earlier Soroban SDK versions
+ *               allowed for Symbol), so both encodings are accepted below.
  *   topics[1] = Symbol("add" | "remove" | "swap")
  *
  * add / remove (AddLiquidityEvent / RemoveLiquidityEvent):
@@ -28,6 +31,20 @@
  *     amounts: Vec<i128>,   // parallel to path
  *     to: Address
  *   }
+ *
+ * Schema history
+ * ──────────────
+ * Only one field-shape schema has ever existed for this contract: the
+ * router's event.rs has had no commits since its initial implementation
+ * (github.com/soroswap/core commits touching contracts/router/src/event.rs
+ * are all dated 2023-12-06/07, all pre-dating the first mainnet deployment).
+ * Consequently no ledger-versioned schema is registered here — see
+ * registry.ts's single `register(...)` call for this blueprint.
+ *
+ * The topics[0] String-vs-Symbol encoding above was found by decoding real
+ * mainnet events (router mainnet ledger 63590516 for swap, 63614836 for add,
+ * 63614765 for remove) — every one of them failed to translate under the
+ * Symbol-only assumption this blueprint previously used.
  */
 
 import { decodeMap, decodeScVal } from "../core";
@@ -66,6 +83,22 @@ function decodeSymbolTopic(hex: string | undefined): string | null {
   return decoded.type === "Symbol" ? decoded.value : null;
 }
 
+/**
+ * Decodes a hex-encoded ScVal Symbol OR String topic to its string value.
+ *
+ * The 14-character "SoroswapRouter" contract tag (topics[0]) is XDR-encoded
+ * as SCV_STRING on live mainnet events, not SCV_SYMBOL — verified against a
+ * real swap event (router mainnet ledger 63590516), whose topics[0] hex
+ * begins with the SCV_STRING discriminant `0000000e`. topics[1] (the short
+ * "add"/"remove"/"swap" event name) is still SCV_SYMBOL. This helper accepts
+ * either encoding so the tag check isn't tied to one representation.
+ */
+function decodeNameTopic(hex: string | undefined): string | null {
+  if (!hex) return null;
+  const decoded = decodeScVal(hex);
+  return decoded.type === "Symbol" || decoded.type === "String" ? decoded.value : null;
+}
+
 /** Looks up a field by name within a decoded Map's entries. */
 function getMapField(map: DecodedMap, key: string): DecodedValue | undefined {
   return map.entries.find((entry) => entry.key.type === "Symbol" && entry.key.value === key)
@@ -91,7 +124,7 @@ type EventKind = "add" | "remove" | "swap";
 
 /** Identifies which Soroswap Router event a raw event represents, if any. */
 function identifyEventKind(event: RawEvent): EventKind | null {
-  if (decodeSymbolTopic(event.topics[0]) !== "SoroswapRouter") return null;
+  if (decodeNameTopic(event.topics[0]) !== "SoroswapRouter") return null;
   const kind = decodeSymbolTopic(event.topics[1]);
   return kind === "add" || kind === "remove" || kind === "swap" ? kind : null;
 }
