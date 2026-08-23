@@ -63,17 +63,6 @@ For the custom server with WebSocket support and `/metrics`, run:
 npm run dev:ws
 ```
 
-### Optional: Native XDR Decoder (Performance Boost)
-
-Open-Audit uses a native Rust XDR decoder for better performance. To compile it (requires Rust):
-
-```bash
-# Install Rust first if needed: https://rustup.rs
-npm run build:native
-```
-
-Without this step, the app will automatically fall back to a pure TypeScript decoder (no errors, just slightly slower performance).
-
 ### Environment Variables
 
 Copy `.env.example` to `.env.local` and fill in the values:

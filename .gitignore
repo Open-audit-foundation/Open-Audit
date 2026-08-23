@@ -41,10 +41,6 @@ Thumbs.db
 # IDE / AI tool internals
 .kiro/
 
-# Native addon binaries (must be built locally with npm run build:native)
-native/soroban-xdr-decode/index.node
-native/soroban-xdr-decode/*.node
-
 # PM2 logs
 .pm2/
 logs/
