@@ -89,8 +89,8 @@ If you are working with the Redis-backed services flow, create a local environme
 | `NEXT_PUBLIC_HORIZON_URL` | Stellar Horizon endpoint | `https://horizon-testnet.stellar.org` |
 | `NEXT_PUBLIC_SOROBAN_RPC_URL` | Soroban RPC endpoint | `https://soroban-testnet.stellar.org` |
 | `NEXT_PUBLIC_NETWORK_PASSPHRASE` | Network passphrase | Testnet passphrase |
-| `REDIS_URL` | Redis connection URL (microservices) | `redis://localhost:6379` |
-| `REDIS_CHANNEL` | Redis Pub/Sub channel (microservices) | `stellar:events` |
+| `REDIS_URL` | Redis connection URL | `redis://localhost:6379` |
+| `REDIS_CHANNEL` | Redis Pub/Sub channel | `stellar:events` |
 | `PORT` | HTTP server port | `3000` |
 
 ### Available Scripts
@@ -102,19 +102,6 @@ npm run dev:ws           # Legacy monolithic server with WebSocket support
 npm run test             # Run the repository test suite
 npm run build:cli        # Build the standalone CLI
 npm run cli:example      # Exercise the CLI against the sample blueprint
-```
-
-**Production (Microservices):**
-```bash
-npm run docker:build     # Build Docker images
-npm run docker:up        # Start all services with Docker Compose
-npm run docker:down      # Stop all Docker services
-npm run docker:logs      # View Docker logs
-
-npm run start:pm2        # Start services with PM2
-npm run stop:pm2         # Stop PM2 services
-npm run monit:pm2        # Monitor PM2 processes
-npm run logs:pm2         # View PM2 logs
 ```
 
 **Testing & Quality:**
@@ -144,40 +131,10 @@ The default Jaeger endpoint is `http://localhost:14268/api/traces`.
 
 ## Architecture
 
-Open-Audit supports two deployment architectures:
-
-### 🆕 Microservices Architecture (Recommended for Production)
-
-**Decoupled, scalable, fault-isolated system using Redis Pub/Sub:**
-
-```
-Stellar Network → Indexer Worker → Redis Pub/Sub → Web Server → WebSocket Clients
-```
-
-**Benefits:**
-- ✅ Zero CPU starvation (indexer runs in separate process)
-- ✅ Independent horizontal scaling
-- ✅ Fault isolation (crashes don't affect other services)
-- ✅ Auto-reconnect and message queuing
-- ✅ Zero-downtime deployments
-
-**Quick Start:**
-```bash
-# Option 1: Docker Compose (Easiest)
-npm run docker:up
-
-# Option 2: PM2 Process Manager
-npm run start:pm2
-
-# Option 3: Manual
-Terminal 1: redis-server
-Terminal 2: npm run dev:decoupled
-Terminal 3: npm run worker:indexer
-```
+Open-Audit currently runs as a single-process monolithic architecture:
 
 📚 **Documentation:**
 - **[Architecture Guide](ARCHITECTURE.md)** - Repository and service architecture overview
-- **[Security Hardening Guide](SECURITY_HARDENING_GUIDE.md)** - Production hardening notes
 
 ### 📊 Status Monitoring System (Production-Ready)
 
@@ -285,8 +242,8 @@ For new contributors wanting to understand the system's data flow and internal a
 
 1. **Event Indexer** (`lib/stellar/`, `src/worker/`) — Polls Stellar RPC with resilient rate limiting
 2. **Translation Engine** (`lib/translator/`) — Converts XDR to human-readable text with security hardening
-3. **Redis Pub/Sub** (microservices only) — Message broker for event distribution
-4. **WebSocket Server** (`server-decoupled.ts` or `server.ts`) — Broadcasts events in real-time
+3. **Redis Pub/Sub** — Message broker for event distribution
+4. **WebSocket Server** (`server.ts`) — Broadcasts events in real-time
 5. **Frontend Dashboard** (`app/dashboard/`, `components/`) — Interactive UI
 
 ---
@@ -319,20 +276,14 @@ open-audit/
 │   ├── hooks/              # React hooks for live data
 │   └── utils.ts            # Shared utilities
 ├── src/
-│   └── worker/             # 🆕 Microservices architecture
-│       └── indexer.ts      # Standalone indexer worker
+│   └── worker/             # Standalone indexer worker
+│       └── indexer.ts
 ├── scripts/
 │   ├── lint-registry.ts    # Translation registry validation
 │   └── test-websocket-client.js # WebSocket testing tool
 ├── docs/
 │   └── good-first-issues.json
 ├── server.ts               # Legacy monolithic server (deprecated)
-├── server-decoupled.ts     # 🆕 Microservices web server
-├── ecosystem.config.js     # 🆕 PM2 configuration
-├── docker-compose.microservices.yml # 🆕 Docker Compose config
-├── Dockerfile.worker       # 🆕 Indexer worker Docker image
-├── Dockerfile.web          # 🆕 Web server Docker image
-├── ARCHITECTURE.md         # 📖 Detailed architecture guide
 ├── ARCHITECTURE.md         # 📖 Detailed architecture guide
 ├── SECURITY_HARDENING_GUIDE.md # 🔒 Security documentation
 └── public/

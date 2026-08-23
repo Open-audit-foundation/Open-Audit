@@ -9,26 +9,8 @@
  * - No fault isolation: indexer crash kills entire server
  * - Cannot scale independently
  * 
- * RECOMMENDED: Use the decoupled microservices architecture instead:
- * 
- * 1. DOCKER COMPOSE (Recommended for Production):
- *    $ npm run docker:up
- *    $ npm run docker:logs
- * 
- * 2. PM2 PROCESS MANAGER:
- *    $ npm run start:pm2
- *    $ npm run monit:pm2
- * 
- * 3. MANUAL (Development):
- *    Terminal 1: $ redis-server
- *    Terminal 2: $ npm run dev:decoupled
- *    Terminal 3: $ npm run worker:indexer
- * 
- * See: MICROSERVICES_ARCHITECTURE.md for complete documentation
- * See: .env.microservices.example for configuration
- * 
  * ---
- * 
+ *
  * Custom Next.js server with an attached WebSocket server.
  * Broadcasts newly translated Soroban events to all connected clients.
  * Bloated event data (>2KB) is automatically offloaded to IPFS before broadcast.
