@@ -1,0 +1,26 @@
+name: Validate docs/reality drift
+
+on:
+  pull_request:
+    paths:
+      - "README.md"
+      - "ARCHITECTURE.md"
+      - "package.json"
+      - "scripts/validate-docs.ts"
+      - ".github/workflows/validate-docs.yml"
+
+jobs:
+  validate-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Check README.md / ARCHITECTURE.md / package.json for dead references
+        run: npm run validate:docs

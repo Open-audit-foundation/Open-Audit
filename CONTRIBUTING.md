@@ -506,11 +506,24 @@ test: add edge cases for decodeAmount with zero values
    ```bash
    npm test && npx tsc --noEmit && npm run lint
    ```
-3. Push your branch:
+3. If your PR touches `README.md`, `ARCHITECTURE.md`, or `package.json`,
+   also run:
+   ```bash
+   npm run validate:docs
+   ```
+   This check runs automatically in CI on any PR touching those files.
+   It fails if a package.json script points at a file/directory that
+   doesn't exist, or a markdown link in README.md/ARCHITECTURE.md
+   resolves to nothing — the goal is to catch a doc or script that
+   references something not actually in the repo before it merges,
+   rather than after (see `scripts/validate-docs.ts`). If your PR
+   fails this check, either fix the reference or remove the claim —
+   don't skip/bypass the workflow.
+4. Push your branch:
    ```bash
    git push -u origin feat/your-feature-name
    ```
-4. Open a PR against `main` on GitHub.
+5. Open a PR against `main` on GitHub.
 
 ### PR Checklist
 
@@ -520,7 +533,7 @@ test: add edge cases for decodeAmount with zero values
 - [ ] Unit tests written and passing (`npm test`)
 - [ ] No TypeScript errors (`npx tsc --noEmit`)
 - [ ] No lint errors (`npm run lint`)
-- [ ] Code follows [CODE_STANDARDS.md](CODE_STANDARDS.md) (standard function declarations, no `any`)
+- [ ] Code follows the project's code standards (standard function declarations, no `any`)
 - [ ] PR title follows naming conventions above
 - [ ] PR description explains what contract was added and where you found its event schema
 
