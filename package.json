@@ -13,6 +13,7 @@
     "lint": "next lint",
     "lint:registry": "tsx scripts/lint-registry.ts",
     "validate:registry": "tsx scripts/validate-registry.ts",
+    "validate:docs": "tsx scripts/validate-docs.ts",
     "format": "prettier --write .",
     "test": "vitest run",
     "test:watch": "vitest",
