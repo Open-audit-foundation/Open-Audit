@@ -149,7 +149,6 @@ Worker Heartbeat → Redis → Health API → Status Dashboard
 
 📚 **Documentation:**
 - **[Status Monitoring Guide](STATUS_MONITORING_GUIDE.md)** - Complete monitoring documentation
-- **[Status Summary](TASK_7_STATUS_MONITORING_SUMMARY.md)** - Implementation overview
 
 **Quick Start:**
 ```bash
