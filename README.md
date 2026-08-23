@@ -49,15 +49,9 @@ npm install
 npm run dev
 ```
 
-If you want a local API/server workflow for testing the app, run:
-
-```bash
-npm run dev:ws
-```
-
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-For the custom server with WebSocket support and `/metrics`, run:
+If you want the custom server with WebSocket support and `/metrics`, run:
 
 ```bash
 npm run dev:ws
@@ -82,16 +76,9 @@ Copy `.env.example` to `.env.local` and fill in the values:
 cp .env.example .env.local
 ```
 
-If you are working with the Redis-backed services flow, create a local environment file from the available sample config in the repository and adjust the values for your setup.
-
-| Variable | Description | Default |
-|---|---|---|
-| `NEXT_PUBLIC_HORIZON_URL` | Stellar Horizon endpoint | `https://horizon-testnet.stellar.org` |
-| `NEXT_PUBLIC_SOROBAN_RPC_URL` | Soroban RPC endpoint | `https://soroban-testnet.stellar.org` |
-| `NEXT_PUBLIC_NETWORK_PASSPHRASE` | Network passphrase | Testnet passphrase |
-| `REDIS_URL` | Redis connection URL (microservices) | `redis://localhost:6379` |
-| `REDIS_CHANNEL` | Redis Pub/Sub channel (microservices) | `stellar:events` |
-| `PORT` | HTTP server port | `3000` |
+See [`.env.example`](.env.example) for the full, commented list of
+required and optional variables — it's organized into `[REQUIRED]`
+and `[OPTIONAL]` sections with defaults and explanations for each.
 
 ### Available Scripts
 
@@ -332,7 +319,6 @@ open-audit/
 ├── docker-compose.microservices.yml # 🆕 Docker Compose config
 ├── Dockerfile.worker       # 🆕 Indexer worker Docker image
 ├── Dockerfile.web          # 🆕 Web server Docker image
-├── ARCHITECTURE.md         # 📖 Detailed architecture guide
 ├── ARCHITECTURE.md         # 📖 Detailed architecture guide
 ├── SECURITY_HARDENING_GUIDE.md # 🔒 Security documentation
 └── public/
