@@ -253,11 +253,6 @@ if (result.success) {
 }
 ```
 
-**Monitoring:**
-```bash
-GET /api/security/metrics  # Security metrics API
-```
-
 ### Legacy Monolithic Architecture
 
 **Single-process system (for simple deployments):**
