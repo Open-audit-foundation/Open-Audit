@@ -7,7 +7,6 @@
     "dev": "next dev",
     "dev:ws": "node --max-old-space-size=512 --expose-gc -r ts-node/register --project tsconfig.server.json server.ts",
     "start:ws": "node --max-old-space-size=1024 --max-semi-space-size=64 --initial-old-space-size=128 --optimize-for-size dist/server.js",
-    "profile:heap": "node --expose-gc --max-old-space-size=512 -r tsx/cjs scripts/profile-heap.ts",
     "build": "next build",
     "build:all": "next build",
     "start": "next start",
@@ -32,10 +31,7 @@
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "db:seed": "ts-node prisma/seed.ts",
-    "db:studio": "prisma studio",
-    "retention": "ts-node --project tsconfig.server.json scripts/retention.ts",
-    "retention:dry-run": "ts-node --project tsconfig.server.json scripts/retention.ts --dry-run",
-    "worker:evm-bridge": "ts-node --project tsconfig.server.json src/worker/evm-bridge-indexer.ts"
+    "db:studio": "prisma studio"
   },
   "dependencies": {
     "@clickhouse/client": "^1.0.0",
