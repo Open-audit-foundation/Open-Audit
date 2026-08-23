@@ -12,7 +12,7 @@
     "start": "next start",
     "lint": "next lint",
     "lint:registry": "tsx scripts/lint-registry.ts",
-    "validate:registry": "node scripts/validate-registry.js",
+    "validate:registry": "tsx scripts/validate-registry.ts",
     "format": "prettier --write .",
     "test": "vitest run",
     "test:watch": "vitest",
