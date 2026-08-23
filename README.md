@@ -26,7 +26,7 @@ Smart contracts on Stellar/Soroban emit events as cryptic, hex-encoded binary da
 
 ## Tech Stack
 
-- **Framework:** Next.js 14 (App Router) + TypeScript
+- **Framework:** Next.js 16.2.10 (App Router) + TypeScript
 - **Design System:** Tailwind CSS + shadcn/ui
 - **Stellar Integration:** `stellar-sdk`
 - **State Management:** React Context + Server Components
