@@ -47,3 +47,6 @@ logs/
 
 # Archive output
 archives/
+
+# Native addon binaries (build with `npm run build:native`)
+native/**/*.node
