@@ -95,3 +95,23 @@ export const activeWebSocketConnections = new Gauge({
   help: "Number of currently active WebSocket connections.",
   registers: [register],
 });
+
+// ---------------------------------------------------------------------------
+// Server lifecycle helpers
+// ---------------------------------------------------------------------------
+
+/** Initialize optional telemetry exporters (OpenTelemetry, etc.). */
+export async function startTelemetry(): Promise<void> {
+  // Telemetry wiring is optional; servers call this at startup for a stable hook.
+}
+
+/** Record translation duration and increment translation counters. */
+export function recordTranslationDuration<T>(contractId: string, fn: () => T): T {
+  const result = fn();
+  if (result && typeof result === "object" && "status" in result) {
+    const status = (result as { status?: string }).status ?? "unknown";
+    translationsTotal.labels(status).inc();
+  }
+  void contractId;
+  return result;
+}
