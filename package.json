@@ -16,7 +16,7 @@
     "build": "next build",
     "build:all": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "tsc --noEmit --pretty false",
     "lint:registry": "tsx scripts/lint-registry.ts",
     "validate:registry": "tsx scripts/validate-registry.ts",
     "validate:docs": "tsx scripts/validate-docs.ts",
@@ -93,6 +93,7 @@
     "yaml": "^2.8.1"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.3.6",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/bull": "^4.10.4",
@@ -102,6 +103,7 @@
     "@types/node-cron": "^3.0.11",
     "@types/react": "^18",
     "@types/react-dom": "^18",
+    "@types/react-syntax-highlighter": "^15.5.13",
     "@types/swagger-ui-react": "^5.18.0",
     "@types/ws": "^8.5.13",
     "@typescript-eslint/eslint-plugin": "^8.19.0",

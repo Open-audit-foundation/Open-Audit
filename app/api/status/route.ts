@@ -13,7 +13,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { Server as StellarSorobanRpc } from "stellar-sdk/lib/soroban";
+import { SorobanRpc } from "stellar-sdk";
 import Redis from "ioredis";
 import { resilientStellarClient } from "../../../lib/stellar/resilient-stellar-client";
 import { CircuitState } from "../../../lib/resilience/circuit-breaker";
@@ -90,7 +90,7 @@ async function checkStellarRpc(): Promise<ComponentHealthResponse> {
     // Attempt to fetch latest ledger
     await Promise.race([
       resilientStellarClient.execute(async (url) => {
-        const server = new StellarSorobanRpc(url);
+        const server = new SorobanRpc.Server(url);
         return await server.getLatestLedger();
       }),
       new Promise((_, reject) =>

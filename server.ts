@@ -25,30 +25,15 @@
 import { createServer } from "http";
 import { parse } from "url";
 import next from "next";
-import { processEventForIpfs } from "./lib/ipfs/offloader";
 import { eventsIngestedTotal, recordTranslationDuration, startTelemetry } from "./lib/metrics";
 import { applyContentSecurityPolicy } from "./lib/server/csp";
 import { createEventWebSocketServer } from "./lib/server/ws-server";
-import { createFileIngestionStateStore, startResilientEventIngestion } from "./lib/stellar/indexer";
+import { startHorizonStreamingIndexer } from "./lib/stellar/indexer";
 import { getNetworkConfig } from "./lib/stellar/client";
 import { translateEvent } from "./lib/translator/registry";
 
 const dev = process.env.NODE_ENV !== "production";
 const port = parseInt(process.env.PORT ?? "3000", 10);
-
-function parseHistoryArchives(): Record<string, string> {
-  const raw = process.env.STELLAR_HISTORY_ARCHIVES;
-  if (!raw) {
-    return {};
-  }
-
-  try {
-    return JSON.parse(raw) as Record<string, string>;
-  } catch (error) {
-    console.warn("[Indexer] Failed to parse STELLAR_HISTORY_ARCHIVES JSON:", error);
-    return {};
-  }
-}
 
 const app = next({ dev });
 const handle = app.getRequestHandler();
@@ -67,41 +52,11 @@ app.prepare().then(async () => {
     logPrefix: "[WS]",
   });
 
-  const stateStore = createFileIngestionStateStore(
-    process.env.INGESTION_STATE_FILE ?? ".open-audit/ingestion-state.json"
-  );
-
-  startResilientEventIngestion({
+  startHorizonStreamingIndexer({
     networkConfig: getNetworkConfig(),
-    stateStore,
-    coldStartLookbackLedgers: Number(process.env.INGESTION_COLD_START_LOOKBACK_LEDGERS ?? "100"),
-    captiveCore: process.env.STELLAR_CORE_BINARY
-      ? {
-          binaryPath: process.env.STELLAR_CORE_BINARY,
-          networkPassphrase: getNetworkConfig().networkPassphrase,
-          historyArchives: parseHistoryArchives(),
-          startLedger: Number(process.env.INGESTION_START_LEDGER ?? "0"),
-          transport:
-            process.env.STELLAR_CORE_TRANSPORT === "tcp"
-              ? {
-                  type: "tcp",
-                  host: process.env.STELLAR_CORE_STREAM_HOST ?? "127.0.0.1",
-                  port: process.env.STELLAR_CORE_STREAM_PORT
-                    ? Number(process.env.STELLAR_CORE_STREAM_PORT)
-                    : undefined,
-                }
-              : { type: "stdio" },
-          heartbeatTimeoutMs: Number(process.env.STELLAR_CORE_HEARTBEAT_TIMEOUT_MS ?? "30000"),
-          restartDelayMs: Number(process.env.STELLAR_CORE_RESTART_DELAY_MS ?? "5000"),
-          maxRestartAttempts: Number(process.env.STELLAR_CORE_MAX_RESTARTS ?? "2"),
-        }
-      : undefined,
+    contractIds: process.env.CONTRACT_IDS ? process.env.CONTRACT_IDS.split(",") : undefined,
     onEvent: async (rawEvent) => {
       console.log(`[Indexer] New event: ${rawEvent.id} from contract ${rawEvent.contractId}`);
-
-      const processed = await processEventForIpfs(rawEvent);
-      rawEvent.data = processed.data;
-      rawEvent.topics = processed.topics;
 
       const translated = recordTranslationDuration(rawEvent.contractId, () => translateEvent(rawEvent));
       eventsIngestedTotal

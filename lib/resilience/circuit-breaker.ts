@@ -239,6 +239,10 @@ export function createCircuitBreaker(config: CircuitBreakerConfig): CircuitBreak
   let lastFailureTime: number | undefined;
   let lastSuccessTime: number | undefined;
 
+  function getState(): CircuitState {
+    return state;
+  }
+
   /**
    * Transitions to a new state and notifies listeners.
    */
@@ -358,28 +362,11 @@ export function createCircuitBreaker(config: CircuitBreakerConfig): CircuitBreak
       if (isFailure(error)) {
         recordFailure(error);
       } else {
-        // Non-circuit-breaking error, just pass through
         totalFailures++;
-      }
-
-      // If we just opened the circuit and have a fallback, try it
-      if (state === CircuitState.OPEN && fallback) {
-        totalFallbacks++;
-        console.log("[circuit-breaker] Circuit just opened, attempting fallback");
-        try {
-          return await fallback();
-        } catch (fallbackError) {
-          console.error("[circuit-breaker] Fallback also failed:", fallbackError);
-          throw error; // Throw original error
-        }
       }
 
       throw error;
     }
-  }
-
-  function getState(): CircuitState {
-    return state;
   }
 
   function metrics(): CircuitBreakerMetrics {

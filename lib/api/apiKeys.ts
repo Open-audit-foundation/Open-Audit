@@ -4,11 +4,11 @@ import { ApiKey, DeveloperTier } from "./types";
 const API_KEY_PREFIX = "oa_live";
 const KEY_LENGTH = 32;
 
-export function generateApiKey(): { key: string; hash: string; prefix: string } {
+export function generateApiKey(): { key: string; hash: string; prefix: "oa_live" | "oa_test" } {
   const key = crypto.randomBytes(KEY_LENGTH).toString("hex");
   const fullKey = `${API_KEY_PREFIX}_${key}`;
   const hash = hashApiKey(fullKey);
-  return { key: fullKey, hash, prefix: API_KEY_PREFIX };
+  return { key: fullKey, hash, prefix: API_KEY_PREFIX as "oa_live" };
 }
 
 export function hashApiKey(key: string): string {

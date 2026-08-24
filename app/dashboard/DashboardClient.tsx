@@ -56,6 +56,8 @@ export function DashboardClient({
   const [searchValue, setSearchValue] = useState("");
   const [searchedContract, setSearchedContract] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<RawEvent[] | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const { language } = useLanguage();
   const { network } = useNetwork();
@@ -86,22 +88,11 @@ export function DashboardClient({
   );
 
   // Merge live-streamed events (prepended) with the translated batch.
-  const events = useMemo(
+  const allEvents = useMemo(
     function () {
       return [...liveEvents, ...translatedRawEvents];
     },
     [liveEvents, translatedRawEvents]
-  );
-
-  const translatedEvents = useMemo(
-    () =>
-      resolveDisplayEvents(USE_MOCK_DATA, rawEvents, dbEvents, customBlueprints, language),
-    [rawEvents, dbEvents, customBlueprints, language]
-  );
-
-  const allEvents = useMemo(
-    () => [...liveEvents, ...translatedEvents],
-    [liveEvents, translatedEvents]
   );
 
   const filteredEvents = useMemo(
@@ -123,7 +114,7 @@ export function DashboardClient({
           const amount = Number(
             event.raw.data
               ? BigInt("0x" + event.raw.data.slice(2).replace(/[^0-9a-fA-F]/g, "0"))
-              : 0n
+              : BigInt(0)
           );
           if (Number(amount) < filters.minAmount) {
             return false;
@@ -245,7 +236,7 @@ export function DashboardClient({
       {ready && (
         <FavoritesSidebar
           favorites={prefs.favorites}
-          activeContract={filters.contractId}
+          activeContract={filters.contractId ?? null}
           onSelect={handleFavoriteSelect}
           onRemove={toggleFavorite}
         />
@@ -278,7 +269,9 @@ export function DashboardClient({
                 variant="ghost"
                 size="icon"
                 className="mt-0.5 h-9 w-9 shrink-0"
-                onClick={() => toggleFavorite(filters.contractId)}
+                onClick={() => {
+                  if (filters.contractId) toggleFavorite(filters.contractId);
+                }}
                 aria-label={isFavorited ? "Unpin this contract" : "Pin this contract"}
                 title={isFavorited ? "Unpin contract" : "Pin contract"}
               >
