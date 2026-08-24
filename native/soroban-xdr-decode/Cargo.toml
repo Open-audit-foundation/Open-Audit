@@ -1,0 +1,21 @@
+[package]
+name = "soroban-xdr-decode"
+version = "0.1.0"
+edition = "2021"
+description = "Native (N-API) Soroban ScVal XDR decoder with the same security guards as lib/translator/secure-xdr-parser.ts"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "2", default-features = false, features = ["napi4"] }
+napi-derive = "2"
+
+[build-dependencies]
+napi-build = "2"
+
+[profile.release]
+lto = true
+strip = "symbols"

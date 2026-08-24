@@ -83,9 +83,18 @@ npm run cli:example      # Exercise the CLI against the sample blueprint
 **Testing & Quality:**
 ```bash
 npm run test             # Run all tests
+npm run test:parity      # Native/TS XDR decoder parity + fallback tests
 npm run lint             # Run ESLint
 npm run lint:registry    # Validate translation registry
 npm run format           # Format code with Prettier
+```
+
+**Native XDR decoder (optional):**
+```bash
+npm run build:native         # Build the Rust N-API decoder (release)
+npm run build:native:debug   # Debug build
+npm run build:native:docker  # Build in a clean container
+npm run bench:xdr            # TS vs native throughput comparison
 ```
 
 ---
@@ -184,6 +193,59 @@ if (result.success) {
   // Use result.value safely
 }
 ```
+
+### ⚡ Native XDR Decoder (Optional, Rust)
+
+A native N-API module (`native/soroban-xdr-decode`) accelerates `secureParseScVal`
+for high-throughput scenarios. It is a **drop-in performance path, not a second
+parser contract**: it enforces the exact same security guards as the TypeScript
+implementation (recursion depth, allocation, timeout, collection size — same
+limits, same error classes, same messages) and the TypeScript parser remains
+the automatic fallback.
+
+**Zero configuration:** if the addon has been built for the current platform it
+is used automatically (for payloads large enough to benefit); if it is missing,
+fails to load, or misbehaves at runtime, `secureParseScVal` transparently uses
+the pure-TypeScript implementation. Set `OPEN_AUDIT_DISABLE_NATIVE_XDR=1` to
+force the TypeScript path (debugging/benchmarking only).
+
+**Building** (requires a [Rust toolchain](https://rustup.rs), or Docker):
+```bash
+npm run build:native          # release build for the current platform
+npm run build:native:debug    # debug build
+npm run build:native:docker   # build inside a clean container (no local Rust needed)
+```
+
+**Supported platforms:** Linux x64/arm64 (glibc & musl), macOS x64/arm64,
+Windows x64. On anything else the build script exits with a message and the
+TypeScript parser is used — that is a fully supported configuration, not an
+error.
+
+**Verification:** `npm run test:parity` runs every fuzz/security corpus input
+(including all payloads from `fuzz-xdr-parser.test.ts` and
+`secure-xdr-parser.test.ts`, deterministic mutation/random sweeps, UTF-8 edge
+cases and guard-boundary payloads) against both implementations and asserts
+identical results, and covers the automatic fallback with simulated
+missing/crashing/lying addons.
+
+**Measured throughput** (`npm run bench:xdr`, Node v20.20.2, linux-x64,
+release build, interleaved best-of-3 rounds):
+
+| workload                                  | TS ops/s | native ops/s | speedup |
+| ----------------------------------------- | -------- | ------------ | ------- |
+| typical transfer event (4 payloads)       | 104,654  | 104,173      | 1.00x   |
+| medium nested struct (depth 5, 50 fields) | 8,204    | 19,634       | 2.39x   |
+| large vec (1,000 u32)                     | 1,081    | 3,568        | 3.30x   |
+| large map (5,000 entries)                 | 104      | 324          | 3.12x   |
+| attack: nested vec depth 150              | 1,928    | 24,781       | 12.86x  |
+| attack: vec with 20,000 elements          | 292      | 1,401        | 4.80x   |
+| malformed: tiny truncated garbage         | 10,877   | 11,128       | 1.02x   |
+| malformed: 4KB of garbage                 | 23,406   | 29,623       | 1.27x   |
+
+Small payloads (< ~50 bytes) intentionally stay on the TypeScript path — the
+N-API call overhead exceeds the work saved there, so the hybrid is never
+slower than pure TS. The largest wins are on hostile payloads, where rejection
+happens in Rust before the JavaScript XDR parser ever runs.
 
 ### Legacy Monolithic Architecture
 

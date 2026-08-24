@@ -24,10 +24,22 @@ import {
   logSecurityError,
   recordParse,
   toSafeErrorMessage,
+  MaxDepthExceededError,
+  MaxPayloadSizeExceededError,
+  MaxParseTimeExceededError,
+  MaxCollectionSizeExceededError,
+  MaxHexLengthExceededError,
+  MalformedXdrError,
+  type ParserSecurityError,
   type ParsingContext,
   type SafeParseResult,
 } from "./parser-security";
 import { truncateHex } from "./decode";
+import {
+  getNativeXdrDecoder,
+  type NativeDecodeOutcome,
+  type NativeXdrDecoder,
+} from "./native-xdr-decoder";
 
 // ============================================================================
 // Secure ScVal Parsing
@@ -37,10 +49,43 @@ import { truncateHex } from "./decode";
  * Safely parses a hex-encoded ScVal with security guards.
  * Returns a SafeParseResult that never throws.
  *
+ * When the native decoder (native/soroban-xdr-decode) is built and loadable,
+ * the parse+validation work is delegated to it; otherwise (or if it fails in
+ * any way at runtime) this transparently uses the pure-TypeScript
+ * implementation. Both paths enforce the exact same security guards and
+ * produce identical results — see native-ts-parity.test.ts.
+ *
  * @param hex Hex-encoded ScVal (with or without 0x prefix)
  * @returns SafeParseResult with either the parsed ScVal or security error
  */
+/**
+ * Below this input size the pure-TS path outruns the native one: the N-API
+ * call overhead exceeds the validation work saved (crossover measured at
+ * ~100 hex chars on Node 20/linux-x64 — see scripts/bench-xdr-parser.ts).
+ * Both paths enforce identical guards, so this is purely a speed heuristic.
+ */
+const NATIVE_MIN_HEX_CHARS = 96;
+
 export function secureParseScVal(hex: string): SafeParseResult<StellarXdr.ScVal> {
+  if (typeof hex === "string" && hex.length >= NATIVE_MIN_HEX_CHARS) {
+    const native = getNativeXdrDecoder();
+    if (native) {
+      const result = nativeParseScVal(native, hex);
+      if (result) {
+        return finishParseResult(result, hex);
+      }
+      // Native addon unhealthy for this input — fall through to TS.
+    }
+  }
+  return secureParseScValTs(hex);
+}
+
+/**
+ * Pure-TypeScript implementation of secureParseScVal. Exported so the parity
+ * test suite and benchmarks can compare it against the native path; regular
+ * callers should use secureParseScVal, which picks the best available path.
+ */
+export function secureParseScValTs(hex: string): SafeParseResult<StellarXdr.ScVal> {
   const result = safeParseXdr<StellarXdr.ScVal>((ctx) => {
     // Validate hex length first
     validateHexLength(hex);
@@ -58,16 +103,98 @@ export function secureParseScVal(hex: string): SafeParseResult<StellarXdr.ScVal>
     
     return scVal;
   });
-  
+
+  return finishParseResult(result, hex);
+}
+
+/**
+ * Shared metrics/logging tail for both the native and TS parse paths, so the
+ * observable side effects are identical regardless of which path ran.
+ */
+function finishParseResult(
+  result: SafeParseResult<StellarXdr.ScVal>,
+  hex: string
+): SafeParseResult<StellarXdr.ScVal> {
   // Record metrics
   recordParse(result.success, result.success ? createParsingContext() : createParsingContext(), result.error ?? undefined);
-  
+
   // Log security errors
   if (!result.success) {
     logSecurityError(result.error, { hex: truncateHex(hex) });
   }
-  
+
   return result;
+}
+
+/**
+ * Runs the native decoder for one input. Returns null whenever the TypeScript
+ * implementation should take over instead (native threw, returned a
+ * malformed outcome, or disagreed with the JS XDR parser on a success).
+ */
+function nativeParseScVal(
+  native: NativeXdrDecoder,
+  hex: string
+): SafeParseResult<StellarXdr.ScVal> | null {
+  let outcome: NativeDecodeOutcome;
+  try {
+    outcome = native.decodeScVal(hex);
+  } catch {
+    // Includes non-string inputs (N-API type errors) and addon crashes that
+    // surface as exceptions — the TS path classifies those itself.
+    return null;
+  }
+
+  if (!outcome || typeof outcome.success !== "boolean") {
+    return null;
+  }
+
+  if (outcome.success) {
+    try {
+      const cleanHex = hex.startsWith("0x") ? hex.slice(2) : hex;
+      const scVal = StellarXdr.ScVal.fromXDR(cleanHex, "hex");
+      return { success: true, value: scVal, error: null };
+    } catch {
+      // The native decoder accepted a payload the JS parser rejects — treat
+      // the native module as untrustworthy for this input and let the TS
+      // implementation produce the authoritative result.
+      return null;
+    }
+  }
+
+  const error = nativeOutcomeToError(outcome);
+  if (!error) {
+    return null;
+  }
+  return { success: false, value: null, error };
+}
+
+/**
+ * Reconstructs the exact ParserSecurityError subclass the TS implementation
+ * would have thrown, from the native outcome's errorType and parameters, so
+ * error messages match the TS path verbatim.
+ */
+function nativeOutcomeToError(
+  outcome: NativeDecodeOutcome
+): ParserSecurityError | null {
+  const actual = outcome.actual ?? 0;
+  const limit = outcome.limit ?? 0;
+  switch (outcome.errorType) {
+    case "MAX_DEPTH_EXCEEDED":
+      return new MaxDepthExceededError(actual, limit);
+    case "MAX_PAYLOAD_SIZE_EXCEEDED":
+      return new MaxPayloadSizeExceededError(actual, limit);
+    case "MAX_PARSE_TIME_EXCEEDED":
+      return new MaxParseTimeExceededError(actual, limit);
+    case "MAX_COLLECTION_SIZE_EXCEEDED":
+      return new MaxCollectionSizeExceededError(actual, limit);
+    case "MAX_HEX_LENGTH_EXCEEDED":
+      return new MaxHexLengthExceededError(actual, limit);
+    case "MALFORMED_XDR":
+      return new MalformedXdrError(outcome.message ?? "unknown parse error");
+    default:
+      // Unknown classification from the addon — distrust it and fall back.
+      return null;
+  }
 }
 
 /**
