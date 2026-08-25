@@ -29,6 +29,7 @@ import { createFileIngestionStateStore, startResilientEventIngestion } from "./l
 import { getNetworkConfig } from "./lib/stellar/client";
 import { eventsIngestedTotal, metricsHandler, recordTranslationDuration, startTelemetry } from "./lib/metrics";
 import { startRetentionScheduler } from "./lib/retention/scheduler";
+import { persistExecutionDag } from "./lib/dag/persistence";
 
 const dev = process.env.NODE_ENV !== "production";
 const port = parseInt(process.env.PORT ?? "3000", 10);
@@ -167,6 +168,19 @@ app.prepare().then(async () => {
     onError: (err) => {
       console.error('[server.ts] Error:', err);
       console.error("[Indexer] Streaming error:", err);
+    },
+    onDag: async (dag) => {
+      try {
+        await persistExecutionDag(dag);
+        if (dag.hasReentrancy) {
+          console.warn(
+            `[Indexer] Reentrancy detected in tx ${dag.txHash}: ` +
+            dag.reentrancyDetails.map((r) => r.description).join("; ")
+          );
+        }
+      } catch (err) {
+        console.error("[Indexer] Failed to persist DAG:", err);
+      }
     },
   });
 

@@ -23,9 +23,12 @@ model Event {
   blueprintName   String?  // Contract name from blueprint
   eventType       String?  // Event type (transfer, mint, burn, etc.)
   schemaVersion   String?  // Blueprint schema version that translated this event (e.g. "v2", "1.0.0")
+  executionDagId  String?  // FK to ExecutionDag (a tx can produce multiple events)
 
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  executionDag    ExecutionDag? @relation(fields: [executionDagId], references: [id])
 
   @@index([contractId])
   @@index([ledger])
@@ -77,6 +80,29 @@ model WebhookSubscription {
 
   @@index([isActive])
   @@index([contractId])
+}
+
+// Execution DAG — reconstructed call tree for a Soroban transaction
+model ExecutionDag {
+  id               String   @id @default(cuid())
+  txHash           String   @unique
+  ledger           Int
+  timestamp        Int
+  nodes            Json     // DagNode[] serialized
+  maxDepth         Int
+  uniqueContracts  Int
+  hasReentrancy    Boolean  @default(false)
+  reentrancyDetails Json   // ReentrancyInfo[] serialized
+  authTraces       Json     // AuthTrace[] serialized
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  events           Event[]
+
+  @@index([ledger])
+  @@index([txHash])
+  @@index([hasReentrancy])
+  @@index([ledger, hasReentrancy])
 }
 
 // Record of each delivery attempt for auditing and debugging

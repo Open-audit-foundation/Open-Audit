@@ -756,6 +756,7 @@ export function startResilientEventIngestion(
     fallbackPollIntervalMs = 5000,
     onEvent,
     onError,
+    onDag,
     contractIds,
     stateStore,
   } = options;
@@ -798,6 +799,7 @@ export function startResilientEventIngestion(
       contractIds,
       onEvent,
       onError,
+      onDag,
       workerCount: options.workerCount,
       maxQueueSize: options.maxQueueSize,
       stateStore,
