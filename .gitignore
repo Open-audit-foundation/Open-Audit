@@ -27,6 +27,7 @@ target/
 # TypeScript
 *.tsbuildinfo
 next-env.d.ts
+.server-dist/
 
 # OS
 .DS_Store

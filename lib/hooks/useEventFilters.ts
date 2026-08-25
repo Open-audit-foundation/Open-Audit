@@ -59,7 +59,7 @@ export function useEventFilters() {
 
   const setFilters = useCallback(
     function (updates: EventFilterParams): void {
-      urlSync.setParams(updates);
+      urlSync.setParams(updates as Record<string, string | null | undefined>);
     },
     [urlSync]
   );

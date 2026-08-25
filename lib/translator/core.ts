@@ -291,10 +291,14 @@ function decodeScValInternal(scVal: xdr.ScVal): DecodedScVal {
       return { type: "Symbol", value: scVal.sym()?.toString() ?? "", hex };
     case "scvBytes":
       return { type: "Bytes", value: "0x" + scVal.bytes().toString("hex"), hex };
-    case "scvVec":
-      return decodeVec(hex);
-    case "scvMap":
-      return decodeMap(hex);
+    case "scvVec": {
+      const vec = decodeVec(hex);
+      return { type: "Vec", value: vec.summary, hex };
+    }
+    case "scvMap": {
+      const map = decodeMap(hex);
+      return { type: "Map", value: map.summary, hex };
+    }
     case "scvAddress":
       const decoded = decodeAddress(hex);
       return { type: "Address", value: decoded.short, hex };

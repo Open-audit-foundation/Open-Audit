@@ -162,7 +162,12 @@ export async function getLatestLedgerResilient(): Promise<{
     return await client.execute(async (rpcUrl: string) => {
       const { SorobanRpc } = await import("stellar-sdk");
       const server = new SorobanRpc.Server(rpcUrl);
-      return await server.getLatestLedger();
+      const ledger = await server.getLatestLedger();
+      return {
+        sequence: ledger.sequence,
+        hash: (ledger as { hash?: string }).hash ?? "",
+        protocolVersion: Number(ledger.protocolVersion),
+      };
     });
   } catch (error) {
     const networkError = new StellarNetworkException(
@@ -204,6 +209,16 @@ export function getCurrentRpcEndpoint() {
  *
  * @returns Health status
  */
+/** Singleton-style facade used by the status API and tests. */
+export const resilientStellarClient = {
+  execute<T>(fn: (endpointUrl: string) => Promise<T>): Promise<T> {
+    return getResilientClient().execute(fn);
+  },
+  metrics() {
+    return getResilientClient().metrics();
+  },
+};
+
 export function getHealthStatus(): {
   healthy: boolean;
   currentEndpoint: string;

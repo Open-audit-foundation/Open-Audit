@@ -50,16 +50,16 @@ function ipv4ToBigInt(ip: string): bigint {
     throw new Error(`Invalid IPv4 address: ${ip}`);
   }
   return (
-    (BigInt(parts[0]) << 24n) |
-    (BigInt(parts[1]) << 16n) |
-    (BigInt(parts[2]) << 8n) |
+    (BigInt(parts[0]) << BigInt(24)) |
+    (BigInt(parts[1]) << BigInt(16)) |
+    (BigInt(parts[2]) << BigInt(8)) |
     BigInt(parts[3])
   );
 }
 
 function ipv4CidrToRange(network: string, prefix: number): { network: bigint; mask: bigint } {
   const networkInt = ipv4ToBigInt(network);
-  const maskInt = prefix === 0 ? 0n : (~0n << (32n - BigInt(prefix))) & 0xffffffffn;
+  const maskInt = prefix === 0 ? BigInt(0) : (~BigInt(0) << (BigInt(32) - BigInt(prefix))) & BigInt("0xffffffff");
   return { network: networkInt & maskInt, mask: maskInt };
 }
 

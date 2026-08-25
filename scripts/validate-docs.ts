@@ -57,6 +57,7 @@ function looksLikePath(token: string): boolean {
   // script referencing dist/foo.js before anyone has run `build` is
   // expected, not drift.
   if (token.startsWith("dist/") || token.startsWith("dist\\")) return false;
+  if (token.startsWith(".server-dist/") || token.startsWith(".server-dist\\")) return false;
   if (KNOWN_COMMANDS.has(token)) return false;
   const hasSeparator = token.includes("/") || token.includes("\\");
   const hasKnownExtension = /\.(ts|tsx|js|jsx|mjs|cjs|json|sh|yml|yaml)$/.test(token);
