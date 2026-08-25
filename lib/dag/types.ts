@@ -42,6 +42,38 @@ export interface DagNode {
    * Derived from the SorobanAuthorizationEntry tree.
    */
   requiresAuth: boolean;
+  /**
+   * Stellar account(s) that authorized this call, if available.
+   * Derived from SorobanAuthorizationEntry in the transaction.
+   * Empty array when auth data is unavailable.
+   */
+  authorizedBy: string[];
+}
+
+/**
+ * Details about a detected reentrancy pattern.
+ */
+export interface ReentrancyInfo {
+  /** The contract address that was re-entered. */
+  contractId: string;
+  /** The full call path (sequence of node IDs) where reentrancy occurred. */
+  callPath: number[];
+  /** Human-readable description of the reentrancy pattern. */
+  description: string;
+}
+
+/**
+ * Auth trace information for a single node.
+ */
+export interface AuthTrace {
+  /** Node ID this auth trace applies to. */
+  nodeId: number;
+  /** Contract being called. */
+  contractId: string | null;
+  /** Function being called. */
+  functionName: string | null;
+  /** Stellar accounts that authorized this specific call. */
+  authorizedBy: string[];
 }
 
 /**
@@ -65,4 +97,14 @@ export interface ExecutionDag {
   uniqueContracts: number;
   /** Whether any contract appears more than once in the call path (reentrancy hint). */
   hasReentrancy: boolean;
+  /**
+   * Detailed reentrancy information.
+   * Empty when no reentrancy is detected.
+   */
+  reentrancyDetails: ReentrancyInfo[];
+  /**
+   * Auth trace for each node that has authorization data.
+   * Empty when auth information is unavailable from the transaction meta.
+   */
+  authTraces: AuthTrace[];
 }

@@ -68,6 +68,19 @@ app.prepare().then(async () => {
       console.error("[server.ts] Error:", err);
       console.error("[Indexer] Streaming error:", err);
     },
+    onDag: async (dag) => {
+      try {
+        await persistExecutionDag(dag);
+        if (dag.hasReentrancy) {
+          console.warn(
+            `[Indexer] Reentrancy detected in tx ${dag.txHash}: ` +
+            dag.reentrancyDetails.map((r) => r.description).join("; ")
+          );
+        }
+      } catch (err) {
+        console.error("[Indexer] Failed to persist DAG:", err);
+      }
+    },
   });
 
   httpServer.listen(port, () => {

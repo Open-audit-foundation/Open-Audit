@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import {
   AlertCircle,
   BookOpen,
@@ -14,6 +14,7 @@ import {
   Trash2,
   Download,
   Star,
+  Search,
 } from "lucide-react";
 import { SearchBar } from "@/components/dashboard/SearchBar";
 import { FilterBuilder } from "@/components/dashboard/FilterBuilder";
@@ -28,6 +29,7 @@ import { useLanguage } from "@/lib/hooks/useLanguage";
 import { useNetwork } from "@/lib/hooks/useNetwork";
 import { useDashboardPrefs } from "@/lib/hooks/useDashboardPrefs";
 import { useEventFilters } from "@/lib/hooks/useEventFilters";
+import { useEventSearch } from "@/lib/hooks/useEventSearch";
 import {
   buildCustomBlueprints,
   loadCustomAbis,
@@ -120,32 +122,70 @@ export function DashboardClient({
             return false;
           }
         }
+      }
+    }
+  }, [allEvents, buildIndex, addSearchEvents, liveEvents]);
 
-        if (
-          filters.startLedger !== undefined &&
-          event.raw.ledger < filters.startLedger
-        ) {
+  // When client search hits come back, filter the event list to show only matches.
+  const filteredEvents = useMemo(() => {
+    let events = allEvents;
+
+    // Apply client-side search filter if there are search hits and a query is active.
+    if (searchHits.length > 0 && searchValue) {
+      const hitIds = new Set(searchHits.map((h) => h.id));
+      events = events.filter((event) => hitIds.has(event.raw.id));
+    }
+
+    return events.filter((event) => {
+      if (filters.contractId && event.raw.contractId !== filters.contractId) {
+        return false;
+      }
+
+      if (filters.eventType) {
+        const normalizedEventType = filters.eventType.toLowerCase();
+        const translatedType = event.eventType?.toLowerCase() ?? "";
+        if (!translatedType.includes(normalizedEventType)) {
           return false;
         }
+      }
 
-        if (
-          filters.endLedger !== undefined &&
-          event.raw.ledger > filters.endLedger
-        ) {
+      if (filters.minAmount !== undefined) {
+        const amount = Number(
+          event.raw.data
+            ? BigInt("0x" + event.raw.data.slice(2).replace(/[^0-9a-fA-F]/g, "0"))
+            : 0n
+        );
+        if (Number(amount) < filters.minAmount) {
           return false;
         }
+      }
 
-        return true;
-      }),
-    [allEvents, filters]
-  );
+      if (
+        filters.startLedger !== undefined &&
+        event.raw.ledger < filters.startLedger
+      ) {
+        return false;
+      }
+
+      if (
+        filters.endLedger !== undefined &&
+        event.raw.ledger > filters.endLedger
+      ) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [allEvents, searchHits, searchValue, filters]);
 
   const handleNewEvent = useCallback(
     (event: TranslatedEvent): void => {
       if (filters.contractId && event.raw.contractId !== filters.contractId) return;
       setLiveEvents((prev) => [event, ...prev]);
+      // Incrementally add the new event to the search index.
+      addSearchEvents([event]);
     },
-    [filters.contractId]
+    [filters.contractId, addSearchEvents]
   );
 
   const handleSearch = useCallback(
@@ -158,6 +198,7 @@ export function DashboardClient({
       if (!normalized) {
         setSearchResults(null);
         setError(null);
+        clearClientSearch();
         return;
       }
 
@@ -192,7 +233,20 @@ export function DashboardClient({
         setIsLoading(false);
       }
     },
-    [setFilters]
+    [setFilters, clearClientSearch]
+  );
+
+  // Client-side full-text search handler (separate from contract ID search).
+  const handleClientSearch = useCallback(
+    function (query: string): void {
+      setSearchValue(query);
+      if (!query.trim()) {
+        clearClientSearch();
+        return;
+      }
+      clientSearch(query);
+    },
+    [clientSearch, clearClientSearch]
   );
 
   const { isLive, isPaused, newEventIds, toggleLive, togglePause } =
@@ -244,11 +298,38 @@ export function DashboardClient({
 
       <section aria-label="Event filters">
         <div className="flex flex-col gap-3">
+          {/* Server-side contract ID search */}
           <SearchBar
             onSearch={handleSearch}
             isLoading={isLoading}
             defaultValue={searchValue}
           />
+
+          {/* Client-side full-text search input */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Full-text search events (powered by Web Worker)..."
+              value={searchValue}
+              onChange={(e) => handleClientSearch(e.target.value)}
+              className="h-10 w-full rounded-lg border bg-background pl-9 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-ring font-mono"
+              aria-label="Full-text event search"
+            />
+            {isSearching && (
+              <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              </div>
+            )}
+          </div>
+          {searchError && (
+            <p className="text-xs text-destructive">{searchError}</p>
+          )}
+          {isFallback && (
+            <p className="text-xs text-muted-foreground">
+              Running search on main thread (Web Worker unavailable) — results may be slower.
+            </p>
+          )}
 
           <FilterBuilder
             eventTypeSuggestions={Array.from(

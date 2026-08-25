@@ -79,6 +79,19 @@ class StellarIndexerWorker {
       onError: (error) => {
         this.handleError(error);
       },
+      onDag: async (dag) => {
+        try {
+          await persistExecutionDag(dag);
+          if (dag.hasReentrancy) {
+            console.warn(
+              `[${WORKER_ID}] Reentrancy detected in tx ${dag.txHash}: ` +
+              dag.reentrancyDetails.map((r) => r.description).join("; ")
+            );
+          }
+        } catch (err) {
+          console.error(`[${WORKER_ID}] Failed to persist DAG:`, err);
+        }
+      },
     });
   }
 
