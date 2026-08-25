@@ -23,10 +23,10 @@ import { createAllSdexBlueprints } from "./blueprints/sdex-orderbook";
 import { createAllSoroswapRouterBlueprints } from "./blueprints/soroswap-router";
 import { createAllBlendPoolV1Blueprints, createAllBlendPoolV2Blueprints } from "./blueprints/blend-pool";
 import {
-  registryCacheHitsTotal,
-  registryCacheMissesTotal,
-  translationsTotal,
-} from "../metrics";
+  incRegistryCacheHit,
+  incRegistryCacheMiss,
+  incTranslationTotal,
+} from "../metric-increment";
 import {
   decodeEventName,
   sanitizeTextField,
@@ -251,53 +251,6 @@ function buildRegistry(): BlueprintRegistry {
   return registry;
 }
 
-function interpolate(template: string, values: Record<string, any>): string {
-  return template.replace(/\{([^}]+)\}/g, (match, key) => {
-    const [path, format] = key.split(".");
-    const val = values[path];
-    if (val && typeof val === "object" && format) {
-      return val[format] ?? match;
-    }
-    return val ?? match;
-  });
-}
-
-function createTranslateFromMapping(mapping: any) {
-  return (event: RawEvent, lang: Language): TranslationResult | null => {
-    // 1. Match topics
-    for (let i = 0; i < mapping.topics.length; i++) {
-      if (i === 0) {
-        if (decodeEventName(event.topics[0]) !== mapping.topics[0]) return null;
-      }
-      // Future: support matching other topics too
-    }
-
-    const fields: Record<string, any> = {};
-
-    // 2. Extract topics[1..]
-    mapping.event_structure.topics.forEach((t: any, i: number) => {
-      const hex = event.topics[i + 1];
-      if (!hex) return;
-      if (t.type === "address") fields[t.name] = decodeAddress(hex);
-      else if (t.type === "i128") fields[t.name] = decodeAmount(hex);
-      else fields[t.name] = hex;
-    });
-
-    // 3. Extract data
-    if (mapping.event_structure.data) {
-      const d = mapping.event_structure.data;
-      if (d.type === "i128") fields[d.name] = decodeAmount(event.data);
-      else if (d.type === "address") fields[d.name] = decodeAddress(event.data);
-      else fields[d.name] = event.data;
-    }
-
-    return {
-      description: interpolate(mapping.english_template, fields),
-      eventType: mapping.topics[0],
-    };
-  };
-}
-
 /**
  * Builds a `translate` function from a single event-mapping declaration.
  * Called by registerUpgrade (eventMappings). Required for the module to load.
@@ -425,10 +378,10 @@ export function resolveSchema(
   const cacheKey = `${contractId}:${ledger}`;
   const cached = RESOLUTION_CACHE.get(cacheKey);
   if (cached) {
-    registryCacheHitsTotal.inc();
+    incRegistryCacheHit();
     return cached;
   }
-  registryCacheMissesTotal.inc();
+  incRegistryCacheMiss();
 
   // 3. Look up in global registry
   const entry = REGISTRY.get(contractId);
@@ -607,10 +560,10 @@ function translateEventSafe(
 ): TranslatedEvent {
   try {
     const result = translateEvent(event, customBlueprints, lang);
-    translationsTotal.inc({ status: result.status ?? "cryptic" });
+    incTranslationTotal(result.status ?? "cryptic");
     return result;
   } catch (error) {
-    translationsTotal.inc({ status: "cryptic" });
+    incTranslationTotal("cryptic");
     const templateError = new RegistryTemplateException(
       error instanceof Error ? error.message : "Translation failed",
       {
@@ -664,9 +617,10 @@ export function getBlueprintCount(): number {
  */
 export function registerBlueprint(...blueprints: TranslationBlueprint[]): void {
   for (const blueprint of blueprints) {
+    const versioned = blueprint as VersionedTranslationBlueprint;
     const schema: ContractSchema = {
-      version: "1.0.0",
-      validFromLedger: blueprint.validFromLedger ?? 1,
+      version: versioned.version ?? "1.0.0",
+      validFromLedger: versioned.validFromLedger ?? 1,
       validToLedger: null,
       blueprint,
     };

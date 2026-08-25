@@ -99,7 +99,7 @@ async function saveDeadLetterEvent(rawEvent: RawEvent, payload: DeadLetterPayloa
         errorCode: payload.errorCode,
         errorMessage: payload.errorMessage,
         errorStack: payload.errorStack ?? undefined,
-        errorContext: payload.errorContext ?? undefined,
+        errorContext: (payload.errorContext ?? undefined) as object | undefined,
       },
     });
   } catch (dbError) {

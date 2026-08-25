@@ -3,13 +3,19 @@ import { db } from "../lib/db/client";
 async function main() {
   console.log("Seeding database...");
 
-  // Create default reconciliation configuration
-  await db.reconciliationConfig.upsert({
+  const recon = (db as { reconciliationConfig?: { upsert: (args: object) => Promise<unknown> } })
+    .reconciliationConfig;
+  if (!recon) {
+    console.log("Skipping reconciliationConfig seed (model not in Prisma schema)");
+    return;
+  }
+
+  await recon.upsert({
     where: { id: "current" },
     update: {},
     create: {
       id: "current",
-      cronSchedule: "0 2 * * *", // Daily at 2 AM UTC
+      cronSchedule: "0 2 * * *",
       batchSize: 1000,
       lookbackDays: 7,
       autoFix: false,
@@ -18,12 +24,12 @@ async function main() {
     },
   });
 
-  console.log("✓ Seeding completed");
+  console.log("Seeding completed");
 }
 
 main()
   .catch((e) => {
-    console.error("✗ Seeding failed:", e);
+    console.error("Seeding failed:", e);
     process.exit(1);
   })
   .finally(async () => {

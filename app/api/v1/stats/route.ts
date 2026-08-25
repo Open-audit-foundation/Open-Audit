@@ -4,7 +4,12 @@ import { getCachedStats, setCachedStats } from "@/lib/cache/redisCache";
 
 export async function GET(): Promise<NextResponse> {
   try {
-    const cached = await getCachedStats();
+    let cached: Awaited<ReturnType<typeof getCachedStats>> = null;
+    try {
+      cached = await getCachedStats();
+    } catch {
+      cached = null;
+    }
     if (cached) {
       return NextResponse.json(cached);
     }
@@ -39,7 +44,7 @@ export async function GET(): Promise<NextResponse> {
   } catch (error) {
     console.error("[stats] Failed to compute stats:", error);
 
-    const stale = await getCachedStats().catch(() => null);
+    const stale = await Promise.resolve(getCachedStats()).catch(() => null);
     if (stale) {
       return NextResponse.json({
         ...stale,

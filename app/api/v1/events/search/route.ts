@@ -4,6 +4,7 @@
  * POST /api/v1/events/search — Full-text + filter search across historical events.
  */
 import { NextRequest, NextResponse } from "next/server";
+import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db/client";
 import { authenticateAndRateLimit } from "@/lib/api/middleware";
 import { toErrorResponse, validationErrorResponse } from "@/lib/api/error-response";
@@ -55,8 +56,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     // --- Build Prisma where clause ---
-    const where: Record<string, unknown> = {};
-    const AND: Record<string, unknown>[] = [];
+    const where: Prisma.EventWhereInput = {};
+    const AND: Prisma.EventWhereInput[] = [];
 
     if (body.query) {
       AND.push({ description: { contains: body.query, mode: "insensitive" } });
@@ -71,7 +72,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       AND.push({ status: body.status });
     }
     if (body.startLedger !== undefined || body.endLedger !== undefined) {
-      const ledgerFilter: Record<string, number> = {};
+      const ledgerFilter: Prisma.IntFilter = {};
       if (body.startLedger !== undefined) ledgerFilter.gte = body.startLedger;
       if (body.endLedger !== undefined) ledgerFilter.lte = body.endLedger;
       AND.push({ ledger: ledgerFilter });
@@ -83,7 +84,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     // --- Pagination ---
     const take = limit + 1; // fetch one extra to detect next page
-    const queryArgs: Record<string, unknown> = {
+    const queryArgs: Prisma.EventFindManyArgs = {
       where,
       orderBy: [{ ledger: "desc" }, { timestamp: "desc" }],
       take,

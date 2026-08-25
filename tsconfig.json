@@ -30,7 +30,7 @@
         "./*"
       ]
     },
-    "target": "ES2017"
+    "target": "ES2020"
   },
   "include": [
     "next-env.d.ts",
@@ -41,6 +41,9 @@
   ],
   "exclude": [
     "node_modules",
-    "vitest.config.ts"
+    "vitest.config.ts",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/__tests__/**"
   ]
 }

@@ -61,19 +61,6 @@ export function DashboardClient({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Client-side full-text search via Web Worker.
-  const {
-    results: searchHits,
-    isSearching,
-    isIndexed,
-    error: searchError,
-    isFallback,
-    search: clientSearch,
-    clearResults: clearClientSearch,
-    buildIndex,
-    addEvents: addSearchEvents,
-  } = useEventSearch({ debounceMs: 300 });
-
   const { language } = useLanguage();
   const { network } = useNetwork();
   const { prefs, ready, update, toggleColumn, toggleFavorite } =
@@ -110,23 +97,30 @@ export function DashboardClient({
     [liveEvents, translatedRawEvents]
   );
 
-  // Build the search index when allEvents change.
-  const allEventsRef = useRef(allEvents);
-  allEventsRef.current = allEvents;
-  const indexBuiltRef = useRef(false);
+  const filteredEvents = useMemo(
+    () =>
+      allEvents.filter((event) => {
+        if (filters.contractId && event.raw.contractId !== filters.contractId) {
+          return false;
+        }
 
-  useEffect(() => {
-    if (allEvents.length > 0) {
-      if (!indexBuiltRef.current) {
-        buildIndex(allEvents);
-        indexBuiltRef.current = true;
-      } else {
-        // Incrementally add new events that aren't already indexed.
-        const newEvents = allEvents.filter(
-          (e) => !liveEvents.includes(e) || liveEvents.indexOf(e) === allEvents.indexOf(e)
-        );
-        if (newEvents.length > 0 && newEvents.length < allEvents.length) {
-          addSearchEvents(newEvents.slice(0, Math.min(20, newEvents.length)));
+        if (filters.eventType) {
+          const normalizedEventType = filters.eventType.toLowerCase();
+          const translatedType = event.eventType?.toLowerCase() ?? "";
+          if (!translatedType.includes(normalizedEventType)) {
+            return false;
+          }
+        }
+
+        if (filters.minAmount !== undefined) {
+          const amount = Number(
+            event.raw.data
+              ? BigInt("0x" + event.raw.data.slice(2).replace(/[^0-9a-fA-F]/g, "0"))
+              : BigInt(0)
+          );
+          if (Number(amount) < filters.minAmount) {
+            return false;
+          }
         }
       }
     }
@@ -296,7 +290,7 @@ export function DashboardClient({
       {ready && (
         <FavoritesSidebar
           favorites={prefs.favorites}
-          activeContract={filters.contractId}
+          activeContract={filters.contractId ?? null}
           onSelect={handleFavoriteSelect}
           onRemove={toggleFavorite}
         />
@@ -356,7 +350,9 @@ export function DashboardClient({
                 variant="ghost"
                 size="icon"
                 className="mt-0.5 h-9 w-9 shrink-0"
-                onClick={() => toggleFavorite(filters.contractId)}
+                onClick={() => {
+                  if (filters.contractId) toggleFavorite(filters.contractId);
+                }}
                 aria-label={isFavorited ? "Unpin this contract" : "Pin this contract"}
                 title={isFavorited ? "Unpin contract" : "Pin contract"}
               >

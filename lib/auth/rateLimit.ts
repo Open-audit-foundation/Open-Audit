@@ -1,5 +1,4 @@
 import type { Tier } from "./apiKey";
-import { isRedisEnabled, getRedisClient } from "../cache/redisCache";
 import { getRedisClient, isRedisEnabled } from "../cache/redisCache";
 
 // Sliding-window limits in requests per minute per tier
@@ -44,6 +43,8 @@ export function _getBucketsSize(): number {
  */
 export function _clearBuckets(): void {
   buckets.clear();
+}
+
 let warnedFallback = false;
 function warnInMemoryFallback(reason: string): void {
   if (warnedFallback) return;
@@ -72,54 +73,38 @@ function checkInMemRateLimit(
   now: number
 ): RateLimitResult {
   const limit = TIER_LIMITS[tier];
-  const windowMs = 60_000;
-
   let bucket = buckets.get(hashedKey);
-  if (!bucket) {
-    bucket = [];
-  }
-
-  // Remove timestamps older than the sliding window
-  while (bucket.length > 0 && bucket[0] <= now - windowMs) {
-    bucket.shift();
-function checkRateLimitInMemory(hashedKey: string, limit: number): RateLimitResult {
-  let bucket = buckets.get(hashedKey);
-  const now = Date.now();
 
   if (bucket) {
     while (bucket.length > 0 && bucket[0] <= now - WINDOW_MS) {
       bucket.shift();
     }
-
     if (bucket.length === 0) {
       buckets.delete(hashedKey);
+      bucket = undefined;
     }
   }
 
-  const allowed = (bucket?.length ?? 0) < limit;
+  const currentLength = bucket?.length ?? 0;
+  const allowed = currentLength < limit;
+
   if (allowed) {
     if (!bucket) {
       bucket = [];
     }
     bucket.push(now);
     buckets.set(hashedKey, bucket);
-  } else if (bucket.length === 0) {
-    buckets.delete(hashedKey);
-  }
-
-  if (bucket.length === 0) {
-    buckets.delete(hashedKey);
   }
 
   return {
     allowed,
     limit,
-    remaining: Math.max(0, limit - (bucket?.length ?? 0)),
+    remaining: Math.max(0, limit - (allowed ? currentLength + 1 : currentLength)),
     retryAfter: allowed
       ? undefined
       : bucket
         ? Math.ceil((bucket[0] + WINDOW_MS - now) / 1000)
-        : undefined,
+        : 60,
   };
 }
 
@@ -223,19 +208,6 @@ async function checkRedisRateLimit(
 /**
  * Sliding-window rate limiter.
  *
- * Primary mode: Redis sorted set (`oa:rl:{hashedKey}`) when `REDIS_URL` is configured.
- * Key: oa:rl:{hashedKey}
- * Members: unique timestamps of recent requests ({timestamp}:{random})
- * Window: 60 seconds
- * Key TTL: 60 seconds (automatically evicts inactive keys in Redis)
- *
- * Fallback mode: In-memory sliding-window bucket map when Redis is unconfigured
- * or unavailable.
- * Eviction: Automatically removes keys from memory when their request timestamps expire.
- * Limitations: Per-instance scoping (no cross-node state) and reset on server restart.
-/**
- * Sliding-window rate limiter.
- *
  * Primary path: a Redis sorted set.
  *   Key: oa:rl:{hashedKey}
  *   Members: unique per-request ids
@@ -264,15 +236,4 @@ export async function checkRateLimit(
     }
   }
   return checkInMemRateLimit(hashedKey, tier, now);
-  const limit = TIER_LIMITS[tier];
-
-  if (isRedisEnabled()) {
-    try {
-      return await checkRateLimitRedis(hashedKey, limit);
-    } catch (err) {
-      warnInMemoryFallback(`Redis error: ${(err as Error).message}`);
-    }
-  }
-
-  return checkRateLimitInMemory(hashedKey, limit);
 }

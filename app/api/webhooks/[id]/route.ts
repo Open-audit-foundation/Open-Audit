@@ -11,11 +11,12 @@ export const runtime = "nodejs";
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await context.params;
   try {
     const subscription = await db.webhookSubscription.findUnique({
-      where: { id: params.id },
+      where: { id },
       select: {
         id: true,
         url: true,
@@ -45,11 +46,12 @@ export async function GET(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await context.params;
   try {
     const existing = await db.webhookSubscription.findUnique({
-      where: { id: params.id },
+      where: { id },
     });
 
     if (!existing) {
@@ -60,7 +62,7 @@ export async function DELETE(
     }
 
     await db.webhookSubscription.delete({
-      where: { id: params.id },
+      where: { id },
     });
 
     return NextResponse.json({

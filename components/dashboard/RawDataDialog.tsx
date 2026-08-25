@@ -1,6 +1,6 @@
 "use client";
 
-import { Code, ExternalLink, Copy, Check, Loader2, AlertCircle } from "lucide-react";
+import { Code, ExternalLink, Copy, Check, Loader2, AlertCircle, ChevronUp, ChevronDown } from "lucide-react";
 import React, { useState, useEffect, useRef } from "react";
 import {
   Dialog,
