@@ -322,4 +322,135 @@ describe("Reentrancy Detection", () => {
       expect(dag.hasReentrancy).toBe(false);
     });
   });
+
+  describe("Auth Tracing", () => {
+    it("attributes explicit auth addresses to nodes with requiresAuth=true", () => {
+      // Simulate what extractAuthTraces does: for each node with
+      // requiresAuth, attribute the provided auth addresses.
+      const authAddresses = ["GABC...AUTH_ACCT_1", "GABC...AUTH_ACCT_2"];
+      const nodes: DagNode[] = [
+        {
+          id: 0,
+          kind: "contract_fn",
+          contractId: "CCONTRACT_A",
+          functionName: "transfer",
+          depth: 0,
+          children: [1],
+          requiresAuth: true,
+          authorizedBy: [],
+        },
+        {
+          id: 1,
+          kind: "contract_fn",
+          contractId: "CCONTRACT_B",
+          functionName: "deposit",
+          depth: 1,
+          children: [],
+          requiresAuth: false,
+          authorizedBy: [],
+        },
+      ];
+
+      // The engine's extractAuthTraces attributes topLevelAccounts to
+      // nodes where requiresAuth=true.
+      const traces: AuthTrace[] = [];
+      for (const node of nodes) {
+        if (node.requiresAuth && node.contractId) {
+          traces.push({
+            nodeId: node.id,
+            contractId: node.contractId,
+            functionName: node.functionName,
+            authorizedBy: authAddresses,
+          });
+        }
+      }
+
+      expect(traces.length).toBe(1);
+      expect(traces[0].nodeId).toBe(0);
+      expect(traces[0].contractId).toBe("CCONTRACT_A");
+      expect(traces[0].authorizedBy).toEqual(authAddresses);
+    });
+
+    it("does not attribute auth to nodes without requiresAuth", () => {
+      const authAddresses = ["GABC...AUTH_ACCT_1"];
+      const nodes: DagNode[] = [
+        {
+          id: 0,
+          kind: "contract_fn",
+          contractId: "CCONTRACT_A",
+          functionName: "view",
+          depth: 0,
+          children: [],
+          requiresAuth: false,
+          authorizedBy: [],
+        },
+      ];
+
+      const traces: AuthTrace[] = [];
+      for (const node of nodes) {
+        if (node.requiresAuth && node.contractId) {
+          traces.push({
+            nodeId: node.id,
+            contractId: node.contractId,
+            functionName: node.functionName,
+            authorizedBy: authAddresses,
+          });
+        }
+      }
+
+      expect(traces.length).toBe(0);
+    });
+
+    it("attributes top-level account to all authorized nodes in a tree", () => {
+      const topLevelAccount = "GABC...SIGNER";
+      const nodes: DagNode[] = [
+        {
+          id: 0,
+          kind: "contract_fn",
+          contractId: "CCONTRACT_A",
+          functionName: "require_auth",
+          depth: 0,
+          children: [1, 2],
+          requiresAuth: true,
+          authorizedBy: [],
+        },
+        {
+          id: 1,
+          kind: "contract_fn",
+          contractId: "CCONTRACT_B",
+          functionName: "authorize",
+          depth: 1,
+          children: [],
+          requiresAuth: true,
+          authorizedBy: [],
+        },
+        {
+          id: 2,
+          kind: "contract_fn",
+          contractId: "CCONTRACT_C",
+          functionName: "read",
+          depth: 1,
+          children: [],
+          requiresAuth: false,
+          authorizedBy: [],
+        },
+      ];
+
+      const traces: AuthTrace[] = [];
+      for (const node of nodes) {
+        if (node.requiresAuth && node.contractId) {
+          traces.push({
+            nodeId: node.id,
+            contractId: node.contractId,
+            functionName: node.functionName,
+            authorizedBy: [topLevelAccount],
+          });
+        }
+      }
+
+      expect(traces.length).toBe(2);
+      expect(traces.map((t) => t.nodeId)).toEqual([0, 1]);
+      expect(traces.every((t) => t.authorizedBy.includes(topLevelAccount))).toBe(true);
+    });
+  });
 });

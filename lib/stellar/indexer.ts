@@ -626,11 +626,17 @@ export function startHorizonStreamingIndexer(options: StreamingIndexerOptions): 
               // which contractIds are being monitored.
               if (onDag && tx.result_meta_xdr) {
                 try {
+                  // Extract the transaction source account as the top-level
+                  // authorizing account for auth tracing.
+                  const authAddresses = tx.source_account
+                    ? [tx.source_account]
+                    : undefined;
                   const dag = reconstructDagFromMetaXdr(
                     tx.result_meta_xdr,
                     tx.hash,
                     tx.ledger_attr,
-                    Math.floor(Date.now() / 1000)
+                    Math.floor(Date.now() / 1000),
+                    authAddresses
                   );
                   if (dag !== null) {
                     await onDag(dag);

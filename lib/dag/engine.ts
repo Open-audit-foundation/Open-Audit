@@ -175,7 +175,8 @@ function detectReentrancyDetailed(nodes: DagNode[]): ReentrancyInfo[] {
  */
 function extractAuthTraces(
   metaXdr: string,
-  nodes: DagNode[]
+  nodes: DagNode[],
+  authAddresses?: string[]
 ): AuthTrace[] {
   const traces: AuthTrace[] = [];
   if (nodes.length === 0) return traces;
@@ -191,31 +192,17 @@ function extractAuthTraces(
       const sorobanMeta = v3.sorobanMeta();
       if (sorobanMeta) {
         try {
-          // SorobanTransactionMetaWithContractEvents might have auth via
-          // SorobanTransactionMeta in the v3 meta.
-          // The authorization entries are typically in the transaction result
-          // or the meta. We try to extract them from the meta.
           const resources = sorobanMeta.ext()?.resource_budget_summary();
-          // Auth entries are not directly in the meta for all versions.
-          // They are part of the transaction body in v3 transactions.
         } catch {
           // Auth data not available in this meta version.
         }
       }
     }
 
-    // Try to extract auth entries from TransactionMetaV3.sorobanMeta
-    // In Soroban, authorization entries are part of the transaction envelope,
-    // not the meta. However, the meta may contain traces of which contracts
-    // required auth through the events themselves.
-
-    // For now, we correlate auth requirements based on the requiresAuth flag
-    // already set during node construction. The actual authorization entries
-    // are in the transaction envelope, which we don't have here.
-
-    // Build a map: for each node, if it has requiresAuth, we attribute it
-    // to the top-level authorizing account(s) found in the meta.
-    const topLevelAccounts = extractTopLevelAccounts(metaXdr);
+    // Authorization entries are in the transaction envelope (SorobanTransactionAuth),
+    // not in the meta. The caller can pass explicit auth addresses from the
+    // envelope; otherwise we fall back to meta-derived accounts.
+    const topLevelAccounts = extractTopLevelAccounts(metaXdr, authAddresses);
 
     for (const node of nodes) {
       if (node.requiresAuth && node.contractId) {
@@ -238,8 +225,19 @@ function extractAuthTraces(
  * Extract top-level authorizing accounts from the transaction meta.
  * These are the G... accounts that signed the transaction and provided
  * authorization for nested calls.
+ *
+ * If explicit auth addresses are provided (from the transaction envelope),
+ * those take priority. Otherwise, we fall back to extracting addresses
+ * from the meta's contract events.
  */
-function extractTopLevelAccounts(metaXdr: string): string[] {
+function extractTopLevelAccounts(
+  metaXdr: string,
+  explicitAuthAddresses?: string[]
+): string[] {
+  if (explicitAuthAddresses && explicitAuthAddresses.length > 0) {
+    return explicitAuthAddresses;
+  }
+
   const accounts: string[] = [];
   try {
     const meta = xdr.TransactionMeta.fromXDR(metaXdr, "base64");
@@ -250,15 +248,43 @@ function extractTopLevelAccounts(metaXdr: string): string[] {
       const sorobanMeta = v3.sorobanMeta();
       if (sorobanMeta) {
         try {
-          const ext = sorobanMeta.ext();
-          if (ext) {
-            // Try to get contract events that may reference authorizing accounts.
-            const events = sorobanMeta.events();
-            // Events don't directly give us auth entries, but we can look for
-            // system events that reference authorization.
+          const events = sorobanMeta.events();
+          // Look for system contract events that reference authorizing accounts.
+          // In Soroban, the "host function" event (ContractEventType = system)
+          // may contain the authorizing account as an address argument.
+          for (const event of events) {
+            try {
+              const eventType = event.type();
+              const name: string = (eventType as unknown as { name: string }).name ?? "";
+              if (name === "system") {
+                const body = event.body();
+                const topics = body.v0().topics();
+                // The first topic of a system event may be the event type discriminant.
+                // Address arguments in system events can contain authorizing accounts.
+                const dataVal = body.v0().data();
+                if (dataVal.switch().name === "scvAddress") {
+                  try {
+                    const addr = dataVal.address();
+                    const addrBuf = addr.switch().name === "scAddressTypeAccount"
+                      ? addr.accountId().ed25519()
+                      : null;
+                    if (addrBuf) {
+                      const encoded = StrKey.encodeAccount(addrBuf as Parameters<typeof StrKey.encodeAccount>[0]);
+                      if (!accounts.includes(encoded)) {
+                        accounts.push(encoded);
+                      }
+                    }
+                  } catch {
+                    // Not an account address.
+                  }
+                }
+              }
+            } catch {
+              // Skip events that can't be parsed.
+            }
           }
         } catch {
-          // Not available.
+          // Events not available.
         }
       }
     }
@@ -286,7 +312,8 @@ export function reconstructDagFromMetaXdr(
   metaXdr: string,
   txHash: string,
   ledger: number,
-  timestamp: number
+  timestamp: number,
+  authAddresses?: string[]
 ): ExecutionDag | null {
   // ── 1. Decode TransactionMeta ──────────────────────────────────────────
   let meta: xdr.TransactionMeta;
@@ -451,7 +478,7 @@ export function reconstructDagFromMetaXdr(
   const hasReentrancy = reentrancyDetails.length > 0;
 
   // Auth tracing: correlate authorization entries with nodes.
-  const authTraces = extractAuthTraces(metaXdr, nodes);
+  const authTraces = extractAuthTraces(metaXdr, nodes, authAddresses);
 
   // Merge any additional auth traces from the node-level authorizedBy.
   for (const node of nodes) {

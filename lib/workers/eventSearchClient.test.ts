@@ -227,4 +227,10 @@ describe("useEventSearch", () => {
     expect(result.current.results).toEqual([]);
     expect(mockSearch).not.toHaveBeenCalled();
   });
+
+  it("reports isFallback=false when Worker is available", async () => {
+    const { result } = renderHook(() => useEventSearch());
+
+    expect(result.current.isFallback).toBe(false);
+  });
 });

@@ -67,6 +67,7 @@ export function DashboardClient({
     isSearching,
     isIndexed,
     error: searchError,
+    isFallback,
     search: clientSearch,
     clearResults: clearClientSearch,
     buildIndex,
@@ -329,6 +330,11 @@ export function DashboardClient({
           </div>
           {searchError && (
             <p className="text-xs text-destructive">{searchError}</p>
+          )}
+          {isFallback && (
+            <p className="text-xs text-muted-foreground">
+              Running search on main thread (Web Worker unavailable) — results may be slower.
+            </p>
           )}
 
           <FilterBuilder

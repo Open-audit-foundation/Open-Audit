@@ -6,8 +6,8 @@
  * multiple contract events, all sharing one call tree).
  */
 
-import { db } from "./client";
-import type { ExecutionDag, ReentrancyInfo, AuthTrace } from "../dag/types";
+import { db } from "../db/client";
+import type { ExecutionDag, ReentrancyInfo, AuthTrace } from "./types";
 
 /**
  * Persist an ExecutionDag to the database.
