@@ -489,7 +489,7 @@ export function DashboardClient({
             </div>
           </div>
           <a
-            href="https://github.com/your-org/open-audit/blob/main/CONTRIBUTING.md"
+            href="https://github.com/Open-audit-foundation/Open-Audit/blob/main/CONTRIBUTING.md"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-1.5 whitespace-nowrap text-sm font-medium text-violet-700 hover:underline dark:text-violet-400"

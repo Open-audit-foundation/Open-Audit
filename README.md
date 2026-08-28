@@ -43,7 +43,7 @@ Smart contracts on Stellar/Soroban emit events as cryptic, hex-encoded binary da
 ### Installation
 
 ```bash
-git clone https://github.com/your-org/open-audit.git
+git clone https://github.com/Open-audit-foundation/Open-Audit.git
 cd open-audit
 npm install
 npm run dev
