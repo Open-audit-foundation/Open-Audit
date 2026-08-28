@@ -53,7 +53,7 @@ Violations can be reported by opening a private GitHub issue or contacting a mai
 
 ### Prerequisites
 
-- Node.js >= 18 (we recommend [nvm](https://github.com/nvm-sh/nvm))
+- Node.js >= 20.9 (we recommend [nvm](https://github.com/nvm-sh/nvm))
 - npm >= 9
 
 ### Install Dependencies

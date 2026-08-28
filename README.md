@@ -37,7 +37,7 @@ Smart contracts on Stellar/Soroban emit events as cryptic, hex-encoded binary da
 
 ### Prerequisites
 
-- Node.js >= 18
+- Node.js >= 20.9
 - npm >= 9
 
 ### Installation
