@@ -21,6 +21,9 @@ import { reconstructDagFromMetaXdr } from "../dag/engine";
 import type { ExecutionDag } from "../dag/types";
 import { eventResponseToRawEvent } from "./events";
 import type { IngestionStateStore } from "./ingestion-state";
+import logger from "../logger";
+
+const indexerLogger = logger.child({ module: "indexer" });
 export { createFileIngestionStateStore, createMemoryIngestionStateStore } from "./ingestion-state";
 
 /** Configuration for the indexer retry mechanism. */
@@ -222,7 +225,7 @@ export async function fetchEventsWithRetry(
         try {
           await setCachedEvents(sorobanRpcUrl, contractIds, startLedger, response);
         } catch (err) {
-          console.warn("[indexer] Failed to set cache:", err);
+          indexerLogger.warn({ err }, "Failed to set cache");
         }
       }
       return response;
@@ -259,8 +262,15 @@ export async function fetchEventsWithRetry(
       const delayMs = retryAfterMs ?? calculateRetryDelay(attempt, retryConfig);
       const cappedDelayMs = Math.min(delayMs, retryConfig.maxDelayMs);
 
-      console.warn(
-        `[indexer] Retriable error hit. Retrying in ${delayMs}ms (attempt ${attempt + 1}/${retryConfig.maxRetries})...`
+      indexerLogger.warn(
+        {
+          err: lastError,
+          delayMs: cappedDelayMs,
+          requestedDelayMs: delayMs,
+          attempt: attempt + 1,
+          maxRetries: retryConfig.maxRetries,
+        },
+        "Retriable error hit; retrying",
       );
 
       // Wait before retrying
@@ -321,11 +331,11 @@ export interface IndexerControls {
  *   startLedger: 1000,
  *   pollIntervalMs: 5000,
  *   onEvents: async (events, cursor) => {
- *     console.log(`Received ${events.length} events`);
+ *     indexerLogger.info({ eventCount: events.length }, "Received events");
  *     // Process events...
  *   },
  *   onError: (error, willRetry) => {
- *     console.error(`Indexer error: ${error.message}`);
+ *     indexerLogger.error({ err: error, willRetry }, "Indexer error");
  *   },
  * });
  *
@@ -360,9 +370,12 @@ export function startEventIndexer(options: IndexerOptions): IndexerControls {
         lastLedger: saved.lastLedger,
         paginationCursor: saved.pagingToken,
       };
-      console.log(
-        `[indexer] Restored cursor from state store at ledger ${cursor.lastLedger}` +
-          (cursor.paginationCursor ? ` (${cursor.paginationCursor})` : "")
+      indexerLogger.info(
+        {
+          lastLedger: cursor.lastLedger,
+          paginationCursor: cursor.paginationCursor,
+        },
+        "Restored cursor from state store",
       );
     }
   })();
@@ -378,7 +391,7 @@ export function startEventIndexer(options: IndexerOptions): IndexerControls {
 
     while (isRunning) {
       try {
-        console.log(`[indexer] Fetching events from ledger ${cursor.lastLedger}...`);
+        indexerLogger.info({ lastLedger: cursor.lastLedger }, "Fetching events");
 
         // Fetch events with retry logic
         const response = await fetchEventsWithRetry(
@@ -393,7 +406,7 @@ export function startEventIndexer(options: IndexerOptions): IndexerControls {
         // Process the events
         const events = response.events || [];
 
-        console.log(`[indexer] Fetched ${events.length} events successfully`);
+        indexerLogger.info({ eventCount: events.length }, "Fetched events successfully");
 
         // Invoke the event handler
         await onEvents(events, cursor);
@@ -414,9 +427,12 @@ export function startEventIndexer(options: IndexerOptions): IndexerControls {
             updatedAt: new Date().toISOString(),
             source: "rpc",
           });
-          console.log(
-            `[indexer] Cursor updated to ledger ${cursor.lastLedger}` +
-              (cursor.paginationCursor ? `, cursor ${cursor.paginationCursor}` : "")
+          indexerLogger.info(
+            {
+              lastLedger: cursor.lastLedger,
+              paginationCursor: cursor.paginationCursor,
+            },
+            "Cursor updated",
           );
         }
 
@@ -437,12 +453,12 @@ export function startEventIndexer(options: IndexerOptions): IndexerControls {
                 { cause: error, retriable: willRetry }
               );
 
-        console.error('[indexer.ts] Error:', err);
+        indexerLogger.error({ err, willRetry }, "Indexer polling error");
 
         if (onError) {
           onError(err, willRetry);
         } else {
-          console.error(`[indexer] Error: ${err.message}`);
+          indexerLogger.error({ err }, "Indexer error");
         }
 
         if (!willRetry) {
@@ -451,18 +467,18 @@ export function startEventIndexer(options: IndexerOptions): IndexerControls {
       }
     }
 
-    console.log("[indexer] Stopped");
+    indexerLogger.info("Stopped");
   }
 
   // Start polling in the background
   poll().catch(function (error) {
-    console.error("[indexer] Fatal error in polling loop:", error);
+    indexerLogger.error({ err: error }, "Fatal error in polling loop");
   });
 
   // Return control interface
   return {
     stop: function () {
-      console.log("[indexer] Stopping...");
+      indexerLogger.info("Stopping");
       isRunning = false;
     },
     getCursor: function () {
@@ -597,7 +613,7 @@ export function startHorizonStreamingIndexer(options: StreamingIndexerOptions): 
         },
         err
       );
-      console.error('[indexer.ts] Error:', xdrError);
+      indexerLogger.error({ err: xdrError }, "XDR parsing error");
       if (onError) onError(xdrError);
     },
   });
@@ -610,11 +626,13 @@ export function startHorizonStreamingIndexer(options: StreamingIndexerOptions): 
       savedState?.pagingToken ??
       (savedState?.lastLedger ? String(savedState.lastLedger) : "now");
 
-    console.log(
-      `[streaming-indexer] Starting Horizon transaction stream from cursor ${streamCursor} ` +
-        `(${workerCount ?? DEFAULT_WORKER_COUNT} consumers)` +
-        (coldStartLookbackLedgers ? `, lookback hint ${coldStartLookbackLedgers} ledgers` : "") +
-        "..."
+    indexerLogger.info(
+      {
+        paginationCursor: streamCursor,
+        workerCount: workerCount ?? DEFAULT_WORKER_COUNT,
+        coldStartLookbackLedgers,
+      },
+      "Starting Horizon transaction stream",
     );
 
     try {
@@ -661,7 +679,7 @@ export function startHorizonStreamingIndexer(options: StreamingIndexerOptions): 
                   }
                 } catch (dagErr) {
                   // Never let DAG errors affect the main event pipeline.
-                  console.warn("[streaming-indexer] DAG reconstruction error:", dagErr);
+                  indexerLogger.warn({ err: dagErr }, "DAG reconstruction error");
                 }
               }
 
@@ -705,7 +723,7 @@ export function startHorizonStreamingIndexer(options: StreamingIndexerOptions): 
                 },
                 err
               );
-              console.error('[indexer.ts] Error:', xdrError);
+              indexerLogger.error({ err: xdrError }, "XDR parsing error");
               if (onError) onError(xdrError);
             }
           },
@@ -715,12 +733,12 @@ export function startHorizonStreamingIndexer(options: StreamingIndexerOptions): 
               { operation: "horizonStream" },
               { retriable: true, cause: err }
             );
-            console.error('[indexer.ts] Error:', networkError);
+            indexerLogger.error({ err: networkError }, "Horizon stream network error");
             if (onError) onError(networkError);
 
             // Auto-reconnect logic
             if (isRunning) {
-              console.log("[streaming-indexer] Attempting to reconnect in 5s...");
+              indexerLogger.info({ delayMs: 5000 }, "Attempting to reconnect");
               setTimeout(startStream, 5000);
             }
           },
@@ -731,7 +749,7 @@ export function startHorizonStreamingIndexer(options: StreamingIndexerOptions): 
         { operation: "startHorizonStream" },
         { retriable: true, cause: err }
       );
-      console.error('[indexer.ts] Error:', networkError);
+      indexerLogger.error({ err: networkError }, "Horizon stream error");
       if (onError) onError(networkError);
       if (isRunning) {
         setTimeout(startStream, 5000);
@@ -749,7 +767,7 @@ export function startHorizonStreamingIndexer(options: StreamingIndexerOptions): 
       }
       // Drain in-flight events, then stop the consumer fleet.
       void pool.stop();
-      console.log("[streaming-indexer] Stopped");
+      indexerLogger.info("Stopped Horizon transaction stream");
     },
     getMetrics: () => pool.metrics(),
   };
