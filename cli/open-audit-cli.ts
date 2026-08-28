@@ -23,6 +23,7 @@ import type {
   Language,
   VersionedTranslationBlueprint,
 } from "../lib/translator/types";
+import { version as packageVersion } from "../package.json";
 
 // ============================================================================
 // CLI Configuration
@@ -32,7 +33,7 @@ const program = new Command();
 
 program
   .name("open-audit-cli")
-  .version("1.0.0")
+  .version(packageVersion)
   .description(
     "Standalone CLI for testing Open-Audit translation registry blueprints offline"
   )
