@@ -2,11 +2,23 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateApiKey } from "@/lib/auth/apiKey";
 import { checkRateLimit } from "@/lib/auth/rateLimit";
 
-// Routes that require an API key
 const PROTECTED_PREFIXES = ["/api/"];
 
-// Routes that are public even under /api/
-const PUBLIC_ROUTES = new Set(["/api/ingest-historical/openapi"]);
+const PUBLIC_ROUTES = new Set([
+  "/api/ingest-historical/openapi",
+  "/api/v1/stats",
+  "/api/health",
+  "/api/status",
+]);
+
+function extractApiKey(request: NextRequest): string {
+  const authHeader = request.headers.get("authorization");
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    return authHeader.slice(7);
+  }
+  const xApiKey = request.headers.get("x-api-key");
+  return xApiKey ?? "";
+}
 
 export async function middleware(request: NextRequest): Promise<NextResponse> {
   const { pathname } = request.nextUrl;
@@ -17,13 +29,23 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
 
   if (!isProtected) return NextResponse.next();
 
-  const rawKey = request.headers.get("x-api-key") ?? "";
+  const rawKey = extractApiKey(request);
   const record = validateApiKey(rawKey);
 
   if (!record) {
     return NextResponse.json(
-      { error: "Unauthorized", message: "A valid API key is required." },
-      { status: 401 }
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Invalid or missing API key.",
+        },
+      },
+      {
+        status: 401,
+        headers: {
+          "WWW-Authenticate": 'Bearer realm="api"',
+        },
+      }
     );
   }
 
@@ -36,8 +58,10 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   if (!rl.allowed) {
     return NextResponse.json(
       {
-        error: "Too Many Requests",
-        message: "Rate limit exceeded. Check the Retry-After header.",
+        error: {
+          code: "TOO_MANY_REQUESTS",
+          message: "Rate limit exceeded. Check the Retry-After header.",
+        },
       },
       {
         status: 429,

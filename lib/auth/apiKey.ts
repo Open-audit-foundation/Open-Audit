@@ -1,6 +1,5 @@
-import { createHash } from "crypto";
+import { createHash, randomBytes } from "crypto";
 
-// Developer tiers with their rate limits (requests per minute)
 export type Tier = "free" | "partner";
 
 export interface ApiKeyRecord {
@@ -9,19 +8,25 @@ export interface ApiKeyRecord {
   appName: string;
 }
 
+const API_KEY_PREFIX = "oa_live";
+const KEY_ENTROPY_BYTES = 24;
+
 export function hashKey(rawKey: string): string {
   return createHash("sha256").update(rawKey).digest("hex");
 }
 
-/**
- * Loads API key records from the OA_API_KEYS env var.
- *
- * Format: comma-separated entries of "hashedKey:tier:appName"
- * e.g. OA_API_KEYS="abc123...:free:my-app,def456...:partner:big-client"
- *
- * In practice you'd back this with a database. This is the lightweight
- * env-based version that's easy to operate without standing up a DB.
- */
+export function validateApiKeyFormat(key: string): boolean {
+  const expectedLength = API_KEY_PREFIX.length + 1 + KEY_ENTROPY_BYTES * 2;
+  return key.startsWith(`${API_KEY_PREFIX}_`) && key.length === expectedLength;
+}
+
+export function generateApiKey(): { key: string; hash: string; prefix: string } {
+  const entropy = randomBytes(KEY_ENTROPY_BYTES).toString("hex");
+  const fullKey = `${API_KEY_PREFIX}_${entropy}`;
+  const hash = hashKey(fullKey);
+  return { key: fullKey, hash, prefix: API_KEY_PREFIX };
+}
+
 function loadKeyRegistry(): ApiKeyRecord[] {
   const raw = process.env.OA_API_KEYS ?? "";
   if (!raw) return [];
@@ -40,12 +45,8 @@ function loadKeyRegistry(): ApiKeyRecord[] {
     });
 }
 
-/**
- * Validates an incoming API key header value.
- * Returns the matching record if valid, null otherwise.
- */
 export function validateApiKey(rawKey: string): ApiKeyRecord | null {
-  if (!rawKey || !rawKey.startsWith("oa_live_")) return null;
+  if (!rawKey || !validateApiKeyFormat(rawKey)) return null;
 
   const hashed = hashKey(rawKey);
   const registry = loadKeyRegistry();

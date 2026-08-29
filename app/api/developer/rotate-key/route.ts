@@ -7,13 +7,11 @@
  * In production this would persist to a DB. Right now it demonstrates
  * the key format and hashing so operators can update their env.
  */
-import { randomBytes } from "crypto";
 import { NextResponse } from "next/server";
-import { hashKey } from "@/lib/auth/apiKey";
+import { generateApiKey } from "@/lib/auth/apiKey";
 
 export async function POST(): Promise<NextResponse> {
-  const raw = `oa_live_${randomBytes(24).toString("hex")}`;
-  const hashed = hashKey(raw);
+  const { key: raw, hash: hashed } = generateApiKey();
 
   return NextResponse.json({
     key: raw,

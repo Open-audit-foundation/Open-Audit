@@ -6,6 +6,8 @@ info:
 servers:
   - url: http://localhost:3000
     description: Local development server
+security:
+  - BearerAuth: []
 paths:
   /api/ingest-historical:
     post:
@@ -84,20 +86,175 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  error:
-                    type: string
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized - Invalid or missing API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnauthorizedError'
+          headers:
+            WWW-Authenticate:
+              schema:
+                type: string
+              description: Bearer realm indication
+        '429':
+          description: Too Many Requests - Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TooManyRequestsError'
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds to wait before retrying
+            X-RateLimit-Limit:
+              schema:
+                type: integer
+              description: Request limit per window
+            X-RateLimit-Remaining:
+              schema:
+                type: integer
+              description: Remaining requests in current window
         '500':
           description: Internal server error
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                  details:
-                    type: string
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/events/export:
+    get:
+      summary: Export translated events
+      description: Streams translated contract events as CSV, JSON, or NDJSON.
+      operationId: exportEvents
+      parameters:
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [csv, json, ndjson]
+            default: csv
+          description: Export file format
+        - name: contractId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Soroban contract address filter
+        - name: startLedger
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Starting ledger sequence (inclusive)
+        - name: endLedger
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Ending ledger sequence (inclusive)
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 100000
+            maximum: 1000000
+          description: Maximum rows to export
+      responses:
+        '200':
+          description: Export file stream
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+            application/x-ndjson:
+              schema:
+                type: string
+                format: binary
+        '401':
+          description: Unauthorized - Invalid or missing API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnauthorizedError'
+        '429':
+          description: Too Many Requests - Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TooManyRequestsError'
 components:
-  schemas: {}
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: oa_live_<hex>
+      description: |
+        API key authentication using the standard Authorization: Bearer header.
+        Keys have the format `oa_live_<48 hex chars>`.
+        Fallback: the legacy `x-api-key` header is also accepted.
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          oneOf:
+            - type: string
+            - $ref: '#/components/schemas/ErrorObject'
+        details:
+          type: string
+    ErrorObject:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code
+        message:
+          type: string
+          description: Human-readable error message
+    UnauthorizedError:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+              enum: [UNAUTHORIZED]
+            message:
+              type: string
+              example: "Invalid or missing API key."
+    TooManyRequestsError:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+              enum: [TOO_MANY_REQUESTS]
+            message:
+              type: string
+              example: "Rate limit exceeded. Check the Retry-After header."
