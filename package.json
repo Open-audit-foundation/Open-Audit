@@ -43,7 +43,9 @@
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "db:seed": "ts-node prisma/seed.ts",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "retention": "tsx scripts/retention.ts",
+    "retention:dry-run": "tsx scripts/retention.ts --dry-run"
   },
   "dependencies": {
     "@clickhouse/client": "^1.0.0",

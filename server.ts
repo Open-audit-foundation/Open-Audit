@@ -31,6 +31,8 @@ import { createEventWebSocketServer } from "./lib/server/ws-server";
 import { startHorizonStreamingIndexer } from "./lib/stellar/indexer";
 import { getNetworkConfig } from "./lib/stellar/client";
 import { translateEvent } from "./lib/translator/registry";
+import { persistExecutionDag } from "./lib/dag/persistence";
+import { startRetentionScheduler } from "./lib/retention/scheduler";
 
 const dev = process.env.NODE_ENV !== "production";
 const port = parseInt(process.env.PORT ?? "3000", 10);
@@ -40,6 +42,9 @@ const handle = app.getRequestHandler();
 
 app.prepare().then(async () => {
   await startTelemetry();
+
+  // Start the data-retention scheduler (no-op when RETENTION_ENABLED=false).
+  startRetentionScheduler();
 
   const httpServer = createServer((req, res) => {
     applyContentSecurityPolicy(res);
