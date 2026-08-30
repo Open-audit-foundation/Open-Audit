@@ -1,6 +1,6 @@
 "use client"
 
-import { Code, ExternalLink } from "lucide-react"
+import { Code, ExternalLink, Loader2, AlertCircle } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -13,6 +13,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import type { TranslatedEvent } from "@/lib/translator/types"
 import { formatRelativeTime } from "@/lib/translator/decode"
+import { isIpfsPointer, useIpfsResolver } from "@/lib/hooks/useIpfsResolver"
 
 interface EventDetailsModalProps {
   event: TranslatedEvent | null
@@ -46,10 +47,18 @@ export function EventDetailsModal({
   open,
   onOpenChange,
 }: EventDetailsModalProps): React.JSX.Element {
+  const offloaded = event ? isIpfsPointer(event.raw.data) : false
+  const { payload: resolvedIpfs, loading: ipfsLoading, error: ipfsError } = useIpfsResolver(
+    offloaded ? event!.raw.data : null
+  )
+
   if (!event) return <></>
 
   const horizonUrl = `https://horizon-testnet.stellar.org/transactions/${event.raw.txHash}`
   const isTranslated = event.status === "translated"
+  const displayTopics = resolvedIpfs?.topics ?? event.raw.topics
+  const displayData = resolvedIpfs?.data ?? event.raw.data
+  const ipfsCid = offloaded ? event.raw.data.replace(/^ipfs:\/\//, "") : null
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -128,12 +137,24 @@ export function EventDetailsModal({
                 value={new Date(event.raw.timestamp * 1000).toISOString()}
               />
 
+              {offloaded && (
+                <div className="flex items-center gap-2 rounded-lg border border-violet-500/30 bg-violet-500/5 px-3 py-2 text-xs text-violet-600 dark:text-violet-400">
+                  {ipfsLoading && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
+                  {ipfsError && <AlertCircle className="h-3.5 w-3.5" aria-hidden="true" />}
+                  <span>
+                    {ipfsLoading && "Resolving offloaded payload from IPFS…"}
+                    {ipfsError && "IPFS content unavailable — showing the stored reference below."}
+                    {!ipfsLoading && !ipfsError && `Offloaded to IPFS (CID: ${ipfsCid})`}
+                  </span>
+                </div>
+              )}
+
               <div className="space-y-1">
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Topics ({event.raw.topics.length})
+                  Topics ({displayTopics.length})
                 </p>
                 <div className="space-y-1">
-                  {event.raw.topics.map(function (topic, index) {
+                  {displayTopics.map(function (topic, index) {
                     return (
                       <p
                         key={index}
@@ -150,7 +171,7 @@ export function EventDetailsModal({
               <div className="space-y-1">
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Data</p>
                 <pre className="text-sm break-all rounded bg-black text-green-400 px-3 py-4 font-mono overflow-x-auto">
-                  {event.raw.data}
+                  {displayData}
                 </pre>
               </div>
 

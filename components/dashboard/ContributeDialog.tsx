@@ -97,7 +97,7 @@ export function ContributeDialog({
           <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t">
             <Button className="flex-1" asChild>
               <a
-                href="https://github.com/your-org/open-audit/blob/main/CONTRIBUTING.md"
+                href="https://github.com/Open-audit-foundation/Open-Audit/blob/main/CONTRIBUTING.md"
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -107,7 +107,7 @@ export function ContributeDialog({
             </Button>
             <Button variant="outline" className="flex-1" asChild>
               <a
-                href="https://github.com/your-org/open-audit/issues"
+                href="https://github.com/Open-audit-foundation/Open-Audit/issues"
                 target="_blank"
                 rel="noopener noreferrer"
               >

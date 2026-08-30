@@ -2,6 +2,15 @@
   "name": "open-audit",
   "version": "0.1.0",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Open-audit-foundation/Open-Audit.git"
+  },
+  "homepage": "https://github.com/Open-audit-foundation/Open-Audit#readme",
+  "bugs": {
+    "url": "https://github.com/Open-audit-foundation/Open-Audit/issues"
+  },
+  "author": "Open audit",
   "scripts": {
     "postinstall": "prisma generate",
     "dev": "next dev",
@@ -43,7 +52,9 @@
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "db:seed": "ts-node prisma/seed.ts",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "retention": "tsx scripts/retention.ts",
+    "retention:dry-run": "tsx scripts/retention.ts --dry-run"
   },
   "dependencies": {
     "@clickhouse/client": "^1.0.0",
@@ -94,6 +105,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.6",
+    "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/bull": "^4.10.4",

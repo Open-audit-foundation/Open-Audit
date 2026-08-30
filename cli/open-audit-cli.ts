@@ -17,6 +17,7 @@ import { Command } from "commander";
 import { readFileSync, existsSync } from "fs";
 import { resolve } from "path";
 import { parse as parseYaml } from "yaml";
+import { version } from "../package.json";
 import type {
   RawEvent,
   TranslationBlueprint,
@@ -38,7 +39,7 @@ const program = new Command();
 
 program
   .name("open-audit-cli")
-  .version(packageVersion)
+  .version(version)
   .description(
     "Standalone CLI for testing Open-Audit translation registry blueprints offline"
   )

@@ -34,6 +34,51 @@ interface EventFeedTableProps {
   density: Density;
   onToggleColumn: (col: keyof ColumnVisibility) => void;
   onDensityChange: (d: Density) => void;
+  /**
+   * Active client-side search query. When set, matching substrings in the
+   * translated description and event type are marked, so the user can see
+   * *why* a row matched rather than only that it did.
+   */
+  highlightQuery?: string;
+}
+
+/** Escapes regex metacharacters so a query like `transfer(` cannot throw. */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Splits `text` on case-insensitive occurrences of `query`, wrapping matches
+ * in <mark>.
+ *
+ * Returns the plain string when there is no query, so ordinary renders do no
+ * extra work and emit no wrapper elements.
+ */
+function highlightMatches(
+  text: string | null | undefined,
+  query: string | null | undefined
+): React.ReactNode {
+  if (!text) return text ?? null;
+
+  const trimmed = query?.trim();
+  if (!trimmed) return text;
+
+  const parts = text.split(new RegExp(`(${escapeRegExp(trimmed)})`, "ig"));
+  if (parts.length === 1) return text;
+
+  return parts.map((part, index) =>
+    part.toLowerCase() === trimmed.toLowerCase() ? (
+      <mark
+        key={index}
+        data-testid="search-highlight"
+        className="rounded bg-yellow-200 px-0.5 text-inherit dark:bg-yellow-500/40"
+      >
+        {part}
+      </mark>
+    ) : (
+      part
+    )
+  );
 }
 
 function StatusBadge({ status }: { status: TranslatedEvent["status"] }): React.JSX.Element {
@@ -88,6 +133,7 @@ export function EventFeedTable({
   density,
   onToggleColumn,
   onDensityChange,
+  highlightQuery,
 }: EventFeedTableProps): React.JSX.Element {
   const [detailsEvent, setDetailsEvent] = useState<TranslatedEvent | null>(null);
   const [contributeDialogEvent, setContributeDialogEvent] = useState<RawEvent | null>(null);
@@ -221,10 +267,12 @@ export function EventFeedTable({
                             <div className="space-y-0.5">
                               {event.eventType && (
                                 <span className="text-xs font-medium text-violet-600 dark:text-violet-400 uppercase tracking-wide">
-                                  {event.eventType}
+                                  {highlightMatches(event.eventType, highlightQuery)}
                                 </span>
                               )}
-                              <p className="text-sm">{event.description}</p>
+                              <p className="text-sm">
+                                {highlightMatches(event.description, highlightQuery)}
+                              </p>
                             </div>
                           ) : (
                             <div className="space-y-0.5">
