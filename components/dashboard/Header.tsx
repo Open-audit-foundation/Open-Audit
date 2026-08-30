@@ -61,7 +61,7 @@ export function Header(): React.JSX.Element {
             </Button>
             <Button variant="ghost" size="sm" asChild>
               <a
-                href="https://github.com/your-org/open-audit"
+                href="https://github.com/Open-audit-foundation/Open-Audit"
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -71,7 +71,7 @@ export function Header(): React.JSX.Element {
             </Button>
             <Button variant="ghost" size="sm" asChild>
               <a
-                href="https://github.com/your-org/open-audit/blob/main/CONTRIBUTING.md"
+                href="https://github.com/Open-audit-foundation/Open-Audit/blob/main/CONTRIBUTING.md"
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -156,7 +156,7 @@ export function Header(): React.JSX.Element {
             </div>
             <Button variant="ghost" size="sm" className="w-full justify-start" asChild>
               <a
-                href="https://github.com/your-org/open-audit"
+                href="https://github.com/Open-audit-foundation/Open-Audit"
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={toggleMobileMenu}
@@ -167,7 +167,7 @@ export function Header(): React.JSX.Element {
             </Button>
             <Button variant="ghost" size="sm" className="w-full justify-start" asChild>
               <a
-                href="https://github.com/your-org/open-audit/blob/main/CONTRIBUTING.md"
+                href="https://github.com/Open-audit-foundation/Open-Audit/blob/main/CONTRIBUTING.md"
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={toggleMobileMenu}
