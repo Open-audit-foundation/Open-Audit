@@ -57,7 +57,7 @@ export default function GraphPage(): React.JSX.Element {
         <p className="mt-8 text-sm text-muted-foreground">
           Check back soon for updates. Follow our{" "}
           <a
-            href="https://github.com/your-org/open-audit"
+            href="https://github.com/Open-audit-foundation/Open-Audit"
             target="_blank"
             rel="noopener noreferrer"
             className="underline hover:text-foreground transition-colors"
