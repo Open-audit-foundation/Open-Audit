@@ -61,6 +61,21 @@ export function DashboardClient({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Client-side full-text search over the events already loaded in the
+  // browser, via the Web Worker inverted index. Distinct from the contract-ID
+  // lookup below, which hits the server-side historical API.
+  const {
+    results: searchHits,
+    isSearching,
+    isIndexed,
+    error: searchError,
+    isFallback,
+    search: clientSearch,
+    clearResults: clearClientSearch,
+    buildIndex,
+    addEvents: addSearchEvents,
+  } = useEventSearch({ debounceMs: 300 });
+
   const { language } = useLanguage();
   const { network } = useNetwork();
   const { prefs, ready, update, toggleColumn, toggleFavorite } =
@@ -97,34 +112,39 @@ export function DashboardClient({
     [liveEvents, translatedRawEvents]
   );
 
-  const filteredEvents = useMemo(
-    () =>
-      allEvents.filter((event) => {
-        if (filters.contractId && event.raw.contractId !== filters.contractId) {
-          return false;
-        }
+  // Search index lifecycle.
+  //
+  // Build once from whatever is already loaded, then feed the worker only the
+  // events it has not seen. Rebuilding the whole index per arrival would cost
+  // O(total events) on every WebSocket message, which does not hold up at feed
+  // volume — the worker's ADD_EVENTS protocol exists precisely to avoid that.
+  //
+  // Tracking indexed IDs in a ref (rather than diffing arrays by identity)
+  // keeps this correct when the same event arrives twice, or when a re-render
+  // produces new object identities for events already in the index.
+  const indexedIdsRef = useRef<Set<string>>(new Set());
+  const indexBuiltRef = useRef(false);
 
-        if (filters.eventType) {
-          const normalizedEventType = filters.eventType.toLowerCase();
-          const translatedType = event.eventType?.toLowerCase() ?? "";
-          if (!translatedType.includes(normalizedEventType)) {
-            return false;
-          }
-        }
+  useEffect(() => {
+    if (allEvents.length === 0) return;
 
-        if (filters.minAmount !== undefined) {
-          const amount = Number(
-            event.raw.data
-              ? BigInt("0x" + event.raw.data.slice(2).replace(/[^0-9a-fA-F]/g, "0"))
-              : BigInt(0)
-          );
-          if (Number(amount) < filters.minAmount) {
-            return false;
-          }
-        }
-      }
+    if (!indexBuiltRef.current) {
+      buildIndex(allEvents);
+      indexBuiltRef.current = true;
+      indexedIdsRef.current = new Set(allEvents.map((event) => event.raw.id));
+      return;
     }
-  }, [allEvents, buildIndex, addSearchEvents, liveEvents]);
+
+    const unindexed = allEvents.filter(
+      (event) => !indexedIdsRef.current.has(event.raw.id)
+    );
+    if (unindexed.length === 0) return;
+
+    addSearchEvents(unindexed);
+    for (const event of unindexed) {
+      indexedIdsRef.current.add(event.raw.id);
+    }
+  }, [allEvents, buildIndex, addSearchEvents]);
 
   // When client search hits come back, filter the event list to show only matches.
   const filteredEvents = useMemo(() => {
@@ -182,10 +202,11 @@ export function DashboardClient({
     (event: TranslatedEvent): void => {
       if (filters.contractId && event.raw.contractId !== filters.contractId) return;
       setLiveEvents((prev) => [event, ...prev]);
-      // Incrementally add the new event to the search index.
-      addSearchEvents([event]);
+      // Indexing is deliberately NOT done here. The effect above owns it and
+      // tracks which ids are already indexed; adding here as well would send
+      // every streamed event to the worker twice.
     },
-    [filters.contractId, addSearchEvents]
+    [filters.contractId]
   );
 
   const handleSearch = useCallback(
@@ -310,11 +331,16 @@ export function DashboardClient({
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
             <input
               type="text"
-              placeholder="Full-text search events (powered by Web Worker)..."
+              placeholder={
+                isIndexed
+                  ? "Full-text search events (powered by Web Worker)..."
+                  : "Building search index…"
+              }
               value={searchValue}
               onChange={(e) => handleClientSearch(e.target.value)}
               className="h-10 w-full rounded-lg border bg-background pl-9 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-ring font-mono"
               aria-label="Full-text event search"
+              data-indexed={isIndexed ? "true" : "false"}
             />
             {isSearching && (
               <div className="absolute right-3 top-1/2 -translate-y-1/2">
@@ -469,6 +495,7 @@ export function DashboardClient({
             density={prefs.density}
             onToggleColumn={toggleColumn}
             onDensityChange={(d) => update({ density: d })}
+            highlightQuery={searchValue}
           />
         )}
       </section>
