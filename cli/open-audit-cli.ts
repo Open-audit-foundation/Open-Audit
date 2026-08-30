@@ -25,6 +25,12 @@ import type {
   VersionedTranslationBlueprint,
 } from "../lib/translator/types";
 
+// Resolve version from package.json — works from both cli/ (tsx dev) and dist/cli/ (built)
+const pkgPath = existsSync(resolve(__dirname, "..", "package.json"))
+  ? resolve(__dirname, "..", "package.json")
+  : resolve(__dirname, "..", "..", "package.json");
+const packageVersion = JSON.parse(readFileSync(pkgPath, "utf-8")).version;
+
 // ============================================================================
 // CLI Configuration
 // ============================================================================
