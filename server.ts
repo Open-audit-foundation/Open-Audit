@@ -31,8 +31,8 @@ import { createEventWebSocketServer } from "./lib/server/ws-server";
 import { startHorizonStreamingIndexer } from "./lib/stellar/indexer";
 import { getNetworkConfig } from "./lib/stellar/client";
 import { translateEvent } from "./lib/translator/registry";
+import { processEventForIpfs } from "./lib/ipfs/offloader";
 import { persistExecutionDag } from "./lib/dag/persistence";
-import { startRetentionScheduler } from "./lib/retention/scheduler";
 
 const dev = process.env.NODE_ENV !== "production";
 const port = parseInt(process.env.PORT ?? "3000", 10);
@@ -62,6 +62,10 @@ app.prepare().then(async () => {
     contractIds: process.env.CONTRACT_IDS ? process.env.CONTRACT_IDS.split(",") : undefined,
     onEvent: async (rawEvent) => {
       console.log(`[Indexer] New event: ${rawEvent.id} from contract ${rawEvent.contractId}`);
+
+      const processed = await processEventForIpfs(rawEvent);
+      rawEvent.data = processed.data;
+      rawEvent.topics = processed.topics;
 
       const translated = recordTranslationDuration(rawEvent.contractId, () => translateEvent(rawEvent));
       eventsIngestedTotal
