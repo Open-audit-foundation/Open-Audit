@@ -1067,7 +1067,7 @@ Currently, the health check reads only one heartbeat key. To support multiple wo
 For issues, questions, or feature requests:
 
 1. **Documentation:** Review this guide and related docs
-2. **GitHub Issues:** https://github.com/your-org/open-audit/issues
+2. **GitHub Issues:** https://github.com/Open-audit-foundation/Open-Audit/issues
 3. **Discord:** https://discord.gg/your-server
 4. **Email:** support@your-domain.com
 

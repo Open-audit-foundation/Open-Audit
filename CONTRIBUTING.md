@@ -40,7 +40,7 @@ Violations can be reported by opening a private GitHub issue or contacting a mai
    ```
 3. **Add the upstream remote** so you can pull in future changes:
    ```bash
-   git remote add upstream https://github.com/your-org/open-audit.git
+   git remote add upstream https://github.com/Open-audit-foundation/Open-Audit.git
    ```
 4. **Create a feature branch** (never commit directly to `main`):
    ```bash
