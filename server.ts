@@ -43,6 +43,9 @@ const handle = app.getRequestHandler();
 app.prepare().then(async () => {
   await startTelemetry();
 
+  // Start the data-retention scheduler (no-op when RETENTION_ENABLED=false).
+  startRetentionScheduler();
+
   const httpServer = createServer((req, res) => {
     applyContentSecurityPolicy(res);
     const parsedUrl = parse(req.url ?? "/", true);
