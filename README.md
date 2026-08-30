@@ -421,6 +421,86 @@ if (result.success) {
 
 ---
 
+## 🔐 API Authentication
+
+Open-Audit protects all `/api/*` routes via **Edge Middleware** using the standard `Authorization: Bearer <API_KEY>` header. Authentication and rate-limiting execute once at the edge, before any route handler is invoked.
+
+### Standard Header
+
+```
+Authorization: Bearer oa_live_<48_hex_chars>
+```
+
+### curl Example
+
+```bash
+# Fetch translated events export
+curl -H "Authorization: Bearer oa_live_a1b2c3d4e5f6..." \
+  "http://localhost:3000/api/v1/events/export?format=json&limit=100"
+
+# Ingest historical range
+curl -X POST \
+  -H "Authorization: Bearer oa_live_a1b2c3d4e5f6..." \
+  -H "Content-Type: application/json" \
+  -d '{"contractId":"CABC...","startSequence":1000,"endSequence":5000}' \
+  "http://localhost:3000/api/ingest-historical"
+```
+
+### Error Response Format
+
+Missing, malformed, or invalid keys return a **401** with a consistent JSON shape:
+
+```json
+{
+  "error": "Unauthorized",
+  "message": "Invalid or missing API key"
+}
+```
+
+Rate-limit violations return a **429**:
+
+```json
+{
+  "error": "Too Many Requests",
+  "message": "Rate limit exceeded. Check the Retry-After header."
+}
+```
+
+### Public (Exempt) Routes
+
+The following endpoints bypass authentication intentionally:
+
+| Path | Purpose |
+|---|---|
+| `/api/v1/stats` | Public aggregate statistics |
+| `/api/health` | Liveness probe |
+| `/api/status` | Full system status dashboard data |
+| `/api/ingest-historical/openapi` | OpenAPI spec self-documentation |
+
+### Key Management
+
+Generate a new API key pair:
+
+```bash
+curl -X POST http://localhost:3000/api/developer/rotate-key
+# Response: { "key": "oa_live_<hex>", "hashed": "<sha256_hex>", "note": "..." }
+```
+
+Store the `hashed` value in the `OA_API_KEYS` environment variable as a comma-separated registry:
+
+```
+OA_API_KEYS="<hashed1>:free:my-wallet,<hashed2>:partner:analytics-bot"
+```
+
+Supported tiers and their per-minute limits:
+
+| Tier | Requests / Minute |
+|---|---|
+| `free` | 60 |
+| `partner` | 5,000 |
+
+---
+
 ## Contributing
 
 We welcome contributions of all sizes! See [CONTRIBUTING.md](CONTRIBUTING.md) to get started.

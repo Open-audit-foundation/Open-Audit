@@ -35,10 +35,8 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   if (!record) {
     return NextResponse.json(
       {
-        error: {
-          code: "UNAUTHORIZED",
-          message: "Invalid or missing API key.",
-        },
+        error: "Unauthorized",
+        message: "Invalid or missing API key",
       },
       {
         status: 401,
@@ -58,10 +56,8 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   if (!rl.allowed) {
     return NextResponse.json(
       {
-        error: {
-          code: "TOO_MANY_REQUESTS",
-          message: "Rate limit exceeded. Check the Retry-After header.",
-        },
+        error: "Too Many Requests",
+        message: "Rate limit exceeded. Check the Retry-After header.",
       },
       {
         status: 429,

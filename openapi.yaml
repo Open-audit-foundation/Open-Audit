@@ -207,54 +207,36 @@ components:
       type: object
       properties:
         error:
-          oneOf:
-            - type: string
-            - $ref: '#/components/schemas/ErrorObject'
-        details:
           type: string
-    ErrorObject:
-      type: object
-      required:
-        - code
-        - message
-      properties:
-        code:
-          type: string
-          description: Machine-readable error code
+          description: Error type or classification
         message:
           type: string
-          description: Human-readable error message
+          description: Human-readable error description
+        details:
+          type: string
     UnauthorizedError:
       type: object
       required:
         - error
+        - message
       properties:
         error:
-          type: object
-          required:
-            - code
-            - message
-          properties:
-            code:
-              type: string
-              enum: [UNAUTHORIZED]
-            message:
-              type: string
-              example: "Invalid or missing API key."
+          type: string
+          enum: ["Unauthorized"]
+          example: "Unauthorized"
+        message:
+          type: string
+          example: "Invalid or missing API key"
     TooManyRequestsError:
       type: object
       required:
         - error
+        - message
       properties:
         error:
-          type: object
-          required:
-            - code
-            - message
-          properties:
-            code:
-              type: string
-              enum: [TOO_MANY_REQUESTS]
-            message:
-              type: string
-              example: "Rate limit exceeded. Check the Retry-After header."
+          type: string
+          enum: ["Too Many Requests"]
+          example: "Too Many Requests"
+        message:
+          type: string
+          example: "Rate limit exceeded. Check the Retry-After header."
