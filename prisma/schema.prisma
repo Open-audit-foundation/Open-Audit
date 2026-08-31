@@ -121,3 +121,18 @@ model WebhookDelivery {
   @@index([eventId])
   @@index([subscriptionId, eventId])
 }
+
+// Database-backed API Key store for v1 REST API authentication
+model ApiKey {
+  id          String   @id @default(cuid())
+  hashedKey   String   @unique
+  appName     String
+  owner       String
+  tier        String   // "free" | "partner"
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  lastUsedAt  DateTime?
+
+  @@index([hashedKey])
+  @@index([isActive])
+}
