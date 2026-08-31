@@ -118,24 +118,39 @@ model ArchiveLog {
 // Configuration for reconciliation
 model ReconciliationConfig {
   id              String   @id @default("current")
-  
+
   // Cron schedule (e.g., "0 2 * * *" for daily at 2 AM)
   cronSchedule    String   @default("0 2 * * *")
-  
+
   // Batch size for processing
   batchSize       Int      @default(1000)
-  
+
   // Number of days to look back for reconciliation
   lookbackDays    Int      @default(7)
-  
+
   // Whether to auto-fix detected issues
   autoFix         Boolean  @default(false)
-  
+
   // Alert threshold (percentage of discrepancies)
   alertThreshold  Float    @default(0.1) // 0.1% = 1 in 1000
-  
+
   // Enable/disable reconciliation
   enabled         Boolean  @default(true)
-  
+
   updatedAt       DateTime @updatedAt
+}
+
+// Database-backed API Key store for v1 REST API authentication
+model ApiKey {
+  id          String   @id @default(cuid())
+  hashedKey   String   @unique
+  appName     String
+  owner       String
+  tier        String   // "free" | "partner"
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  lastUsedAt  DateTime?
+
+  @@index([hashedKey])
+  @@index([isActive])
 }
