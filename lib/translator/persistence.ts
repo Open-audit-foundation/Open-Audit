@@ -2,76 +2,186 @@
  * Event Translator with Database Persistence
  *
  * This module handles the translation of raw events into human-readable
- * descriptions and saves them to the database with reconciliation metadata.
+ * descriptions and saves them to the database.
  */
 
+
 import type { RawEvent, TranslatedEvent } from "./types";
-import { translateEvent } from "./registry";
-import { batchUpsertEvents } from "@/lib/db/utils";
-import { db } from "@/lib/db/client";
-import { triggerWebhooksForEvent } from "@/lib/jobs/queue";
+import { translateWithCache } from "./registry";
+import { db } from "../db/client";
+import { triggerWebhooksForEvent } from "../jobs/queue";
+import { OpenAuditError } from "../errors";
+import { setCachedTranslation, isRedisEnabled } from "../cache/redisCache";
+
+const DEFAULT_BATCH_SIZE = 50;
+const DEFAULT_BATCH_CONCURRENCY = 5;
+
+class Semaphore {
+  private activeCount = 0;
+  private readonly queue: Array<() => void> = [];
+
+  constructor(private readonly maxConcurrency: number) {}
+
+  async acquire(): Promise<() => void> {
+    if (this.activeCount >= this.maxConcurrency) {
+      await new Promise<void>((resolve) => this.queue.push(resolve));
+    }
+
+    this.activeCount += 1;
+
+    return () => {
+      this.activeCount -= 1;
+      const next = this.queue.shift();
+      if (next) {
+        next();
+      }
+    };
+  }
+}
+
+function getBatchConcurrency(): number {
+  const rawValue = process.env.BATCH_CONCURRENCY;
+
+  if (!rawValue) {
+    return DEFAULT_BATCH_CONCURRENCY;
+  }
+
+  const parsed = Number.parseInt(rawValue, 10);
+
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    console.warn(
+      `[translator] Invalid BATCH_CONCURRENCY value "${rawValue}". Falling back to ${DEFAULT_BATCH_CONCURRENCY}.`
+    );
+    return DEFAULT_BATCH_CONCURRENCY;
+  }
+
+  return parsed;
+}
+
+async function mapWithConcurrencyLimit<T, TResult>(
+  items: T[],
+  maxConcurrency: number,
+  mapper: (item: T) => Promise<TResult>
+): Promise<TResult[]> {
+  const semaphore = new Semaphore(Math.max(1, maxConcurrency));
+
+  return Promise.all(
+    items.map(async (item) => {
+      const release = await semaphore.acquire();
+
+      try {
+        return await mapper(item);
+      } finally {
+        release();
+      }
+    })
+  );
+}
+
+interface DeadLetterPayload {
+  errorCode: string;
+  errorMessage: string;
+  errorStack?: string | null;
+  errorContext?: Record<string, unknown> | null;
+}
+
+async function saveDeadLetterEvent(rawEvent: RawEvent, payload: DeadLetterPayload): Promise<void> {
+  try {
+    await db.deadLetterEvent.create({
+      data: {
+        eventId: rawEvent.id,
+        contractId: rawEvent.contractId,
+        ledger: rawEvent.ledger,
+        timestamp: rawEvent.timestamp,
+        txHash: rawEvent.txHash,
+        topics: rawEvent.topics,
+        data: rawEvent.data,
+        errorCode: payload.errorCode,
+        errorMessage: payload.errorMessage,
+        errorStack: payload.errorStack ?? undefined,
+        errorContext: payload.errorContext ?? undefined,
+      },
+    });
+  } catch (dbError) {
+    console.error("[dlq] Failed to save dead letter event:", dbError);
+  }
+}
 
 /**
- * Translates and persists a single event
+ * Translates and persists a single event, offloading bloated data to IPFS.
  */
 export async function translateAndPersistEvent(
   rawEvent: RawEvent
 ): Promise<TranslatedEvent | null> {
+  let translated: TranslatedEvent;
+
   try {
-    const translated = await translateEvent(rawEvent);
+    translated = await translateWithCache(rawEvent);
+  } catch (error) {
+    const errorCode = error instanceof OpenAuditError ? error.code : "INTERNAL_ERROR";
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack ?? null : null;
+    const errorContext = error instanceof OpenAuditError ? error.context : null;
 
-    if (translated) {
-      // Save to database
-      const savedEvent = await db.event.upsert({
-        where: { id: rawEvent.id },
-        update: {
-          description: translated.description,
-          status: translated.status,
-          blueprintName: translated.blueprintName,
-          eventType: translated.eventType,
-          updatedAt: new Date(),
-        },
-        create: {
-          id: rawEvent.id,
-          contractId: rawEvent.contractId,
-          ledger: rawEvent.ledger,
-          timestamp: rawEvent.timestamp,
-          txHash: rawEvent.txHash,
-          topics: rawEvent.topics,
-          data: rawEvent.data,
-          description: translated.description,
-          status: translated.status,
-          blueprintName: translated.blueprintName,
-          eventType: translated.eventType,
-        },
-      });
+    await saveDeadLetterEvent(rawEvent, {
+      errorCode,
+      errorMessage,
+      errorStack,
+      errorContext,
+    });
 
-      // Dispatch webhooks in background (do not block persistence)
-      void triggerWebhooksForEvent({
-        id: savedEvent.id,
-        contractId: savedEvent.contractId,
-        ledger: savedEvent.ledger,
-        timestamp: savedEvent.timestamp,
-        txHash: savedEvent.txHash,
-        topics: savedEvent.topics,
-        data: savedEvent.data,
-        description: savedEvent.description,
-        status: savedEvent.status,
-        blueprintName: savedEvent.blueprintName,
-        eventType: savedEvent.eventType,
-        createdAt: savedEvent.createdAt,
-      });
+    console.error(
+      `[dlq] Unparseable event ${rawEvent.id} persisted to DeadLetterEvent with code=${errorCode}`
+    );
+
+    return null;
+  }
+
+  try {
+    const savedEvent = await db.event.upsert({
+      where: { id: rawEvent.id },
+      update: {
+        description: translated.description,
+        status: translated.status,
+        blueprintName: translated.blueprintName,
+        eventType: translated.eventType,
+        updatedAt: new Date(),
+      },
+      create: {
+        id: rawEvent.id,
+        contractId: rawEvent.contractId,
+        ledger: rawEvent.ledger,
+        timestamp: rawEvent.timestamp,
+        txHash: rawEvent.txHash,
+        topics: rawEvent.topics,
+        data: rawEvent.data,
+        description: translated.description,
+        status: translated.status,
+        blueprintName: translated.blueprintName,
+        eventType: translated.eventType,
+      },
+    });
+
+    // Trigger webhooks for the saved event
+    try {
+      await triggerWebhooksForEvent(savedEvent);
+    } catch (webhookError) {
+      console.error("[webhooks] Failed to trigger webhooks:", webhookError);
+    }
+
+    if (isRedisEnabled()) {
+      await setCachedTranslation(rawEvent, translated);
     }
 
     return translated;
   } catch (error) {
-    console.error(`Failed to translate/persist event ${rawEvent.id}:`, error);
+    console.error(`Failed to persist event ${rawEvent.id}:`, error);
     return null;
   }
 }
 
 /**
- * Batch translates and persists multiple events
+ * Batch translates and persists multiple events with IPFS offloading.
  */
 export async function translateAndPersistBatch(rawEvents: RawEvent[]): Promise<{
   successful: number;
@@ -82,12 +192,17 @@ export async function translateAndPersistBatch(rawEvents: RawEvent[]): Promise<{
   let failed = 0;
   const translated: TranslatedEvent[] = [];
 
-  // Process in smaller batches to avoid overwhelming the database
-  const batchSize = 50;
+  const batchSize = DEFAULT_BATCH_SIZE;
+  const batchConcurrency = getBatchConcurrency();
+
   for (let i = 0; i < rawEvents.length; i += batchSize) {
     const chunk = rawEvents.slice(i, i + batchSize);
 
-    const results = await Promise.all(chunk.map((event) => translateAndPersistEvent(event)));
+    const results = await mapWithConcurrencyLimit(
+      chunk,
+      batchConcurrency,
+      translateAndPersistEvent
+    );
 
     for (const result of results) {
       if (result) {
@@ -100,39 +215,4 @@ export async function translateAndPersistBatch(rawEvents: RawEvent[]): Promise<{
   }
 
   return { successful, failed, translated };
-}
-
-/**
- * Mark events as verified by RPC
- */
-export async function markEventsAsVerified(ledger: number): Promise<number> {
-  const result = await db.event.updateMany({
-    where: { ledger },
-    data: {
-      rpcVerified: true,
-      lastRpcCheck: new Date(),
-    },
-  });
-
-  return result.count;
-}
-
-/**
- * Record discrepancies found during reconciliation
- */
-export async function recordEventDiscrepancy(
-  eventId: string,
-  issue: string,
-  action: string
-): Promise<void> {
-  await db.event.update({
-    where: { id: eventId },
-    data: {
-      discrepancies: JSON.stringify({
-        issue,
-        action,
-        timestamp: new Date().toISOString(),
-      }),
-    },
-  });
 }

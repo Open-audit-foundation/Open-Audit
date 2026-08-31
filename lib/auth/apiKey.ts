@@ -1,4 +1,5 @@
-import { createHash, randomBytes } from "crypto";
+const API_KEY_PREFIX = "oa_live";
+const KEY_ENTROPY_BYTES = 24;
 
 export type Tier = "free" | "partner";
 
@@ -8,11 +9,11 @@ export interface ApiKeyRecord {
   appName: string;
 }
 
-const API_KEY_PREFIX = "oa_live";
-const KEY_ENTROPY_BYTES = 24;
-
-export function hashKey(rawKey: string): string {
-  return createHash("sha256").update(rawKey).digest("hex");
+export async function hashKey(rawKey: string): Promise<string> {
+  const msgUint8 = new TextEncoder().encode(rawKey);
+  const hashBuffer = await globalThis.crypto.subtle.digest("SHA-256", msgUint8);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 export function validateApiKeyFormat(key: string): boolean {
@@ -20,10 +21,11 @@ export function validateApiKeyFormat(key: string): boolean {
   return key.startsWith(`${API_KEY_PREFIX}_`) && key.length === expectedLength;
 }
 
-export function generateApiKey(): { key: string; hash: string; prefix: string } {
-  const entropy = randomBytes(KEY_ENTROPY_BYTES).toString("hex");
-  const fullKey = `${API_KEY_PREFIX}_${entropy}`;
-  const hash = hashKey(fullKey);
+export async function generateApiKey(): Promise<{ key: string; hash: string; prefix: string }> {
+  const entropy = globalThis.crypto.getRandomValues(new Uint8Array(KEY_ENTROPY_BYTES));
+  const entropyHex = Array.from(entropy).map((b) => b.toString(16).padStart(2, "0")).join("");
+  const fullKey = `${API_KEY_PREFIX}_${entropyHex}`;
+  const hash = await hashKey(fullKey);
   return { key: fullKey, hash, prefix: API_KEY_PREFIX };
 }
 
@@ -45,10 +47,10 @@ function loadKeyRegistry(): ApiKeyRecord[] {
     });
 }
 
-export function validateApiKey(rawKey: string): ApiKeyRecord | null {
+export async function validateApiKey(rawKey: string): Promise<ApiKeyRecord | null> {
   if (!rawKey || !validateApiKeyFormat(rawKey)) return null;
 
-  const hashed = hashKey(rawKey);
+  const hashed = await hashKey(rawKey);
   const registry = loadKeyRegistry();
   return registry.find((r) => r.hashedKey === hashed) ?? null;
 }

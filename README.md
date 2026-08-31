@@ -2,7 +2,7 @@
 
 > **The Google Translate for Soroban** — an open-source transparency tool for the Stellar/Soroban ecosystem.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Contributions Welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![Built on Stellar](https://img.shields.io/badge/Built%20on-Stellar-7B2FBE)](https://stellar.org)
 
@@ -49,7 +49,30 @@ npm install
 npm run dev
 ```
 
+If you want a local API/server workflow for testing the app, run:
+
+```bash
+npm run dev:ws
+```
+
 Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+For the custom server with WebSocket support and `/metrics`, run:
+
+```bash
+npm run dev:ws
+```
+
+### Optional: Native XDR Decoder (Performance Boost)
+
+Open-Audit uses a native Rust XDR decoder for better performance. To compile it (requires Rust):
+
+```bash
+# Install Rust first if needed: https://rustup.rs
+npm run build:native
+```
+
+Without this step, the app will automatically fall back to a pure TypeScript decoder (no errors, just slightly slower performance).
 
 ### Environment Variables
 
@@ -59,10 +82,7 @@ Copy `.env.example` to `.env.local` and fill in the values:
 cp .env.example .env.local
 ```
 
-For microservices architecture, use:
-```bash
-cp .env.microservices.example .env.local
-```
+If you are working with the Redis-backed services flow, create a local environment file from the available sample config in the repository and adjust the values for your setup.
 
 | Variable | Description | Default |
 |---|---|---|
@@ -78,10 +98,10 @@ cp .env.microservices.example .env.local
 **Development:**
 ```bash
 npm run dev              # Standard Next.js dev server
-npm run dev:ws           # Legacy monolithic server with WebSocket
-npm run dev:decoupled    # Microservices web server (requires Redis)
-npm run worker:indexer   # Microservices indexer worker (requires Redis)
-npm run test:websocket   # Test WebSocket connection
+npm run dev:ws           # Legacy monolithic server with WebSocket support
+npm run test             # Run the repository test suite
+npm run build:cli        # Build the standalone CLI
+npm run cli:example      # Exercise the CLI against the sample blueprint
 ```
 
 **Production (Microservices):**
@@ -104,6 +124,21 @@ npm run lint             # Run ESLint
 npm run lint:registry    # Validate translation registry
 npm run format           # Format code with Prettier
 ```
+
+---
+
+## Telemetry
+
+The custom server exposes Prometheus metrics on `http://localhost:3000/metrics` when running `npm run dev:ws`.
+
+You can configure OpenTelemetry to export spans to Jaeger by setting:
+
+```bash
+export JAEGER_ENDPOINT="http://localhost:14268/api/traces"
+export OTEL_SERVICE_NAME="open-audit"
+```
+
+The default Jaeger endpoint is `http://localhost:14268/api/traces`.
 
 ---
 
@@ -141,9 +176,8 @@ Terminal 3: npm run worker:indexer
 ```
 
 📚 **Documentation:**
-- **[Quick Start Guide](QUICKSTART_MICROSERVICES.md)** - Get running in 5 minutes
-- **[Architecture Details](MICROSERVICES_ARCHITECTURE.md)** - Complete technical documentation
-- **[Testing Guide](MICROSERVICES_TESTING_GUIDE.md)** - Comprehensive testing walkthrough
+- **[Architecture Guide](ARCHITECTURE.md)** - Repository and service architecture overview
+- **[Security Hardening Guide](SECURITY_HARDENING_GUIDE.md)** - Production hardening notes
 
 ### 📊 Status Monitoring System (Production-Ready)
 
@@ -208,7 +242,6 @@ Untrusted XDR → Security Guards → Safe Parsing → Graceful Error Handling
 
 📚 **Documentation:**
 - **[Security Hardening Guide](SECURITY_HARDENING_GUIDE.md)** - Complete security documentation
-- **[Security Summary](TASK_4_SECURITY_HARDENING_SUMMARY.md)** - Implementation overview
 
 **Quick Start:**
 ```typescript
@@ -300,9 +333,8 @@ open-audit/
 ├── Dockerfile.worker       # 🆕 Indexer worker Docker image
 ├── Dockerfile.web          # 🆕 Web server Docker image
 ├── ARCHITECTURE.md         # 📖 Detailed architecture guide
-├── MICROSERVICES_ARCHITECTURE.md # 🆕 Microservices documentation
-├── QUICKSTART_MICROSERVICES.md   # 🆕 Quick start guide
-├── MICROSERVICES_TESTING_GUIDE.md # 🆕 Testing guide
+├── ARCHITECTURE.md         # 📖 Detailed architecture guide
+├── SECURITY_HARDENING_GUIDE.md # 🔒 Security documentation
 └── public/
 ```
 
@@ -343,8 +375,7 @@ node dist/cli/open-audit-cli.js test \
 
 📚 **Documentation:**
 - **[CLI README](cli/README.md)** - Complete command reference and examples
-- **[Quick Start](cli/QUICK_START.md)** - Get started in 30 seconds
-- **[Task Summary](TASK_6_CLI_TOOL_SUMMARY.md)** - Implementation details
+- **[CLI Quick Start](cli/QUICK_START.md)** - Get started in 30 seconds
 
 **Quick Example:**
 ```bash
@@ -383,7 +414,7 @@ Untrusted WASM → Sandbox → Zero Host Access → Strict Limits → Safe Execu
 📚 **Documentation:**
 - **[WASM Sandbox Architecture](lib/wasm-sandbox/WASM_SANDBOX_ARCHITECTURE.md)** - Complete technical documentation
 - **[Community Parser Guide](lib/wasm-sandbox/COMMUNITY_PARSER_GUIDE.md)** - Write your own parser
-- **[Implementation Summary](TASK_5_WASM_SANDBOX_SUMMARY.md)** - Overview and testing
+- **[WASM Sandbox README](lib/wasm-sandbox/README.md)** - Local usage and test commands
 
 **Quick Start (Parser Development):**
 ```bash

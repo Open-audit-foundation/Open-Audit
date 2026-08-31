@@ -3,7 +3,7 @@ import { translateEvent, matchesEventCriteria } from "./registry";
 import * as Core from "./core";
 import type { RawEvent } from "./types";
 
-const { interpolateTemplate, isValidHex, sanitizeHex, escapeHtml, detectScValType, decodeMap, decodeVec, decodeEnum, decodeScVal } = Core;
+const { interpolateTemplate, isValidHex, sanitizeHex, escapeHtml, detectScValType, decodeMap, decodeVec, decodeEnum, decodeScVal, sanitizeTextField, validateTextField } = Core;
 
 /**
  * Mock XDR data for testing Soroban event translation.
@@ -195,6 +195,35 @@ describe("Hex sanitization", () => {
     expect(escapeHtml("<script>alert('xss')</script>")).toBe("&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;");
     expect(escapeHtml("test&value")).toBe("test&amp;value");
     expect(escapeHtml('quote"test')).toBe("quote&quot;test");
+  });
+});
+
+describe("String and text validation & sanitization", () => {
+  it("sanitizes malicious payload strings by escaping HTML", () => {
+    const malicious = "<img src=x onerror=alert(1)> <script>eval('bad')</script>";
+    const sanitized = sanitizeTextField(malicious);
+    expect(sanitized).not.toContain("<img");
+    expect(sanitized).not.toContain("<script>");
+    expect(sanitized).toBe("&lt;img src=x onerror=alert(1)&gt; &lt;script&gt;eval(&#39;bad&#39;)&lt;/script&gt;");
+  });
+
+  it("truncates extremely long text fields to avoid UI layout breakages", () => {
+    const longText = "a".repeat(300);
+    const sanitized = sanitizeTextField(longText, { maxLength: 50 });
+    expect(sanitized.length).toBe(50);
+    expect(sanitized).toBe("a".repeat(50));
+  });
+
+  it("removes control characters and non-printable characters", () => {
+    const controlText = "Hello\u0000World\u001f!";
+    expect(sanitizeTextField(controlText)).toBe("HelloWorld!");
+  });
+
+  it("validates text fields against alphanumeric constraints", () => {
+    expect(validateTextField("ValidProjectName123")).toBe(true);
+    expect(validateTextField("Valid Project-Name (1)")).toBe(true);
+    expect(validateTextField("Bad<script>")).toBe(false);
+    expect(validateTextField("a".repeat(300))).toBe(false);
   });
 });
 

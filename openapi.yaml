@@ -201,7 +201,6 @@ components:
       description: |
         API key authentication using the standard Authorization: Bearer header.
         Keys have the format `oa_live_<48 hex chars>`.
-        Fallback: the legacy `x-api-key` header is also accepted.
   schemas:
     ErrorResponse:
       type: object

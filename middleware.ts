@@ -16,8 +16,7 @@ function extractApiKey(request: NextRequest): string {
   if (authHeader && authHeader.startsWith("Bearer ")) {
     return authHeader.slice(7);
   }
-  const xApiKey = request.headers.get("x-api-key");
-  return xApiKey ?? "";
+  return "";
 }
 
 export async function middleware(request: NextRequest): Promise<NextResponse> {
@@ -30,7 +29,7 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   if (!isProtected) return NextResponse.next();
 
   const rawKey = extractApiKey(request);
-  const record = validateApiKey(rawKey);
+  const record = await validateApiKey(rawKey);
 
   if (!record) {
     return NextResponse.json(

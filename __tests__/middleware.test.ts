@@ -38,8 +38,8 @@ describe("lib/auth/apiKey.ts - Canonical key store (Issue #15)", () => {
   });
 
   describe("key format validation", () => {
-    test("accepts properly formatted oa_live_<48hex> keys", () => {
-      const { key } = generateApiKey();
+    test("accepts properly formatted oa_live_<48hex> keys", async () => {
+      const { key } = await generateApiKey();
       expect(validateApiKeyFormat(key)).toBe(true);
       expect(key.startsWith("oa_live_")).toBe(true);
       expect(key.length).toBe("oa_live_".length + 48);
@@ -59,49 +59,53 @@ describe("lib/auth/apiKey.ts - Canonical key store (Issue #15)", () => {
   });
 
   describe("hashKey determinism", () => {
-    test("identical inputs produce identical SHA-256 hashes", () => {
+    test("identical inputs produce identical SHA-256 hashes", async () => {
       const k = "oa_live_0123456789abcdef0123456789abcdef0123456789abcdef";
-      expect(hashKey(k)).toBe(hashKey(k));
-      expect(hashKey(k)).toMatch(/^[0-9a-f]{64}$/);
+      const a = await hashKey(k);
+      const b = await hashKey(k);
+      expect(a).toBe(b);
+      expect(a).toMatch(/^[0-9a-f]{64}$/);
     });
   });
 
   describe("registry-based validateApiKey (real Issue #15 store contract)", () => {
-    test("valid known key in registry passes lookup", () => {
-      const { key, hash } = generateApiKey();
+    test("valid known key in registry passes lookup", async () => {
+      const { key, hash } = await generateApiKey();
       process.env.OA_API_KEYS = `${hash}:free:my-app`;
-      const rec = validateApiKey(key);
+      const rec = await validateApiKey(key);
       expect(rec).not.toBeNull();
       expect(rec!.tier).toBe("free");
       expect(rec!.appName).toBe("my-app");
       expect(rec!.hashedKey).toBe(hash);
     });
 
-    test("key not in registry returns null", () => {
+    test("key not in registry returns null", async () => {
       process.env.OA_API_KEYS = "";
-      const { key } = generateApiKey();
-      expect(validateApiKey(key)).toBeNull();
+      const { key } = await generateApiKey();
+      expect(await validateApiKey(key)).toBeNull();
     });
 
-    test("empty registry returns null even for well-formed key", () => {
-      const { key } = generateApiKey();
-      expect(validateApiKey(key)).toBeNull();
+    test("empty registry returns null even for well-formed key", async () => {
+      const { key } = await generateApiKey();
+      expect(await validateApiKey(key)).toBeNull();
     });
 
-    test("partner tier parsed correctly", () => {
-      const { key, hash } = generateApiKey();
+    test("partner tier parsed correctly", async () => {
+      const { key, hash } = await generateApiKey();
       process.env.OA_API_KEYS = `${hash}:partner:enterprise-saas`;
-      const rec = validateApiKey(key);
+      const rec = await validateApiKey(key);
       expect(rec!.tier).toBe("partner");
       expect(rec!.appName).toBe("enterprise-saas");
     });
 
-    test("multiple comma-separated registry entries", () => {
-      const app1 = generateApiKey();
-      const app2 = generateApiKey();
+    test("multiple comma-separated registry entries", async () => {
+      const app1 = await generateApiKey();
+      const app2 = await generateApiKey();
       process.env.OA_API_KEYS = `${app1.hash}:free:app-a,${app2.hash}:partner:app-b`;
-      expect(validateApiKey(app1.key)!.tier).toBe("free");
-      expect(validateApiKey(app2.key)!.tier).toBe("partner");
+      const rec1 = await validateApiKey(app1.key);
+      const rec2 = await validateApiKey(app2.key);
+      expect(rec1!.tier).toBe("free");
+      expect(rec2!.tier).toBe("partner");
     });
   });
 });
@@ -176,7 +180,7 @@ describe("Edge Middleware - Single Enforcement Point (Integration Behaviour)", (
   const loadMiddleware = () => import(path.join(PROJECT_ROOT, "middleware"));
 
   test("valid Authorization: Bearer passes through exactly once (no double-check)", async () => {
-    const { key, hash } = generateApiKey();
+    const { key, hash } = await generateApiKey();
     process.env.OA_API_KEYS = `${hash}:free:once-app`;
 
     const { middleware } = await loadMiddleware();
@@ -261,7 +265,7 @@ describe("Edge Middleware - Single Enforcement Point (Integration Behaviour)", (
   });
 
   test("429 rate-limit: mocked canonical RL (Issue #16) → flat { error, message } shape + Retry-After", async () => {
-    const { key, hash } = generateApiKey();
+    const { key, hash } = await generateApiKey();
     process.env.OA_API_KEYS = `${hash}:free:rl-app`;
 
     const rlMock = vi.fn().mockResolvedValue({
@@ -294,29 +298,20 @@ describe("Edge Middleware - Single Enforcement Point (Integration Behaviour)", (
     vi.doUnmock(path.join(PROJECT_ROOT, "lib/auth/rateLimit"));
   });
 
-  test("legacy x-api-key header still works as fallback", async () => {
-    const { key, hash } = generateApiKey();
-    process.env.OA_API_KEYS = `${hash}:free:legacy-app`;
+  test("missing Authorization: Bearer header is rejected", async () => {
+    const { key, hash } = await generateApiKey();
+    process.env.OA_API_KEYS = `${hash}:free:test-app`;
     const { middleware } = await loadMiddleware();
 
+    // Send key in non-standard header - should be rejected
     const req = makeFakeNextRequest("/api/v1/events/export", {
-      "x-api-key": key,
+      "x-custom-key": key,
     });
-    const resp = (await middleware(req)) as unknown as { status: number };
-    expect(resp.status).toBe(200);
-    expect(nextJsonSpy).not.toHaveBeenCalled();
-  });
+    await middleware(req);
 
-  test("Authorization: Bearer takes precedence over x-api-key fallback", async () => {
-    const good = generateApiKey();
-    process.env.OA_API_KEYS = `${good.hash}:free:precedence-app`;
-    const { middleware } = await loadMiddleware();
-
-    const req = makeFakeNextRequest("/api/v1/events/export", {
-      authorization: `Bearer ${good.key}`,
-      "x-api-key": "oa_live_ffffffffffffffffffffffffffffffffffffffffffffffff",
-    });
-    const resp = (await middleware(req)) as unknown as { status: number };
-    expect(resp.status).toBe(200);
+    expect(capturedJson).toHaveLength(1);
+    expect(capturedJson[0].opts?.status).toBe(401);
+    const body = capturedJson[0].body as { error: string };
+    expect(body.error).toBe("Unauthorized");
   });
 });

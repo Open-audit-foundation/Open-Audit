@@ -12,27 +12,45 @@ datasource db {
 
 model Event {
   id              String   @id @unique
-  contractId      String   @index
-  ledger          Int      @index
+  contractId      String
+  ledger          Int
   timestamp       Int
-  txHash          String   @index
+  txHash          String
   topics          Json     // Store as JSON array
-  data            String
+  data            String   // Hex-encoded event data
   description     String?  // Translated human-readable text
   status          String   // "translated" | "cryptic"
   blueprintName   String?  // Contract name from blueprint
   eventType       String?  // Event type (transfer, mint, burn, etc.)
 
-  // Reconciliation fields
-  rpcVerified     Boolean  @default(false)
-  lastRpcCheck    DateTime?
-  discrepancies   String?  // JSON array of issues
-
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  @@index([contractId])
+  @@index([ledger])
+  @@index([txHash])
   @@index([contractId, ledger])
   @@index([timestamp])
+}
+
+model DeadLetterEvent {
+  id            String   @id @default(cuid()) @unique
+  eventId       String
+  contractId    String
+  ledger        Int
+  timestamp     Int
+  txHash        String
+  topics        Json
+  data          String
+  errorCode     String
+  errorMessage  String
+  errorStack    String?
+  errorContext  Json?
+  createdAt     DateTime @default(now())
+
+  @@index([contractId])
+  @@index([eventId])
+  @@index([createdAt])
 }
 
 // Tracks the indexer's progress through ledgers
@@ -41,103 +59,4 @@ model IndexerCursor {
   lastLedger      Int      @default(0)
   lastProcessed   DateTime @default(now())
   updatedAt       DateTime @updatedAt
-}
-
-// Records reconciliation job executions
-model ReconciliationJob {
-  id              String   @id @default(cuid())
-  status          String   // "pending" | "processing" | "completed" | "failed"
-  startLedger     Int
-  endLedger       Int
-
-  eventsProcessed Int      @default(0)
-  eventsMatched   Int      @default(0)
-  eventsSkipped   Int      @default(0)
-  eventsError     Int      @default(0)
-
-  // Discrepancies found during reconciliation
-  discrepancies   Json?    // Array of { ledger, eventId, issue, action }
-
-  // Job metadata
-  triggeredBy     String?  // "cron" | "manual" | admin user ID
-  errorMessage    String?
-  completedAt     DateTime?
-
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  @@index([status])
-  @@index([createdAt])
-}
-
-// Audit trail for reconciliation actions
-model AuditLog {
-  id              String   @id @default(cuid())
-  jobId           String   @index
-  action          String   // "detected" | "fixed" | "flagged" | "verified"
-  eventId         String?  @index
-  ledger          Int?
-  details         Json     // Additional context
-  metadata        Json?    // Request headers, IP, etc.
-
-  createdAt       DateTime @default(now())
-}
-
-// Configuration for reconciliation
-model ReconciliationConfig {
-  id              String   @id @default("current")
-  
-  // Cron schedule (e.g., "0 2 * * *" for daily at 2 AM)
-  cronSchedule    String   @default("0 2 * * *")
-  
-  // Batch size for processing
-  batchSize       Int      @default(1000)
-  
-  // Number of days to look back for reconciliation
-  lookbackDays    Int      @default(7)
-  
-  // Whether to auto-fix detected issues
-  autoFix         Boolean  @default(false)
-  
-  // Alert threshold (percentage of discrepancies)
-  alertThreshold  Float    @default(0.1) // 0.1% = 1 in 1000
-  
-  // Enable/disable reconciliation
-  enabled         Boolean  @default(true)
-  
-  updatedAt       DateTime @updatedAt
-}
-
-// Webhook subscription management
-model WebhookSubscription {
-  id           String   @id @default(cuid())
-  url          String
-  contractId   String?
-  secretHash   String
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  deliveries   WebhookDelivery[]
-
-  @@index([url])
-  @@index([contractId])
-  @@index([isActive])
-}
-
-// Webhook delivery telemetry
-model WebhookDelivery {
-  id             String   @id @default(cuid())
-  subscriptionId String
-  eventId        String
-  httpStatus     Int?
-  succeeded      Boolean
-  attempts       Int      @default(1)
-  createdAt      DateTime @default(now())
-
-  subscription   WebhookSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
-
-  @@index([subscriptionId])
-  @@index([eventId])
-  @@index([succeeded])
 }
