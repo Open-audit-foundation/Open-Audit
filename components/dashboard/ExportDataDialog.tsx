@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Download, FileText, Braces, CheckCircle2, Layers } from "lucide-react";
 import {
   Dialog,
@@ -69,8 +69,18 @@ export function ExportDataDialog({
 }: ExportDataDialogProps): React.JSX.Element {
   const [selectedFormat, setSelectedFormat] = useState<ExportFormat>("csv");
   const [isExporting, setIsExporting] = useState(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isLargeExport = events.length >= STREAM_THRESHOLD;
+
+  // Cleanup timeout on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
 
   async function handleExport(): Promise<void> {
     setIsExporting(true);
@@ -107,9 +117,15 @@ export function ExportDataDialog({
         }
       }
     } finally {
-      setTimeout(function () {
+      // Clear any existing timeout to prevent memory leaks
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      
+      timeoutRef.current = setTimeout(function () {
         setIsExporting(false);
         onOpenChange(false);
+        timeoutRef.current = null;
       }, 400);
     }
   }

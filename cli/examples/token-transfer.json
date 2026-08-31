@@ -1,0 +1,62 @@
+{
+  "contractId": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+  "contractName": "Test Token Contract",
+  "version": "1.0.0",
+  "validFromLedger": 0,
+  "events": [
+    {
+      "name": "transfer",
+      "template": "{from} transferred {amount} to {to}",
+      "topics": [
+        {
+          "index": 0,
+          "decodedName": "transfer"
+        }
+      ],
+      "fields": [
+        {
+          "name": "from",
+          "source": "topic",
+          "index": 1,
+          "type": "address"
+        },
+        {
+          "name": "to",
+          "source": "topic",
+          "index": 2,
+          "type": "address"
+        },
+        {
+          "name": "amount",
+          "source": "data",
+          "type": "amount",
+          "format": "USDC"
+        }
+      ]
+    },
+    {
+      "name": "mint",
+      "template": "Minted {amount} to {to}",
+      "topics": [
+        {
+          "index": 0,
+          "decodedName": "mint"
+        }
+      ],
+      "fields": [
+        {
+          "name": "to",
+          "source": "topic",
+          "index": 1,
+          "type": "address"
+        },
+        {
+          "name": "amount",
+          "source": "data",
+          "type": "amount",
+          "format": "USDC"
+        }
+      ]
+    }
+  ]
+}

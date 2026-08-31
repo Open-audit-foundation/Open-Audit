@@ -143,25 +143,16 @@ export function startPersistentHorizonIndexer(options: StreamingIndexerOptions):
 }
 
 /**
- * Get reconciliation health metrics
+ * Get indexer health metrics
  */
 export async function getIndexerHealthMetrics() {
-  const [totalEvents, verifiedEvents, lastCursor] = await Promise.all([
+  const [totalEvents, lastCursor] = await Promise.all([
     db.event.count(),
-    db.event.count({ where: { rpcVerified: true } }),
     getCursor(),
   ]);
 
-  const pendingVerification = totalEvents - verifiedEvents;
-  const verificationRate =
-    totalEvents > 0 ? ((verifiedEvents / totalEvents) * 100).toFixed(2) : "0";
-
   return {
     totalEvents,
-    verifiedEvents,
-    pendingVerification,
-    verificationRate: `${verificationRate}%`,
     lastLedger: lastCursor,
-    healthy: pendingVerification < totalEvents * 0.1, // Less than 10% pending
   };
 }

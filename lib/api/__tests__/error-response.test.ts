@@ -2,10 +2,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { StellarNetworkException } from "@/lib/errors";
 import { toErrorResponse, validationErrorResponse } from "@/lib/api/error-response";
 
-vi.mock("@/lib/telemetry", () => ({
-  captureException: vi.fn(async (error: unknown) => error),
-}));
-
 describe("error-response helpers", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -30,7 +26,7 @@ describe("error-response helpers", () => {
       { retriable: true }
     );
 
-    const response = await toErrorResponse(error);
+    const response = toErrorResponse(error);
     const body = await response.json();
 
     expect(response.status).toBe(502);

@@ -1,203 +1,312 @@
 /**
- * Job Queue Setup
+ * Webhook Delivery Queue
  *
- * Configures Bull queue for background job processing with Redis backend.
+ * Implements signed webhook delivery with exponential-backoff retries,
+ * 4xx no-retry semantics, and automatic subscription deactivation after
+ * exhausting all retry attempts.
+ *
+ * Exports consumed by the integration tests:
+ *   - WebhookPayload
+ *   - deliverWebhookWithRetries
+ *   - computeWebhookSignature   (re-export from signing)
+ *   - buildSignatureHeader      (re-export from signing)
+ *   - triggerWebhooksForEvent
  */
 
-import Queue from "bull";
-import Redis from "ioredis";
-import { db } from "@/lib/db/client";
+import { db } from "../db/client";
+import {
+  computeWebhookSignature,
+  buildSignatureHeader,
+} from "../webhooks/signing";
 
-// Redis connection for Bull
-export function getRedisConfig() {
-  const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
+// Re-export so callers can import everything from this module.
+export { computeWebhookSignature, buildSignatureHeader };
 
-  return {
-    url: redisUrl,
-    maxRetriesPerRequest: null,
-    enableReadyCheck: false,
-  };
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+/** Shape of the JSON body delivered to a webhook endpoint. */
+export interface WebhookPayload {
+  eventId: string;
+  contractId: string;
+  ledger: number;
+  timestamp: number;
+  txHash: string;
+  topics: string[];
+  data: string;
+  description: string | null;
+  status: string;
+  blueprintName: string | null;
+  eventType: string | null;
+  createdAt: string;
 }
 
-/**
- * Reconciliation Job Data
- */
-export interface ReconciliationJobData {
-  startLedger: number;
-  endLedger: number;
-  contractIds?: string[];
-  triggeredBy?: string; // "cron" | "manual"
-  autoFix?: boolean;
+/** Result returned by a single deliverWebhookWithRetries call. */
+export interface DeliveryResult {
+  succeeded: boolean;
+  httpStatus: number | null;
+  attempts: number;
 }
 
-/**
- * Job Queue instances
- */
-let reconciliationQueue: Queue.Queue<ReconciliationJobData> | null = null;
-
-/**
- * Get or create reconciliation queue
- */
-export function getReconciliationQueue(): Queue.Queue<ReconciliationJobData> {
-  if (!reconciliationQueue) {
-    reconciliationQueue = new Queue<ReconciliationJobData>("reconciliation", getRedisConfig());
-
-    // Configure queue events
-    reconciliationQueue.on("error", (error) => {
-      console.error("[queue] Error:", error);
-    });
-
-    reconciliationQueue.on("stalled", (job) => {
-      console.warn(`[queue] Job ${job.id} stalled`);
-    });
-
-    // Set up job completion/failure handlers
-    reconciliationQueue.on("completed", async (job) => {
-      console.log(`[queue] Job ${job.id} completed`);
-
-      // Update job record in database
-      if (job.data.triggeredBy) {
-        await db.reconciliationJob.updateMany(
-          {
-            status: "processing",
-            triggeredBy: job.data.triggeredBy,
-          },
-          {
-            status: "completed",
-            completedAt: new Date(),
-          }
-        );
-      }
-    });
-
-    reconciliationQueue.on("failed", async (job, err) => {
-      console.error(`[queue] Job ${job.id} failed:`, err.message);
-
-      // Update job record in database
-      if (job.data.triggeredBy) {
-        await db.reconciliationJob.updateMany(
-          {
-            status: "processing",
-            triggeredBy: job.data.triggeredBy,
-          },
-          {
-            status: "failed",
-            errorMessage: err.message,
-            completedAt: new Date(),
-          }
-        );
-      }
-    });
-  }
-
-  return reconciliationQueue;
+/** Options controlling retry / timeout behaviour. */
+export interface DeliveryOptions {
+  /** Maximum total attempts (first attempt + retries). Default: 5 */
+  maxAttempts?: number;
+  /** Initial backoff in milliseconds before the second attempt. Default: 1000 */
+  initialBackoffMs?: number;
+  /** Per-request fetch timeout in milliseconds. Default: 10_000 */
+  timeoutMs?: number;
 }
 
+// ---------------------------------------------------------------------------
+// Core delivery logic
+// ---------------------------------------------------------------------------
+
 /**
- * Initialize queue processors
+ * Delivers a signed webhook payload to a single URL with exponential backoff.
+ *
+ * Retry policy:
+ *  - 5xx / network errors: retry up to maxAttempts total
+ *  - 4xx: fail immediately, no retry
+ *  - 2xx / 3xx: success
+ *
+ * The raw JSON body is fixed before the first attempt and reused on every
+ * retry so that the signature remains identical across all attempts.
  */
-export async function initializeQueueProcessors() {
-  const queue = getReconciliationQueue();
+export async function deliverWebhookWithRetries(
+  subscriptionId: string,
+  url: string,
+  secret: string,
+  payload: WebhookPayload,
+  options: DeliveryOptions = {}
+): Promise<DeliveryResult> {
+  const maxAttempts = options.maxAttempts ?? 5;
+  const initialBackoffMs = options.initialBackoffMs ?? 1000;
+  const timeoutMs = options.timeoutMs ?? 10_000;
 
-  // Set concurrency for reconciliation jobs
-  const concurrency = parseInt(process.env.QUEUE_CONCURRENCY || "5", 10);
+  // Serialise once — signature must be stable across retries.
+  const rawBody = JSON.stringify(payload);
+  const signatureHeader = buildSignatureHeader(rawBody, secret);
 
-  queue.process(concurrency, async (job) => {
-    console.log(`[queue] Processing reconciliation job ${job.id}`);
+  let attempts = 0;
+  let lastHttpStatus: number | null = null;
+
+  while (attempts < maxAttempts) {
+    attempts += 1;
 
     try {
-      // Import the reconciliation engine
-      const { runReconciliation } = await import("@/lib/reconciliation/engine");
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-      // Run reconciliation
-      const result = await runReconciliation(job.data);
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "User-Agent": "Open-Audit-Webhook/1.0",
+            "X-Open-Audit-Signature": signatureHeader,
+          },
+          body: rawBody,
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
 
-      console.log(
-        `[queue] Job ${job.id} completed. Matched: ${result.eventsMatched}, Discrepancies: ${result.discrepancies.length}`
-      );
+      lastHttpStatus = response.status;
 
-      return result;
-    } catch (error) {
-      console.error(`[queue] Job ${job.id} error:`, error);
-      throw error;
+      // 2xx → success
+      if (response.status >= 200 && response.status < 300) {
+        return { succeeded: true, httpStatus: lastHttpStatus, attempts };
+      }
+
+      // 4xx → permanent failure, do not retry
+      if (response.status >= 400 && response.status < 500) {
+        return { succeeded: false, httpStatus: lastHttpStatus, attempts };
+      }
+
+      // 5xx / anything else → fall through to retry
+    } catch {
+      // Network error / timeout — treat as retriable
+      lastHttpStatus = null;
     }
-  });
+
+    // Exponential backoff before the next attempt (skip after last)
+    if (attempts < maxAttempts) {
+      const backoff = initialBackoffMs * 2 ** (attempts - 1);
+      await sleep(backoff);
+    }
+  }
+
+  return { succeeded: false, httpStatus: lastHttpStatus, attempts };
 }
 
+// ---------------------------------------------------------------------------
+// Event-driven fan-out
+// ---------------------------------------------------------------------------
+
 /**
- * Add a reconciliation job to the queue
+ * Finds all active webhook subscriptions that match the given event's
+ * contractId (exact match or null/"subscribe to all"), then delivers the
+ * payload to each one in parallel.
+ *
+ * Side effects:
+ *  - Creates a WebhookDelivery row for every subscription attempted.
+ *  - Deactivates the subscription when all retry attempts are exhausted
+ *    (i.e. max retries hit on 5xx / network). A 4xx failure does NOT
+ *    deactivate the subscription.
  */
-export async function addReconciliationJob(data: ReconciliationJobData): Promise<void> {
-  const queue = getReconciliationQueue();
+export async function triggerWebhooksForEvent(
+  event: {
+    id: string;
+    contractId: string;
+    ledger: number;
+    timestamp: number;
+    txHash: string;
+    topics: unknown;
+    data: string;
+    description?: string | null;
+    status: string;
+    blueprintName?: string | null;
+    eventType?: string | null;
+    createdAt?: Date | string;
+  },
+  options: DeliveryOptions = {}
+): Promise<void> {
+  // Query active subscriptions that are either global (contractId IS NULL)
+  // or bound to this specific contract.
+  let subscriptions: Array<{
+    id: string;
+    url: string;
+    secretHash: string;
+    isActive: boolean;
+  }>;
 
-  // Create job record in database
-  const job = await db.reconciliationJob.create({
-    data: {
-      status: "pending",
-      startLedger: data.startLedger,
-      endLedger: data.endLedger,
-      triggeredBy: data.triggeredBy || "manual",
-    },
-  });
+  try {
+    subscriptions = await db.webhookSubscription.findMany({
+      where: {
+        isActive: true,
+        OR: [
+          { contractId: null },
+          { contractId: event.contractId },
+        ],
+      },
+    });
+  } catch (err) {
+    console.error("[webhooks] Failed to query subscriptions:", err);
+    return;
+  }
 
-  // Add to queue with retry configuration
-  const maxAttempts = parseInt(process.env.QUEUE_MAX_ATTEMPTS || "3", 10);
+  if (subscriptions.length === 0) {
+    return;
+  }
 
-  await queue.add(data, {
-    jobId: job.id,
-    attempts: maxAttempts,
-    backoff: {
-      type: "exponential",
-      delay: 2000,
-    },
-    removeOnComplete: true,
-    removeOnFail: false,
-  });
+  // Build the payload once for all subscribers.
+  const payload: WebhookPayload = {
+    eventId: event.id,
+    contractId: event.contractId,
+    ledger: event.ledger,
+    timestamp: event.timestamp,
+    txHash: event.txHash,
+    topics: Array.isArray(event.topics) ? (event.topics as string[]) : [],
+    data: event.data,
+    description: event.description ?? null,
+    status: event.status,
+    blueprintName: event.blueprintName ?? null,
+    eventType: event.eventType ?? null,
+    createdAt:
+      event.createdAt instanceof Date
+        ? event.createdAt.toISOString()
+        : (event.createdAt ?? new Date().toISOString()),
+  };
 
-  console.log(
-    `[queue] Added reconciliation job ${job.id} for ledgers ${data.startLedger}-${data.endLedger}`
+  // Deliver to all matching subscriptions concurrently.
+  await Promise.all(
+    subscriptions.map((sub) =>
+      deliverToSubscription(sub, event.id, payload, options)
+    )
   );
 }
 
-/**
- * Get queue statistics
- */
-export async function getQueueStats() {
-  const queue = getReconciliationQueue();
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
 
-  const [waiting, active, completed, failed] = await Promise.all([
-    queue.getWaitingCount(),
-    queue.getActiveCount(),
-    queue.getCompletedCount(),
-    queue.getFailedCount(),
-  ]);
+async function deliverToSubscription(
+  sub: { id: string; url: string; secretHash: string; isActive: boolean },
+  eventId: string,
+  payload: WebhookPayload,
+  options: DeliveryOptions
+): Promise<void> {
+  const maxAttempts = options.maxAttempts ?? 5;
 
-  return {
-    waiting,
-    active,
-    completed,
-    failed,
-    total: waiting + active + completed + failed,
-  };
-}
-
-/**
- * Clear queue (for testing/maintenance)
- */
-export async function clearQueue() {
-  const queue = getReconciliationQueue();
-  await queue.clean(0); // Remove all jobs
-  console.log("[queue] Queue cleared");
-}
-
-/**
- * Gracefully shutdown queue
- */
-export async function shutdownQueue() {
-  if (reconciliationQueue) {
-    console.log("[queue] Shutting down...");
-    await reconciliationQueue.close();
-    reconciliationQueue = null;
-    console.log("[queue] Shutdown complete");
+  let result: DeliveryResult;
+  try {
+    result = await deliverWebhookWithRetries(
+      sub.id,
+      sub.url,
+      sub.secretHash,
+      payload,
+      options
+    );
+  } catch (err) {
+    console.error(`[webhooks] Unexpected error delivering to ${sub.url}:`, err);
+    result = { succeeded: false, httpStatus: null, attempts: 1 };
   }
+
+  // Persist the delivery record.
+  try {
+    await db.webhookDelivery.create({
+      data: {
+        subscriptionId: sub.id,
+        eventId,
+        httpStatus: result.httpStatus,
+        succeeded: result.succeeded,
+        attempts: result.attempts,
+      },
+    });
+  } catch (err) {
+    console.error("[webhooks] Failed to persist delivery record:", err);
+  }
+
+  // Deactivate the subscription only when we exhausted all retry attempts
+  // (i.e. 5xx / network failure used up every attempt).
+  // 4xx failures stop at attempt 1 but should NOT deactivate.
+  const exhaustedRetries =
+    !result.succeeded &&
+    result.attempts >= maxAttempts &&
+    result.httpStatus !== null &&
+    result.httpStatus >= 500;
+
+  const networkExhausted =
+    !result.succeeded &&
+    result.attempts >= maxAttempts &&
+    result.httpStatus === null;
+
+  if (exhaustedRetries || networkExhausted) {
+    try {
+      await db.webhookSubscription.update({
+        where: { id: sub.id },
+        data: { isActive: false },
+      });
+      // Reflect the change in the in-memory object so callers that hold a
+      // reference (e.g. test assertions) see the updated state.
+      sub.isActive = false;
+    } catch (err) {
+      console.error(
+        `[webhooks] Failed to deactivate subscription ${sub.id}:`,
+        err
+      );
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Utility
+// ---------------------------------------------------------------------------
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

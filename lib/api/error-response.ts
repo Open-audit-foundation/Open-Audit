@@ -6,7 +6,6 @@ import {
   type ErrorCode,
   type ErrorContext,
 } from "@/lib/errors";
-import { captureException } from "@/lib/telemetry";
 
 export interface ApiErrorBody {
   error: string;
@@ -34,19 +33,19 @@ export function validationErrorResponse(message: string, status = 400): NextResp
 }
 
 /** Maps a domain exception to a structured JSON error response and reports it. */
-export async function toErrorResponse(
+export function toErrorResponse(
   error: unknown,
   options: {
     fallbackMessage?: string;
     status?: number;
     context?: ErrorContext;
   } = {}
-): Promise<NextResponse<ApiErrorBody>> {
+): NextResponse<ApiErrorBody> {
   const normalized = isOpenAuditError(error)
     ? error
     : normalizeError(error, options.fallbackMessage ?? "Internal server error", options.context ?? {});
 
-  await captureException(normalized, { context: options.context });
+  console.error('[error-response.ts] Error:', normalized);
 
   const status =
     options.status ??

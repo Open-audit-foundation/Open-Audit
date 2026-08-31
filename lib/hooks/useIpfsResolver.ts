@@ -1,85 +1,68 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { isIpfsPointer, extractCid } from "@/lib/ipfs/offloader";
+import { useEffect, useState } from "react";
 
-interface IpfsResolveResult {
-  content: string | null;
+/** Returns true when a raw event field looks like an offloaded IPFS pointer. */
+export function isIpfsPointer(value: string): boolean {
+  return typeof value === "string" && value.startsWith("ipfs://");
+}
+
+/** The `{ data, topics }` payload restored from IPFS, matching lib/ipfs/offloader's OffloadablePayload. */
+export interface ResolvedIpfsPayload {
+  data: string;
+  topics: string[];
+}
+
+export interface IpfsResolverState {
+  payload: ResolvedIpfsPayload | null;
   loading: boolean;
   error: string | null;
 }
 
-const resolveCache: Record<string, string> = {};
-
-async function fetchFromApi(cid: string): Promise<string | null> {
-  if (resolveCache[cid]) return resolveCache[cid];
-
-  try {
-    const res = await fetch("/api/ipfs/resolve", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cid }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (data.content) {
-      resolveCache[cid] = data.content;
-    }
-    return data.content ?? null;
-  } catch {
-    return null;
-  }
-}
-
-export function useIpfsResolver(value: string | undefined | null): IpfsResolveResult {
-  const [result, setResult] = useState<IpfsResolveResult>({
-    content: null,
+/**
+ * Resolves an `ipfs://<cid>` pointer back to the original offloaded
+ * `{ data, topics }` payload via the `/api/ipfs/[cid]` proxy route.
+ * Passing a non-pointer value is a no-op.
+ */
+export function useIpfsResolver(pointer: string | null | undefined): IpfsResolverState {
+  const [state, setState] = useState<IpfsResolverState>({
+    payload: null,
     loading: false,
     error: null,
   });
 
   useEffect(() => {
-    if (!value) {
-      setResult({ content: null, loading: false, error: null });
+    if (!pointer || !isIpfsPointer(pointer)) {
+      setState({ payload: null, loading: false, error: null });
       return;
     }
 
-    if (!isIpfsPointer(value)) {
-      setResult({ content: value, loading: false, error: null });
-      return;
-    }
-
-    const cid = extractCid(value);
-    if (!cid) {
-      setResult({ content: value, loading: false, error: null });
-      return;
-    }
-
-    if (resolveCache[cid]) {
-      setResult({ content: resolveCache[cid], loading: false, error: null });
-      return;
-    }
-
+    const cid = pointer.replace(/^ipfs:\/\//, "");
     let cancelled = false;
-    setResult({ content: null, loading: true, error: null });
+    setState({ payload: null, loading: true, error: null });
 
-    fetchFromApi(cid).then((content) => {
-      if (cancelled) return;
-      if (content) {
-        setResult({ content, loading: false, error: null });
-      } else {
-        setResult({
-          content: null,
-          loading: false,
-          error: "Failed to resolve IPFS content",
-        });
-      }
-    });
+    fetch(`/api/ipfs/${encodeURIComponent(cid)}`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((payload: ResolvedIpfsPayload) => {
+        if (!cancelled) setState({ payload, loading: false, error: null });
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setState({
+            payload: null,
+            loading: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      });
 
     return () => {
       cancelled = true;
     };
-  }, [value]);
+  }, [pointer]);
 
-  return result;
+  return state;
 }

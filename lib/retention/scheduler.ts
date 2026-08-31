@@ -1,105 +1,128 @@
 /**
- * Data Retention Cron Scheduler
+ * lib/retention/scheduler.ts
  *
- * Runs the archive-and-purge routine on a configurable cron schedule,
- * defaulting to 03:00 UTC daily (off-peak).  Mirrors the pattern used by
- * lib/reconciliation/scheduler.ts so the two live side-by-side without
- * conflicts.
+ * Wraps `pruneOldData` in a node-cron job.  Reads configuration from
+ * environment variables so the schedule and thresholds can be tuned
+ * without code changes.
  *
- * Environment variables consumed
- *   RETENTION_CRON_SCHEDULE  – cron expression              (default "0 3 * * *")
- *   RETENTION_DAYS           – passed through to archiver   (default 180)
- *   ARCHIVE_BATCH_SIZE       – passed through to archiver   (default 1000)
- *   ARCHIVE_OUTPUT_DIR       – passed through to archiver   (default ./archives)
+ * Environment variables (all optional with documented defaults):
+ *
+ *   RETENTION_ENABLED         — set to "false" to disable the scheduler
+ *                               entirely.  Any other value (or unset) is
+ *                               treated as enabled.  Default: true.
+ *
+ *   RETENTION_DAYS            — rows older than this many days are pruned.
+ *                               Default: 180.
+ *
+ *   RETENTION_CRON_SCHEDULE   — node-cron expression for when to run.
+ *                               Default: "0 3 * * *"  (daily at 03:00 UTC)
+ *
+ *   ARCHIVE_BATCH_SIZE        — maximum rows deleted per run across all
+ *                               tables.  Default: 1000.
+ *
+ * Call `startRetentionScheduler()` once at server startup.  It returns the
+ * scheduled task so callers can stop it (e.g. during tests or graceful
+ * shutdown).
  */
 
 import cron from "node-cron";
-import { archiveAndPurgeOldEvents, getRetentionDays } from "./archiver";
+import { db } from "../db/client";
+import { pruneOldData, logPruneResult } from "./pruner";
 
-// Module-level handle so we can stop/restart without leaking tasks
-let retentionTask: cron.ScheduledTask | null = null;
+// ---------------------------------------------------------------------------
+// Config helpers
+// ---------------------------------------------------------------------------
 
-// ── Scheduler lifecycle ─────────────────────────────────────────────────────
+/** Parse an integer env var, falling back to `defaultValue` on invalid input. */
+function envInt(name: string, defaultValue: number): number {
+  const raw = process.env[name];
+  if (!raw) return defaultValue;
+  const parsed = parseInt(raw, 10);
+  return Number.isFinite(parsed) ? parsed : defaultValue;
+}
+
+/** Returns true unless RETENTION_ENABLED is explicitly set to "false". */
+function isRetentionEnabled(): boolean {
+  const val = process.env.RETENTION_ENABLED;
+  return val !== "false";
+}
+
+// ---------------------------------------------------------------------------
+// Scheduler
+// ---------------------------------------------------------------------------
 
 /**
- * Start the retention cron scheduler.
- * Safe to call multiple times — a running scheduler is stopped first.
+ * Start the retention scheduler.
+ *
+ * - When `RETENTION_ENABLED=false` this is a no-op; it logs a single info
+ *   line and returns undefined so callers do not need to branch.
+ * - Otherwise, schedules a node-cron job according to
+ *   `RETENTION_CRON_SCHEDULE` (default: every day at 03:00 UTC).
+ *
+ * @returns The cron.ScheduledTask, or undefined when retention is disabled.
  */
-export function startRetentionScheduler(): void {
+export function startRetentionScheduler(): cron.ScheduledTask | undefined {
+  if (!isRetentionEnabled()) {
+    console.log(
+      JSON.stringify({
+        level: "info",
+        msg: "retention scheduler disabled (RETENTION_ENABLED=false)",
+      })
+    );
+    return undefined;
+  }
+
+  const retentionDays = envInt("RETENTION_DAYS", 180);
+  const batchCap = envInt("ARCHIVE_BATCH_SIZE", 1000);
   const schedule = process.env.RETENTION_CRON_SCHEDULE ?? "0 3 * * *";
 
   if (!cron.validate(schedule)) {
-    console.error(`[retention-scheduler] Invalid cron expression: "${schedule}". Scheduler not started.`);
-    return;
-  }
-
-  if (retentionTask) {
-    console.log("[retention-scheduler] Replacing existing scheduler...");
-    stopRetentionScheduler();
+    console.error(
+      JSON.stringify({
+        level: "error",
+        msg: `retention scheduler: invalid cron expression "${schedule}" — scheduler not started`,
+      })
+    );
+    return undefined;
   }
 
   console.log(
-    `[retention-scheduler] Starting — schedule="${schedule}", retentionDays=${getRetentionDays()}`
+    JSON.stringify({
+      level: "info",
+      msg: "retention scheduler started",
+      schedule,
+      retentionDays,
+      batchCap,
+    })
   );
 
-  retentionTask = cron.schedule(schedule, async () => {
-    console.log("[retention-scheduler] Cron tick — running archive-and-purge...");
-    try {
-      const result = await archiveAndPurgeOldEvents();
+  const task = cron.schedule(schedule, async () => {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
 
-      if (result.success) {
-        console.log(
-          `[retention-scheduler] Run succeeded — ` +
-            `archived=${result.rowsArchived}, deleted=${result.rowsDeleted}, ` +
-            `file="${result.archiveFile}", duration=${result.durationMs}ms`
-        );
-      } else {
-        console.error(`[retention-scheduler] Run failed — ${result.error}`);
-      }
+    console.log(
+      JSON.stringify({
+        level: "info",
+        msg: "retention run starting",
+        cutoffDate: cutoffDate.toISOString(),
+        retentionDays,
+        batchCap,
+      })
+    );
+
+    try {
+      const result = await pruneOldData({ db, cutoffDate, batchCap });
+      logPruneResult(result);
     } catch (err) {
-      console.error("[retention-scheduler] Unexpected error during cron tick:", err);
+      console.error(
+        JSON.stringify({
+          level: "error",
+          msg: "retention run failed",
+          error: err instanceof Error ? err.message : String(err),
+        })
+      );
     }
   });
 
-  retentionTask.start();
-  console.log("[retention-scheduler] Scheduler started.");
-}
-
-/**
- * Stop the retention cron scheduler.
- */
-export function stopRetentionScheduler(): void {
-  if (retentionTask) {
-    retentionTask.stop();
-    retentionTask.destroy();
-    retentionTask = null;
-    console.log("[retention-scheduler] Scheduler stopped.");
-  }
-}
-
-/**
- * Return the current scheduler status.
- */
-export function getRetentionSchedulerStatus(): {
-  running: boolean;
-  schedule: string;
-  retentionDays: number;
-  nextRun: string | null;
-} {
-  const schedule = process.env.RETENTION_CRON_SCHEDULE ?? "0 3 * * *";
-  return {
-    running: retentionTask !== null,
-    schedule,
-    retentionDays: getRetentionDays(),
-    nextRun: retentionTask ? retentionTask.nextDate().toString() : null,
-  };
-}
-
-/**
- * Trigger an immediate ad-hoc archive-and-purge run (bypass cron schedule).
- * Useful for manual maintenance or testing.
- */
-export async function triggerRetentionNow(): Promise<ReturnType<typeof archiveAndPurgeOldEvents>> {
-  console.log("[retention-scheduler] Manual trigger — running archive-and-purge immediately...");
-  return archiveAndPurgeOldEvents();
+  return task;
 }

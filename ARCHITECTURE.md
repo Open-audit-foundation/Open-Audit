@@ -21,7 +21,49 @@ This document provides a detailed architectural overview of Open-Audit, the "Goo
 
 Open-Audit is a full-stack application that bridges the gap between raw blockchain data and human understanding. The system consists of five major components that work together to fetch, translate, store, and display Soroban smart contract events.
 
-### High-Level Architecture
+### Deployment Modes
+
+Open-Audit supports two server topologies:
+
+| Mode | Entry points | Best for |
+|------|--------------|----------|
+| **Legacy monolith** | `server.ts` via `npm run dev:ws` | Simple local dev, single-process deployments |
+| **Decoupled microservices** | `src/worker/indexer.ts` + `server-decoupled.ts` via `npm run dev:decoupled` | Production, fault isolation, independent scaling |
+
+In the decoupled topology, the **indexer worker** streams and translates Stellar events, publishes them to **Redis pub/sub**, and the **web server** subscribes and fans events out over WebSocket. Killing either process does not take down the other.
+
+### High-Level Architecture (Decoupled)
+
+```
+┌─────────────────┐
+│  Stellar Network│  Raw XDR events emitted by smart contracts
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Indexer Worker  │  Streams Horizon SSE (src/worker/indexer.ts)
+│ (standalone)    │
+└────────┬────────┘
+         │ translate + publish
+         ▼
+┌─────────────────┐
+│ Redis Pub/Sub   │  Channel: REDIS_CHANNEL (default stellar:events)
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Web Server      │  Next.js + WebSocket (server-decoupled.ts)
+│ (standalone)    │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Frontend        │  Interactive dashboard with search & filters
+│ Dashboard       │
+└─────────────────┘
+```
+
+### High-Level Architecture (Legacy Monolith)
 
 ```
 ┌─────────────────┐
@@ -41,7 +83,7 @@ Open-Audit is a full-stack application that bridges the gap between raw blockcha
          │
          ▼
 ┌─────────────────┐
-│ WebSocket       │  Real-time event streaming
+│ WebSocket       │  Real-time event streaming (server.ts)
 │ Server          │
 └────────┬────────┘
          │
@@ -51,6 +93,98 @@ Open-Audit is a full-stack application that bridges the gap between raw blockcha
 │ Dashboard       │
 └─────────────────┘
 ```
+
+## Decoupled Microservices Architecture
+
+The production-oriented deployment splits indexing and web serving into separate processes connected by Redis pub/sub.
+
+```mermaid
+flowchart LR
+    subgraph Stellar["Stellar Network"]
+        Horizon["Horizon SSE"]
+    end
+
+    subgraph Worker["Indexer Worker (src/worker/indexer.ts)"]
+        Stream["Horizon Stream"]
+        TranslateW["translateEvent()"]
+        Publish["Redis PUBLISH"]
+        Heartbeat["Worker Heartbeat Hash"]
+        Stream --> TranslateW --> Publish
+        Publish --> Heartbeat
+    end
+
+    subgraph RedisLayer["Redis"]
+        Channel["Pub/Sub Channel<br/>stellar:events"]
+        HB["open-audit:worker:heartbeat"]
+    end
+
+    subgraph Web["Web Server (server-decoupled.ts)"]
+        Subscribe["Redis SUBSCRIBE"]
+        WSS["WebSocket /ws/events"]
+        Next["Next.js HTTP API"]
+        Subscribe --> WSS
+    end
+
+    subgraph Clients["Clients"]
+        Dashboard["Dashboard (useLiveFeed)"]
+    end
+
+    Horizon --> Stream
+    Publish --> Channel
+    Channel --> Subscribe
+    WSS --> Dashboard
+    Next --> Dashboard
+```
+
+### Shared modules
+
+| Module | Purpose |
+|--------|---------|
+| `lib/server/ws-server.ts` | WebSocket server, per-IP connection limits, broadcast |
+| `lib/server/csp.ts` | Shared Content-Security-Policy header |
+| `lib/redis/config.ts` | `REDIS_URL`, `REDIS_CHANNEL`, heartbeat key |
+| `lib/redis/publisher.ts` | Worker-side Redis publish + reconnect queue |
+| `lib/redis/subscriber.ts` | Web-side Redis subscribe → WebSocket fan-out |
+| `lib/events/message-envelope.ts` | Pub/sub message contract |
+
+### Running the decoupled stack
+
+**Local development (requires Redis):**
+
+```bash
+# Terminal 1 — Redis (if not already running)
+docker run -p 6379:6379 redis:7-alpine
+
+# Terminal 2 — both processes (web + worker)
+npm run dev:decoupled
+
+# Or run individually:
+npm run dev:decoupled:web   # web server only
+npm run worker:indexer      # indexer worker only
+```
+
+**Docker Compose:**
+
+```bash
+docker compose -f docker-compose.microservices.yml up --build
+```
+
+**PM2 (non-Docker production):**
+
+```bash
+npm run build && npm run build:server
+pm2 start ecosystem.config.js
+```
+
+### Fault isolation
+
+Indexer and web server run in separate Node.js processes. Redis subscriber errors are logged but do not crash the web server; existing WebSocket connections stay open. See `lib/server/__tests__/fault-isolation.test.ts`.
+
+**Manual verification:**
+
+1. Start `npm run dev:decoupled` and connect a WebSocket client to `ws://localhost:3000/ws/events`.
+2. Kill the worker process (`kill <worker-pid>` or `docker stop open-audit-worker`).
+3. Confirm the web server and existing WebSocket stay connected; only new events stop until the worker restarts.
 
 ---
 
@@ -213,16 +347,37 @@ The Translation Engine is the heart of Open-Audit. It takes raw XDR events and c
 **Architecture:**
 
 #### Translation Registry (`registry.ts`)
-The central lookup table that maps contract IDs to their blueprints:
+The central lookup table that maps contract IDs to their historical versioned schemas:
 ```typescript
-Map<ContractID, TranslationBlueprint>
+Map<ContractID, ContractRegistryEntry>
+
+interface ContractRegistryEntry {
+  contractId: string;
+  contractName: string;
+  schemas: ContractSchema[];
+}
+
+interface ContractSchema {
+  version: string;
+  validFromLedger: number;
+  validToLedger: number | null;
+  blueprint: TranslationBlueprint;
+}
 ```
 
 When an event arrives:
-1. Look up contract ID in registry
-2. If found, call the blueprint's `translate()` function
-3. Return translated event with human-readable description
-4. If not found, mark as "cryptic"
+1. Look up contract ID in registry to find its `ContractRegistryEntry`.
+2. Search the `schemas` array for a version matching the event's `ledger` sequence:
+   `ledger >= validFromLedger && (validToLedger === null || ledger <= validToLedger)`
+3. If a matching schema is found, call its blueprint's `translate()` function.
+4. Return translated event with human-readable description.
+5. If not found or translation fails, mark as "cryptic".
+
+**Caching Strategy:**
+To optimize lookups, a `RESOLUTION_CACHE` maps `contractId:ledger` to the resolved `ContractSchema`, preventing repeated scans of the version list for hot contracts.
+
+**Contract Upgrades:**
+The system supports dynamic upgrades via `registerUpgrade()`. When a contract is upgraded (e.g., via `update_current_contract_wasm`), a new schema can be registered with a starting ledger, ensuring that historical events continue to decode with the old schema while new events use the updated format.
 
 #### Translation Blueprints (`blueprints/`)
 Each contract gets its own blueprint — a file that knows how to decode that contract's events.
@@ -519,7 +674,15 @@ const amount = decodeAmount(data);     // "100.00 USDC"
    cp .env.example .env.local
    ```
 
-4. **Start the development server** (with WebSocket)
+4. **Start the development server**
+
+   **Option A — Decoupled microservices (recommended for production-like dev):**
+   ```bash
+   # Requires Redis at REDIS_URL (default redis://localhost:6379)
+   npm run dev:decoupled
+   ```
+
+   **Option B — Legacy monolith (single process):**
    ```bash
    npm run dev:ws
    ```
@@ -673,8 +836,9 @@ ws.onmessage = (e) => console.log(JSON.parse(e.data));
 - **Impact:** Zero event loss during rate limiting
 
 ### WebSocket Scaling
-- **Current:** Single server broadcasts to all clients
-- **Future:** Consider Redis pub/sub for multi-server deployments
+- **Decoupled:** Indexer worker publishes to Redis; web server subscribes and broadcasts to clients. Processes restart independently via Docker Compose or PM2.
+- **Legacy monolith:** Single `server.ts` process handles indexing and WebSocket fan-out.
+- **Future:** Horizontal scaling of multiple web server instances behind a load balancer (out of scope for current release).
 
 ### Translation Performance
 - **Optimization:** Blueprint lookup is O(1) via Map

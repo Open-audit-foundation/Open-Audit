@@ -1,15 +1,16 @@
-import Redis from "ioredis";
 import { DeveloperTier, RATE_LIMITS } from "./types";
 
-let redisClient: Redis | null = null;
+const inMemoryBuckets = new Map<string, number[]>();
 
-function getRedis(): Redis | null {
-  if (redisClient) return redisClient;
-  if (process.env.REDIS_URL) {
-    redisClient = new Redis(process.env.REDIS_URL);
-    redisClient.on("error", (err) => console.error("[rate-limiter] Redis error:", err));
+function getBucket(apiKeyId: string): number[] {
+  const existing = inMemoryBuckets.get(apiKeyId);
+  if (existing) {
+    return existing;
   }
-  return redisClient;
+
+  const created: number[] = [];
+  inMemoryBuckets.set(apiKeyId, created);
+  return created;
 }
 
 export interface RateLimitResult {
@@ -22,28 +23,23 @@ export async function checkRateLimit(
   apiKeyId: string,
   tier: DeveloperTier
 ): Promise<RateLimitResult> {
-  const redis = getRedis();
   const limit = RATE_LIMITS[tier].requestsPerMinute;
   const now = Date.now();
   const windowMs = 60 * 1000;
-  const key = `rate_limit:${apiKeyId}`;
+  const bucket = getBucket(apiKeyId);
 
-  if (!redis) {
-    return { allowed: true, remaining: limit, resetAfter: 60 };
+  while (bucket.length > 0 && bucket[0] <= now - windowMs) {
+    bucket.shift();
   }
 
-  const pipeline = redis.pipeline();
-  pipeline.zremrangebyscore(key, 0, now - windowMs);
-  pipeline.zadd(key, now, `${now}-${Math.random()}`);
-  pipeline.zcard(key);
-  pipeline.expire(key, Math.ceil(windowMs / 1000));
+  const allowed = bucket.length < limit;
+  if (allowed) {
+    bucket.push(now);
+  }
 
-  const results = await pipeline.exec();
-  const count = results?.[2]?.[1] as number || 0;
-
-  const allowed = count <= limit;
-  const remaining = Math.max(0, limit - count);
-  const resetAfter = 60;
-
-  return { allowed, remaining, resetAfter };
+  return {
+    allowed,
+    remaining: Math.max(0, limit - bucket.length),
+    resetAfter: 60,
+  };
 }

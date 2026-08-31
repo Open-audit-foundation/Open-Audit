@@ -25,11 +25,11 @@ function makeRedisCacheKey(hashedKey: string): string {
   return `${REDIS_CACHE_KEY_PREFIX}${hashedKey}`;
 }
 
-export function generateApiKey(): { key: string; hash: string; prefix: string } {
+export function generateApiKey(): { key: string; hash: string; prefix: "oa_live" | "oa_test" } {
   const key = crypto.randomBytes(KEY_LENGTH).toString("hex");
   const fullKey = `${API_KEY_PREFIX}_${key}`;
   const hash = hashApiKey(fullKey);
-  return { key: fullKey, hash, prefix: API_KEY_PREFIX };
+  return { key: fullKey, hash, prefix: API_KEY_PREFIX as "oa_live" };
 }
 
 export function hashApiKey(key: string): string {

@@ -1,4 +1,20 @@
 /**
+ * ⚠️ DEPRECATION NOTICE ⚠️
+ *
+ * This is the LEGACY monolithic server implementation.
+ *
+ * KNOWN ISSUES:
+ * - Under heavy network load, indexing logic starves HTTP/WebSocket server of CPU cycles
+ * - Dropped WebSocket connections during high transaction velocity
+ * - No fault isolation: indexer crash kills entire server
+ * - Cannot scale independently
+ *
+ * For production deployments prefer the decoupled architecture:
+ *   npm run dev:decoupled   (web server)
+ *   npm run worker:indexer    (indexer worker)
+ *
+ * ---
+ *
  * Custom Next.js server with an attached WebSocket server.
  * Broadcasts newly translated Soroban events to all connected clients.
  * Bloated event data (>2KB) is automatically offloaded to IPFS before broadcast.
@@ -6,91 +22,44 @@
  * Run with: npx ts-node --project tsconfig.server.json server.ts
  * (or via the `dev:ws` npm script)
  */
-import { createServer, IncomingMessage } from "http";
+import { createServer } from "http";
 import { parse } from "url";
 import next from "next";
-import { WebSocketServer, WebSocket } from "ws";
-import { MOCK_RAW_EVENTS } from "./lib/mock-data";
-import { translateEvent } from "./lib/translator/registry";
-import { createFileIngestionStateStore, startHorizonStreamingIndexer } from "./lib/stellar/indexer";
+import { eventsIngestedTotal, recordTranslationDuration, startTelemetry } from "./lib/metrics";
+import { applyContentSecurityPolicy } from "./lib/server/csp";
+import { createEventWebSocketServer } from "./lib/server/ws-server";
+import { startHorizonStreamingIndexer } from "./lib/stellar/indexer";
 import { getNetworkConfig } from "./lib/stellar/client";
-import { captureExceptionSync, eventsIngestedTotal, metricsHandler, recordTranslationDuration, startTelemetry } from "./lib/telemetry";
-import { startRetentionScheduler } from "./lib/retention/scheduler";
+import { translateEvent } from "./lib/translator/registry";
+import { processEventForIpfs } from "./lib/ipfs/offloader";
+import { persistExecutionDag } from "./lib/dag/persistence";
 
 const dev = process.env.NODE_ENV !== "production";
 const port = parseInt(process.env.PORT ?? "3000", 10);
-const MAX_WS_CONNECTIONS_PER_IP = parseInt(process.env.MAX_WS_CONNECTIONS_PER_IP ?? "5", 10);
-const connectionsByIp = new Map<string, number>();
-
-function getClientIp(req: IncomingMessage): string {
-  const forwardedFor = req.headers["x-forwarded-for"];
-  if (typeof forwardedFor === "string" && forwardedFor.length > 0) {
-    return forwardedFor.split(",")[0].trim();
-  }
-
-  return req.socket.remoteAddress ?? "unknown";
-}
 
 const app = next({ dev });
 const handle = app.getRequestHandler();
 
 app.prepare().then(async () => {
   await startTelemetry();
+
+  // Start the data-retention scheduler (no-op when RETENTION_ENABLED=false).
   startRetentionScheduler();
+
   const httpServer = createServer((req, res) => {
-    res.setHeader(
-      "Content-Security-Policy",
-      "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss://* https://horizon-testnet.stellar.org https://soroban-testnet.stellar.org https://horizon.stellar.org https://mainnet.stellar.validationcloud.io; img-src 'self' data:; font-src 'self' data:;"
-    );
+    applyContentSecurityPolicy(res);
     const parsedUrl = parse(req.url ?? "/", true);
     handle(req, res, parsedUrl);
   });
 
-  const wss = new WebSocketServer({ server: httpServer, path: "/ws/events" });
-
-  wss.on("connection", (socket, request) => {
-    const clientIp = request ? getClientIp(request) : "unknown";
-    const activeConnections = (connectionsByIp.get(clientIp) ?? 0) + 1;
-
-    if (activeConnections > MAX_WS_CONNECTIONS_PER_IP) {
-      console.warn(
-        `[WS] Rejecting connection from ${clientIp}: too many connections (${activeConnections})`
-      );
-      socket.close(1008, "Too many connections from this IP");
-      return;
-    }
-
-    connectionsByIp.set(clientIp, activeConnections);
-    console.log(`[WS] Client connected from ${clientIp} (${activeConnections} active)`);
-
-    socket.on("close", () => {
-      const remaining = (connectionsByIp.get(clientIp) ?? 1) - 1;
-      if (remaining <= 0) {
-        connectionsByIp.delete(clientIp);
-      } else {
-        connectionsByIp.set(clientIp, remaining);
-      }
-      console.log(`[WS] Client disconnected from ${clientIp} (${Math.max(remaining, 0)} remaining)`);
-    });
+  const wsServer = createEventWebSocketServer({
+    httpServer,
+    logPrefix: "[WS]",
   });
 
-  /** Broadcast a JSON payload to every connected client. */
-  function broadcast(data: unknown): void {
-    const message = JSON.stringify(data);
-    wss.clients.forEach((client) => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(message);
-      }
-    });
-  }
-
-  // Start the real-time streaming indexer
-  const indexer = startHorizonStreamingIndexer({
+  startHorizonStreamingIndexer({
     networkConfig: getNetworkConfig(),
-    stateStore: createFileIngestionStateStore(
-      process.env.INGESTION_STATE_FILE ?? ".open-audit/ingestion-state.json"
-    ),
-    coldStartLookbackLedgers: Number(process.env.INGESTION_COLD_START_LOOKBACK_LEDGERS ?? "100"),
+    contractIds: process.env.CONTRACT_IDS ? process.env.CONTRACT_IDS.split(",") : undefined,
     onEvent: async (rawEvent) => {
       console.log(`[Indexer] New event: ${rawEvent.id} from contract ${rawEvent.contractId}`);
 
@@ -99,12 +68,27 @@ app.prepare().then(async () => {
       rawEvent.topics = processed.topics;
 
       const translated = recordTranslationDuration(rawEvent.contractId, () => translateEvent(rawEvent));
-      eventsIngestedTotal.labels(rawEvent.contractId, translated.status === "translated" ? "success" : "failed").inc();
-      broadcast(translated);
+      eventsIngestedTotal
+        .labels(translated.status === "translated" ? "success" : "failed")
+        .inc();
+      wsServer.broadcast(translated);
     },
     onError: (err) => {
-      captureExceptionSync(err, { context: { operation: "horizonStreamingIndexer" } });
+      console.error("[server.ts] Error:", err);
       console.error("[Indexer] Streaming error:", err);
+    },
+    onDag: async (dag) => {
+      try {
+        await persistExecutionDag(dag);
+        if (dag.hasReentrancy) {
+          console.warn(
+            `[Indexer] Reentrancy detected in tx ${dag.txHash}: ` +
+            dag.reentrancyDetails.map((r) => r.description).join("; ")
+          );
+        }
+      } catch (err) {
+        console.error("[Indexer] Failed to persist DAG:", err);
+      }
     },
   });
 
