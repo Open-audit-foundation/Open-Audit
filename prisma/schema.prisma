@@ -25,6 +25,12 @@ model Event {
   schemaVersion   String?  // Blueprint schema version that translated this event (e.g. "v2", "1.0.0")
   executionDagId  String?  // FK to ExecutionDag (a tx can produce multiple events)
 
+  // Source tag lets callers distinguish live-indexed from backfilled events.
+  // "live"       — emitted by the real-time Soroban/Horizon indexer
+  // "historical" — backfilled by POST /api/ingest-historical
+  // null         — pre-migration rows (treated as "live" by convention)
+  source          String?  // "live" | "historical"
+
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -35,6 +41,7 @@ model Event {
   @@index([txHash])
   @@index([contractId, ledger])
   @@index([timestamp])
+  @@index([source])
   @@index([schemaVersion])
 }
 
@@ -58,12 +65,24 @@ model DeadLetterEvent {
   @@index([createdAt])
 }
 
-// Tracks the indexer's progress through ledgers
+// Tracks indexer progress for both the live and historical ingestion paths.
+//
+// Well-known id values
+// ────────────────────
+// "current"                — live Soroban / Horizon indexer  (lib/db/utils.ts → updateCursor)
+// "historical:<contractId>"— per-contract historical backfill (lib/stellar/historical-ingester.ts → updateHistoricalCursor)
+// "historical:global"      — legacy / contract-agnostic historical runs
+//
+// Using separate ids prevents the two paths from ever overwriting each other.
+// The `lastProcessed` field records the wall-clock time of the last write so
+// operators can detect a stalled indexer or backfill at a glance.
 model IndexerCursor {
-  id              String   @id @default("current")
+  id              String   @id
   lastLedger      Int      @default(0)
   lastProcessed   DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  @@index([lastLedger])
 }
 
 // Webhook subscription registered by an external consumer

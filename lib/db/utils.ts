@@ -1,6 +1,26 @@
 import { db } from "./client";
 import { RawEvent } from "@/lib/translator/types";
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+/**
+ * Source tag written to Event.source (Issue #420).
+ *   "live"       — emitted by the real-time Soroban/Horizon indexer
+ *   "historical" — backfilled by POST /api/ingest-historical
+ */
+export type EventSource = "live" | "historical";
+
+type EventCreateInput = RawEvent & {
+  description?: string;
+  status?: string;
+  blueprintName?: string;
+  eventType?: string;
+  /** @default "live" */
+  source?: EventSource;
+};
+
+// ─── Database helpers ─────────────────────────────────────────────────────────
+
 /**
  * Initialize database connection and run migrations
  */
@@ -15,16 +35,9 @@ export async function initializeDatabase(): Promise<void> {
 }
 
 /**
- * Create or update an event in the database
+ * Create or update a single event in the database.
  */
-export async function upsertEvent(
-  event: RawEvent & {
-    description?: string;
-    status?: string;
-    blueprintName?: string;
-    eventType?: string;
-  }
-): Promise<void> {
+export async function upsertEvent(event: EventCreateInput): Promise<void> {
   await db.event.upsert({
     where: { id: event.id },
     update: {
@@ -46,17 +59,19 @@ export async function upsertEvent(
       status: event.status ?? "cryptic",
       blueprintName: event.blueprintName,
       eventType: event.eventType,
+      source: event.source ?? "live",
     },
   });
 }
 
 /**
- * Batch insert events for better performance
+ * Batch upsert events for better performance.
+ *
+ * Processes in chunks of 100 to stay within reasonable per-statement sizes.
+ * Returns the number of rows successfully upserted.
  */
 export async function batchUpsertEvents(
-  events: Array<
-    RawEvent & { description?: string; status?: string; blueprintName?: string; eventType?: string }
-  >
+  events: EventCreateInput[]
 ): Promise<number> {
   let upsertedCount = 0;
 
@@ -88,6 +103,7 @@ export async function batchUpsertEvents(
               status: event.status ?? "cryptic",
               blueprintName: event.blueprintName,
               eventType: event.eventType,
+              source: event.source ?? "live",
             },
           })
           .catch((err) => {
@@ -104,7 +120,8 @@ export async function batchUpsertEvents(
 }
 
 /**
- * Update the indexer cursor to track progress
+ * Advance the **live** indexer cursor.
+ * Uses id = "current" — never conflicts with historical cursors.
  */
 export async function updateCursor(lastLedger: number): Promise<void> {
   await db.indexerCursor.upsert({
@@ -122,7 +139,7 @@ export async function updateCursor(lastLedger: number): Promise<void> {
 }
 
 /**
- * Get the last indexed ledger
+ * Get the last ledger processed by the **live** indexer.
  */
 export async function getCursor(): Promise<number> {
   const cursor = await db.indexerCursor.findUnique({
@@ -132,54 +149,49 @@ export async function getCursor(): Promise<number> {
 }
 
 /**
- * Get event count for a ledger range
+ * Get event count for a ledger range, optionally filtered by contract and/or source.
  */
 export async function getEventCount(
   startLedger: number,
   endLedger: number,
-  contractId?: string
+  contractId?: string,
+  source?: EventSource
 ): Promise<number> {
   return db.event.count({
     where: {
-      ledger: {
-        gte: startLedger,
-        lte: endLedger,
-      },
+      ledger: { gte: startLedger, lte: endLedger },
       ...(contractId && { contractId }),
+      ...(source && { source }),
     },
   });
 }
 
 /**
- * Get events for a ledger range
+ * Get events for a ledger range, optionally filtered by contract and/or source.
  */
 export async function getEventsByLedgerRange(
   startLedger: number,
   endLedger: number,
-  contractId?: string
+  contractId?: string,
+  source?: EventSource
 ): Promise<any[]> {
   return db.event.findMany({
     where: {
-      ledger: {
-        gte: startLedger,
-        lte: endLedger,
-      },
+      ledger: { gte: startLedger, lte: endLedger },
       ...(contractId && { contractId }),
+      ...(source && { source }),
     },
     orderBy: { ledger: "asc" },
   });
 }
 
 /**
- * Clean up old events (for maintenance)
+ * Delete events older than the given date (for maintenance / retention policy).
+ * Returns the number of rows deleted.
  */
 export async function deleteOldEvents(beforeDate: Date): Promise<number> {
   const result = await db.event.deleteMany({
-    where: {
-      createdAt: {
-        lt: beforeDate,
-      },
-    },
+    where: { createdAt: { lt: beforeDate } },
   });
   return result.count;
 }
