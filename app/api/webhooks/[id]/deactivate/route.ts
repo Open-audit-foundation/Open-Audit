@@ -1,0 +1,70 @@
+/**
+ * Webhook Deactivation API
+ * POST /api/webhooks/:id/deactivate   Deactivate a subscription
+ * POST /api/webhooks/:id/activate     Reactivate a subscription
+ */
+
+import { NextRequest, NextResponse } from "next/server";
+import { db } from "@/lib/db/client";
+
+export const runtime = "nodejs";
+
+export async function POST(
+  request: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
+  const { id } = await context.params;
+  try {
+    const existing = await db.webhookSubscription.findUnique({
+      where: { id },
+    });
+
+    if (!existing) {
+      return NextResponse.json(
+        { error: "Webhook subscription not found" },
+        { status: 404 }
+      );
+    }
+
+    if (!existing.isActive) {
+      return NextResponse.json(
+        {
+          message: "Subscription is already deactivated",
+          subscription: {
+            id: existing.id,
+            isActive: existing.isActive,
+          },
+        },
+        { status: 409 }
+      );
+    }
+
+    const updated = await db.webhookSubscription.update({
+      where: { id },
+      data: {
+        isActive: false,
+        updatedAt: new Date(),
+      },
+      select: {
+        id: true,
+        url: true,
+        contractId: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    return NextResponse.json({
+      success: true,
+      message: "Webhook subscription deactivated",
+      subscription: updated,
+    });
+  } catch (error) {
+    console.error("[webhooks/:id/deactivate] POST Error:", error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Unknown error" },
+      { status: 500 }
+    );
+  }
+}

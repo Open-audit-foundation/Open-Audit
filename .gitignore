@@ -27,6 +27,7 @@ target/
 # TypeScript
 *.tsbuildinfo
 next-env.d.ts
+.server-dist/
 
 # OS
 .DS_Store
@@ -41,13 +42,12 @@ Thumbs.db
 # IDE / AI tool internals
 .kiro/
 
-# Native addon binaries (must be built locally with npm run build:native)
-native/soroban-xdr-decode/index.node
-native/soroban-xdr-decode/*.node
-
 # PM2 logs
 .pm2/
 logs/
 
 # Archive output
 archives/
+
+# Native addon binaries (build with `npm run build:native`)
+native/**/*.node

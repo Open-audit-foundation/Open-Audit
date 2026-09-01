@@ -1,24 +1,25 @@
 /**
  * Health Check API
  * GET /api/health
- * 
- * This endpoint is used by:
- * - Docker health checks
- * - Load balancers
- * - Monitoring systems
- * - Kubernetes liveness/readiness probes
- * 
- * Returns:
- * - 200 OK: Service is healthy and ready to accept traffic
- * - 503 Service Unavailable: Service is unhealthy
  */
 
 import { NextRequest, NextResponse } from "next/server";
 
-export async function GET(request: NextRequest) {
+interface HealthStatus {
+  status: string;
+  service: string;
+  timestamp: string;
+  uptime: number;
+  environment: string;
+  version: string;
+  redis?: { connected: boolean; error?: string };
+  database?: Record<string, unknown>;
+  indexer?: Record<string, unknown>;
+}
+
+export async function GET(_request: NextRequest) {
   try {
-    // Basic health check - server is running and can respond
-    const healthStatus = {
+    const healthStatus: HealthStatus = {
       status: "healthy",
       service: "open-audit-web-server",
       timestamp: new Date().toISOString(),
@@ -27,8 +28,6 @@ export async function GET(request: NextRequest) {
       version: process.env.npm_package_version || "unknown",
     };
 
-    // Optional: Check Redis connection if REDIS_URL is configured
-    // This is useful for the microservices architecture
     if (process.env.REDIS_URL) {
       try {
         const Redis = require("ioredis");
@@ -42,23 +41,19 @@ export async function GET(request: NextRequest) {
 
         healthStatus.redis = { connected: true };
       } catch (redisError) {
-        console.warn("[health] Redis check failed:", redisError.message);
-        healthStatus.redis = { 
-          connected: false, 
-          error: redisError.message 
+        const message = redisError instanceof Error ? redisError.message : String(redisError);
+        console.warn("[health] Redis check failed:", message);
+        healthStatus.redis = {
+          connected: false,
+          error: message,
         };
-        // Don't fail the health check if Redis is temporarily down
-        // The server can still serve static content and handle API requests
       }
     }
 
-    // Optional: Check database connection if using Prisma
-    // Only attempt if database libraries are available
     try {
       if (process.env.DATABASE_URL) {
-        const { db } = require("@/lib/db/client");
         const { getIndexerHealthMetrics } = require("@/lib/stellar/indexer-persistent");
-        
+
         const metrics = await getIndexerHealthMetrics();
 
         healthStatus.database = {
@@ -76,14 +71,18 @@ export async function GET(request: NextRequest) {
         healthStatus.status = metrics.healthy ? "healthy" : "degraded";
       }
     } catch (dbError) {
-      console.warn("[health] Database check skipped:", dbError.message);
-      // Database is optional in microservices architecture
-      // Don't fail the health check if database libraries are not available
+      const message = dbError instanceof Error ? dbError.message : String(dbError);
+      console.warn("[health] Database check failed:", message);
+      healthStatus.database = {
+        connected: false,
+        error: message,
+      };
+      if (process.env.DATABASE_URL) {
+        healthStatus.status = "degraded";
+      }
     }
 
-    // Return 200 OK if we got this far
     return NextResponse.json(healthStatus, { status: 200 });
-
   } catch (error) {
     console.error("[health] Health check failed:", error);
 

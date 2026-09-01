@@ -22,6 +22,8 @@ model Event {
   status          String   // "translated" | "cryptic"
   blueprintName   String?  // Contract name from blueprint
   eventType       String?  // Event type (transfer, mint, burn, etc.)
+  schemaVersion   String?  // Blueprint schema version that translated this event (e.g. "v2", "1.0.0")
+  executionDagId  String?  // FK to ExecutionDag (a tx can produce multiple events)
 
   // Source tag lets callers distinguish live-indexed from backfilled events.
   // "live"       — emitted by the real-time Soroban/Horizon indexer
@@ -32,12 +34,15 @@ model Event {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  executionDag    ExecutionDag? @relation(fields: [executionDagId], references: [id])
+
   @@index([contractId])
   @@index([ledger])
   @@index([txHash])
   @@index([contractId, ledger])
   @@index([timestamp])
   @@index([source])
+  @@index([schemaVersion])
 }
 
 model DeadLetterEvent {
@@ -78,4 +83,75 @@ model IndexerCursor {
   updatedAt       DateTime @updatedAt
 
   @@index([lastLedger])
+}
+
+// Webhook subscription registered by an external consumer
+model WebhookSubscription {
+  id          String   @id @default(cuid())
+  url         String
+  contractId  String?  // null = subscribe to all contracts
+  secretHash  String   // HMAC secret stored as scrypt-derived hash
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  deliveries  WebhookDelivery[]
+
+  @@index([isActive])
+  @@index([contractId])
+}
+
+// Execution DAG — reconstructed call tree for a Soroban transaction
+model ExecutionDag {
+  id               String   @id @default(cuid())
+  txHash           String   @unique
+  ledger           Int
+  timestamp        Int
+  nodes            Json     // DagNode[] serialized
+  maxDepth         Int
+  uniqueContracts  Int
+  hasReentrancy    Boolean  @default(false)
+  reentrancyDetails Json   // ReentrancyInfo[] serialized
+  authTraces       Json     // AuthTrace[] serialized
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  events           Event[]
+
+  @@index([ledger])
+  @@index([txHash])
+  @@index([hasReentrancy])
+  @@index([ledger, hasReentrancy])
+}
+
+// Record of each delivery attempt for auditing and debugging
+model WebhookDelivery {
+  id             String   @id @default(cuid())
+  subscriptionId String
+  eventId        String
+  httpStatus     Int?     // null when delivery failed before a response
+  succeeded      Boolean
+  attempts       Int      @default(1)
+  createdAt      DateTime @default(now())
+
+  subscription   WebhookSubscription @relation(fields: [subscriptionId], references: [id])
+
+  @@index([subscriptionId])
+  @@index([eventId])
+  @@index([subscriptionId, eventId])
+}
+
+// Database-backed API Key store for v1 REST API authentication
+model ApiKey {
+  id          String   @id @default(cuid())
+  hashedKey   String   @unique
+  appName     String
+  owner       String
+  tier        String   // "free" | "partner"
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  lastUsedAt  DateTime?
+
+  @@index([hashedKey])
+  @@index([isActive])
 }

@@ -17,7 +17,7 @@
  *  4. shortenAddress is memoised with a small bounded LRU to avoid repeated
  *     string slicing for the same high-frequency contract addresses.
  */
-
+import { xdr, StrKey } from "stellar-sdk";
 import type {
   DecodedAddress,
   DecodedAmount,
@@ -30,7 +30,6 @@ import type {
 } from "./types";
 
 // ─── HTML escape ──────────────────────────────────────────────────────────────
-
 /**
  * Module-level lookup — allocated once, never GC'd.
  * Avoids creating a new Record<string,string> on every escapeHtml() call.
@@ -43,29 +42,22 @@ const HTML_ESCAPE: Record<string, string> = {
   "'": "&#39;",
 };
 const HTML_ESCAPE_RE = /[&<>"']/g;
-
 /** Escapes HTML special characters to prevent XSS. */
 export function escapeHtml(str: string): string {
   return str.replace(HTML_ESCAPE_RE, (m) => HTML_ESCAPE[m]);
 }
-
 // ─── Sanitisation ─────────────────────────────────────────────────────────────
-
 const MAX_PARAM_LENGTH = 512;
-
 export function sanitizeTemplateParam(value: string): string {
   if (typeof value !== "string") return "";
   return escapeHtml(value.trim().slice(0, MAX_PARAM_LENGTH));
 }
-
 export interface SanitizeOptions {
   maxLength?: number;
   allowHex?: boolean;
 }
-
 // Pre-compiled — avoids re-compiling the regex on every sanitizeTextField call.
 const HEX_ONLY_RE = /^(0x)?[0-9a-fA-F\s.]+$/;
-
 export function sanitizeTextField(
   value: string,
   options: SanitizeOptions = {}
@@ -78,21 +70,17 @@ export function sanitizeTextField(
   if (allowHex && HEX_ONLY_RE.test(stripped)) return stripped;
   return escapeHtml(stripped);
 }
-
 export function validateTextField(value: string, maxLength: number = 256): boolean {
   if (typeof value !== "string") return false;
   if (value.length === 0 || value.length > maxLength) return false;
   // Allow alphanumeric, spaces, hyphen, underscore, parentheses
   return /^[A-Za-z0-9\s\-_'()]+$/.test(value);
 }
-
 // ─── Template interpolation ───────────────────────────────────────────────────
-
 // Pre-compiled once.
 const TEMPLATE_TOKEN_RE = /\{(\w+)\}/g;
 // Cap template length to guard against unbounded input.
 const MAX_TEMPLATE_LENGTH = 2048;
-
 /**
  * Replaces {placeholder} tokens with sanitised values from params.
  *
@@ -105,13 +93,11 @@ export function interpolateTemplate(
 ): string {
   if (typeof template !== "string") return "";
   const safeTemplate = escapeHtml(template.slice(0, MAX_TEMPLATE_LENGTH));
-
   // Build result with an index-walk to avoid per-substitution closure.
   let result = "";
   let lastIndex = 0;
   TEMPLATE_TOKEN_RE.lastIndex = 0; // reset shared regex state
   let match: RegExpExecArray | null;
-
   while ((match = TEMPLATE_TOKEN_RE.exec(safeTemplate)) !== null) {
     result += safeTemplate.slice(lastIndex, match.index);
     const key = match[1];
@@ -121,18 +107,14 @@ export function interpolateTemplate(
   result += safeTemplate.slice(lastIndex);
   return result;
 }
-
 // ─── Hex utilities ────────────────────────────────────────────────────────────
-
 const HEX_VALIDATE_RE = /^[0-9a-fA-F]+$/;
 const NON_HEX_RE = /[^0-9a-fA-F]/g;
-
 export function isValidHex(hex: string): boolean {
   if (!hex) return false;
   const cleanHex = hex.startsWith("0x") ? hex.slice(2) : hex;
   return HEX_VALIDATE_RE.test(cleanHex);
 }
-
 export function sanitizeHex(hex: string): string {
   if (!hex) return "";
   const cleanInput = hex.startsWith("0x") ? hex.slice(2) : hex;
@@ -140,9 +122,7 @@ export function sanitizeHex(hex: string): string {
   if (!clean) return "";
   return `0x${clean}`;
 }
-
 // ─── Address pool ─────────────────────────────────────────────────────────────
-
 /**
  * Small bounded LRU cache for shortenAddress results.
  * Full Stellar addresses are 56 chars; the same contract addresses repeat
@@ -151,7 +131,6 @@ export function sanitizeHex(hex: string): string {
  */
 const SHORTEN_CACHE_MAX = 256;
 const shortenCache = new Map<string, string>();
-
 export function shortenAddress(publicKey: string): string {
   if (publicKey.length <= 12) return publicKey;
   let short = shortenCache.get(publicKey);
@@ -164,42 +143,76 @@ export function shortenAddress(publicKey: string): string {
   shortenCache.set(publicKey, short);
   return short;
 }
-
 /**
- * Object pool for DecodedAddress instances.
+ * Memoization + object pool for DecodedAddress instances.
  *
  * decodeAddress() is called 2–3 times per translated event. At 1 000 events/s
- * that would be ~3 000 short-lived objects/s eligible for minor GC.
- * We reuse a fixed pool of pre-allocated objects instead.
+ * that would be ~3 000 short-lived objects/s eligible for minor GC. We memoise
+ * results per-hex (the same high-frequency addresses recur across a ledger) and
+ * recycle objects evicted from the cache back into a pool for reuse.
  *
- * IMPORTANT: pool objects are returned by reference. The caller must consume
- * publicKey/short synchronously and MUST NOT store the reference — the next
- * call to decodeAddress() will overwrite the same object.
+ * Because results are cached and returned by reference, callers may hold the
+ * returned object as long as the hex remains in the cache.
  */
-const ADDRESS_POOL_SIZE = 16;
-const addressPool: DecodedAddress[] = Array.from(
-  { length: ADDRESS_POOL_SIZE },
-  () => ({ publicKey: "", short: "" })
-);
-let addressPoolIndex = 0;
-
-export function decodeAddress(hex: string): DecodedAddress {
-  const seed = hex.slice(2, 10).toUpperCase();
-  const tail = hex.slice(-4).toUpperCase();
-  const publicKey = `G${seed}${"A".repeat(48 - seed.length)}${tail}`;
-
-  const obj = addressPool[addressPoolIndex];
-  obj.publicKey = publicKey;
-  obj.short = shortenAddress(publicKey);
-  addressPoolIndex = (addressPoolIndex + 1) % ADDRESS_POOL_SIZE;
-  return obj;
+const decodeAddressMemo = new Map<string, DecodedAddress>();
+const decodedAddressPool: DecodedAddress[] = [];
+const MAX_POOL_SIZE = 100;
+/** Builds a DecodedAddress, reusing a pooled object when one is available. */
+function makeDecodedAddress(publicKey: string): DecodedAddress {
+  const result = decodedAddressPool.pop() ?? { publicKey: "", short: "" };
+  result.publicKey = publicKey;
+  result.short = shortenAddress(publicKey);
+  return result;
 }
-
+/**
+ * Decodes a hex-encoded Soroban ScVal address into a canonical Stellar
+ * address string (G… for accounts, C… for contracts).
+ *
+ * Falls back to a deterministic placeholder key when the payload cannot be
+ * parsed as an address, so callers always receive a usable G-prefixed string.
+ */
+export function decodeAddress(hex: string): DecodedAddress {
+  // Check memo cache first.
+  const cached = decodeAddressMemo.get(hex);
+  if (cached) return cached;
+  let result: DecodedAddress;
+  try {
+    const cleanHex = hex.startsWith("0x") ? hex.slice(2) : hex;
+    const scVal = xdr.ScVal.fromXDR(cleanHex, "hex");
+    const scAddress = scVal.address();
+    let publicKey: string;
+    if (scAddress.switch() === xdr.ScAddressType.scAddressTypeAccount()) {
+      publicKey = StrKey.encodeEd25519PublicKey(scAddress.accountId().ed25519());
+    } else if (scAddress.switch() === xdr.ScAddressType.scAddressTypeContract()) {
+      publicKey = StrKey.encodeContract(scAddress.contractId());
+    } else {
+      throw new Error("Unsupported address type");
+    }
+    result = makeDecodedAddress(publicKey);
+  } catch {
+    // Fallback to a deterministic placeholder when parsing fails.
+    const seed = hex.replace(/^0x/, "").slice(0, 8).toUpperCase();
+    const tail = hex.slice(-4).toUpperCase();
+    const publicKey = `G${seed}${"A".repeat(Math.max(0, 48 - seed.length))}${tail}`;
+    result = makeDecodedAddress(publicKey);
+  }
+  decodeAddressMemo.set(hex, result);
+  // Trim the cache when it grows too large, recycling evicted objects.
+  if (decodeAddressMemo.size > MAX_POOL_SIZE) {
+    const keys = Array.from(decodeAddressMemo.keys());
+    for (const key of keys.slice(0, Math.floor(decodeAddressMemo.size / 2))) {
+      const removed = decodeAddressMemo.get(key);
+      decodeAddressMemo.delete(key);
+      if (removed && decodedAddressPool.length < MAX_POOL_SIZE) {
+        decodedAddressPool.push(removed);
+      }
+    }
+  }
+  return result;
+}
 // ─── Amount pool ──────────────────────────────────────────────────────────────
-
 const STROOP_DIVISOR = BigInt(10_000_000);
 const STROOP_DIVISOR_NUM = 10_000_000;
-
 /**
  * Same pooling strategy as addresses.
  * decodeAmount() is called once per translated event.
@@ -210,7 +223,6 @@ const amountPool: DecodedAmount[] = Array.from(
   () => ({ raw: BigInt(0), formatted: "0.00", symbol: "" })
 );
 let amountPoolIndex = 0;
-
 export function decodeAmount(hex: string, symbol: string = "XLM"): DecodedAmount {
   const rawValue = BigInt("0x" + hex.slice(2, 18).replace(NON_HEX_RE, "0") || "0");
   const obj = amountPool[amountPoolIndex];
@@ -220,9 +232,7 @@ export function decodeAmount(hex: string, symbol: string = "XLM"): DecodedAmount
   amountPoolIndex = (amountPoolIndex + 1) % AMOUNT_POOL_SIZE;
   return obj;
 }
-
 // ─── Event name decode ────────────────────────────────────────────────────────
-
 /**
  * Module-level map — allocated once.
  * Keyed by the hex suffix that actually varies between topics (last 8 chars)
@@ -234,20 +244,15 @@ const KNOWN_TOPIC_NAMES = new Map<string, string>([
   ["0x000000000000000000000000000000000000000000000000000000006275726e", "burn"],
   ["0x000000000000000000000000000000000000000000000000000000006170707276", "approve"],
 ]);
-
 export function decodeEventName(topicHex: string): string {
   return KNOWN_TOPIC_NAMES.get(topicHex) ?? "unknown";
 }
-
 // ─── Display helpers ──────────────────────────────────────────────────────────
-
 export function truncateHex(hex: string, chars: number = 8): string {
   if (hex.length <= chars * 2 + 2) return hex;
   return `${hex.slice(0, chars + 2)}...${hex.slice(-chars)}`;
 }
-
 // ─── ScVal decode ─────────────────────────────────────────────────────────────
-
 export function detectScValType(hex: string): ScValType {
   if (!isValidHex(hex)) return "Void";
   const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
@@ -259,35 +264,83 @@ export function detectScValType(hex: string): ScValType {
   return "Bytes";
 }
 
+function decodeScValInternal(scVal: xdr.ScVal): DecodedScVal {
+  const hex = `0x${scVal.toXDR("hex")}`;
+  switch (scVal.switch().name) {
+    case "scvBool":
+      return { type: "Bool", value: String(scVal.b()), hex };
+    case "scvU32":
+      return { type: "U32", value: String(scVal.u32()), hex };
+    case "scvI32":
+      return { type: "I32", value: String(scVal.i32()), hex };
+    case "scvU64":
+      return { type: "U64", value: scVal.u64().toString(), hex };
+    case "scvI64":
+      return { type: "I64", value: scVal.i64().toString(), hex };
+    case "scvU128":
+      const u = scVal.u128();
+      const uVal = ((BigInt(u.hi().toString()) << BigInt(64)) | BigInt(u.lo().toString())).toString();
+      return { type: "U128", value: uVal, hex };
+    case "scvI128":
+      const i = scVal.i128();
+      const iVal = ((BigInt(i.hi().toString()) << BigInt(64)) | BigInt(i.lo().toString())).toString();
+      return { type: "I128", value: iVal, hex };
+    case "scvString":
+      return { type: "String", value: scVal.str()?.toString() ?? "", hex };
+    case "scvSymbol":
+      return { type: "Symbol", value: scVal.sym()?.toString() ?? "", hex };
+    case "scvBytes":
+      return { type: "Bytes", value: "0x" + scVal.bytes().toString("hex"), hex };
+    case "scvVec": {
+      const vec = decodeVec(hex);
+      return { type: "Vec", value: vec.summary, hex };
+    }
+    case "scvMap": {
+      const map = decodeMap(hex);
+      return { type: "Map", value: map.summary, hex };
+    }
+    case "scvAddress":
+      const decoded = decodeAddress(hex);
+      return { type: "Address", value: decoded.short, hex };
+    default:
+      return { type: "Bytes", value: hex, hex };
+  }
+}
+
 export function decodeMap(hex: string): DecodedMap {
-  if (!isValidHex(hex)) {
+  try {
+    const cleanHex = hex.startsWith("0x") ? hex.slice(2) : hex;
+    const scVal = xdr.ScVal.fromXDR(cleanHex, "hex");
+    const entries = scVal.map() || [];
+    const decodedEntries: DecodedMapEntry[] = entries.map((entry) => {
+      const key = decodeScValInternal(entry.key());
+      const value = decodeScValInternal(entry.val());
+      return { key, value };
+    });
+    return {
+      type: "Map",
+      entries: decodedEntries,
+      summary: `Map with ${decodedEntries.length} ${decodedEntries.length === 1 ? "entry" : "entries"}`,
+    };
+  } catch {
     return { type: "Map", entries: [], summary: "Invalid map data" };
   }
-  if (!hex) {
-    return { type: "Map", entries: [], summary: "" };
-  }
-  const entries: DecodedMapEntry[] = [];
-  if (hex.length > 10) {
-    entries.push({
-      key: { type: "String", value: "key1", hex: "0x... " },
-      value: { type: "String", value: "value1", hex: "0x... " },
-    });
-  }
-  return { type: "Map", entries, summary: `Map with ${entries.length} entries` };
 }
 
 export function decodeVec(hex: string): DecodedVec {
-  if (!isValidHex(hex)) {
+  try {
+    const cleanHex = hex.startsWith("0x") ? hex.slice(2) : hex;
+    const scVal = xdr.ScVal.fromXDR(cleanHex, "hex");
+    const elements = scVal.vec() || [];
+    const decodedElements: DecodedScVal[] = elements.map((elem) => decodeScValInternal(elem));
+    return {
+      type: "Vec",
+      elements: decodedElements,
+      summary: `Vec with ${decodedElements.length} ${decodedElements.length === 1 ? "element" : "elements"}`,
+    };
+  } catch {
     return { type: "Vec", elements: [], summary: "Invalid vector data" };
   }
-  if (!hex) {
-    return { type: "Vec", elements: [], summary: "" };
-  }
-  const elements: DecodedScVal[] = [];
-  if (hex.length > 10) {
-    elements.push({ type: "String", value: "elem1", hex: "0x... " });
-  }
-  return { type: "Vec", elements, summary: `Vec with ${elements.length} elements` };
 }
 
 export function decodeEnum(hex: string, knownVariants?: Record<string, string>): DecodedEnum {
@@ -310,17 +363,11 @@ export function decodeEnum(hex: string, knownVariants?: Record<string, string>):
 }
 
 export function decodeScVal(hex: string): DecodedScVal {
-  const type = detectScValType(hex);
-  switch (type) {
-    case "Map":
-      return decodeMap(hex);
-    case "Vec":
-      return decodeVec(hex);
-    case "Address":
-    case "U128":
-    case "Void":
-      return { type, value: hex, hex };
-    default:
-      return { type: "Bytes", value: hex, hex };
+  try {
+    const cleanHex = hex.startsWith("0x") ? hex.slice(2) : hex;
+    const scVal = xdr.ScVal.fromXDR(cleanHex, "hex");
+    return decodeScValInternal(scVal);
+  } catch {
+    return { type: "Bytes", value: hex, hex };
   }
 }

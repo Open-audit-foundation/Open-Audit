@@ -26,7 +26,7 @@ Smart contracts on Stellar/Soroban emit events as cryptic, hex-encoded binary da
 
 ## Tech Stack
 
-- **Framework:** Next.js 14 (App Router) + TypeScript
+- **Framework:** Next.js 16.2.10 (App Router) + TypeScript
 - **Design System:** Tailwind CSS + shadcn/ui
 - **Stellar Integration:** `stellar-sdk`
 - **State Management:** React Context + Server Components
@@ -37,42 +37,25 @@ Smart contracts on Stellar/Soroban emit events as cryptic, hex-encoded binary da
 
 ### Prerequisites
 
-- Node.js >= 18
+- Node.js >= 20.9
 - npm >= 9
 
 ### Installation
 
 ```bash
-git clone https://github.com/your-org/open-audit.git
+git clone https://github.com/Open-audit-foundation/Open-Audit.git
 cd open-audit
 npm install
 npm run dev
 ```
 
-If you want a local API/server workflow for testing the app, run:
-
-```bash
-npm run dev:ws
-```
-
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-For the custom server with WebSocket support and `/metrics`, run:
+If you want the custom server with WebSocket support and `/metrics`, run:
 
 ```bash
 npm run dev:ws
 ```
-
-### Optional: Native XDR Decoder (Performance Boost)
-
-Open-Audit uses a native Rust XDR decoder for better performance. To compile it (requires Rust):
-
-```bash
-# Install Rust first if needed: https://rustup.rs
-npm run build:native
-```
-
-Without this step, the app will automatically fall back to a pure TypeScript decoder (no errors, just slightly slower performance).
 
 ### Environment Variables
 
@@ -82,16 +65,9 @@ Copy `.env.example` to `.env.local` and fill in the values:
 cp .env.example .env.local
 ```
 
-If you are working with the Redis-backed services flow, create a local environment file from the available sample config in the repository and adjust the values for your setup.
-
-| Variable | Description | Default |
-|---|---|---|
-| `NEXT_PUBLIC_HORIZON_URL` | Stellar Horizon endpoint | `https://horizon-testnet.stellar.org` |
-| `NEXT_PUBLIC_SOROBAN_RPC_URL` | Soroban RPC endpoint | `https://soroban-testnet.stellar.org` |
-| `NEXT_PUBLIC_NETWORK_PASSPHRASE` | Network passphrase | Testnet passphrase |
-| `REDIS_URL` | Redis connection URL (microservices) | `redis://localhost:6379` |
-| `REDIS_CHANNEL` | Redis Pub/Sub channel (microservices) | `stellar:events` |
-| `PORT` | HTTP server port | `3000` |
+See [`.env.example`](.env.example) for the full, commented list of
+required and optional variables — it's organized into `[REQUIRED]`
+and `[OPTIONAL]` sections with defaults and explanations for each.
 
 ### Available Scripts
 
@@ -104,25 +80,21 @@ npm run build:cli        # Build the standalone CLI
 npm run cli:example      # Exercise the CLI against the sample blueprint
 ```
 
-**Production (Microservices):**
-```bash
-npm run docker:build     # Build Docker images
-npm run docker:up        # Start all services with Docker Compose
-npm run docker:down      # Stop all Docker services
-npm run docker:logs      # View Docker logs
-
-npm run start:pm2        # Start services with PM2
-npm run stop:pm2         # Stop PM2 services
-npm run monit:pm2        # Monitor PM2 processes
-npm run logs:pm2         # View PM2 logs
-```
-
 **Testing & Quality:**
 ```bash
 npm run test             # Run all tests
+npm run test:parity      # Native/TS XDR decoder parity + fallback tests
 npm run lint             # Run ESLint
 npm run lint:registry    # Validate translation registry
 npm run format           # Format code with Prettier
+```
+
+**Native XDR decoder (optional):**
+```bash
+npm run build:native         # Build the Rust N-API decoder (release)
+npm run build:native:debug   # Debug build
+npm run build:native:docker  # Build in a clean container
+npm run bench:xdr            # TS vs native throughput comparison
 ```
 
 ---
@@ -144,40 +116,49 @@ The default Jaeger endpoint is `http://localhost:14268/api/traces`.
 
 ## Architecture
 
-Open-Audit supports two deployment architectures:
-
-### 🆕 Microservices Architecture (Recommended for Production)
-
-**Decoupled, scalable, fault-isolated system using Redis Pub/Sub:**
-
-```
-Stellar Network → Indexer Worker → Redis Pub/Sub → Web Server → WebSocket Clients
-```
-
-**Benefits:**
-- ✅ Zero CPU starvation (indexer runs in separate process)
-- ✅ Independent horizontal scaling
-- ✅ Fault isolation (crashes don't affect other services)
-- ✅ Auto-reconnect and message queuing
-- ✅ Zero-downtime deployments
-
-**Quick Start:**
-```bash
-# Option 1: Docker Compose (Easiest)
-npm run docker:up
-
-# Option 2: PM2 Process Manager
-npm run start:pm2
-
-# Option 3: Manual
-Terminal 1: redis-server
-Terminal 2: npm run dev:decoupled
-Terminal 3: npm run worker:indexer
-```
+Open-Audit currently runs as a single-process monolithic architecture:
 
 📚 **Documentation:**
 - **[Architecture Guide](ARCHITECTURE.md)** - Repository and service architecture overview
-- **[Security Hardening Guide](SECURITY_HARDENING_GUIDE.md)** - Production hardening notes
+
+### 📊 Status Monitoring System (Production-Ready)
+
+**Real-time health monitoring for all system components with sub-500ms response:**
+
+```
+Worker Heartbeat → Redis → Health API → Status Dashboard
+```
+
+**Features:**
+- ✅ Real-time component health checks (Stellar RPC, Database, Redis, Worker)
+- ✅ Circuit breaker state monitoring
+- ✅ System metrics (events, translations, connections)
+- ✅ Beautiful auto-refreshing dashboard
+- ✅ Sub-500ms API response time
+- ✅ Graceful degradation
+
+**Components Monitored:**
+- Stellar RPC (with circuit breaker state)
+- Database (Prisma connection)
+- Redis cache
+- Indexer worker (heartbeat-based)
+
+📚 **Documentation:**
+- **[Status Monitoring Guide](STATUS_MONITORING_GUIDE.md)** - Complete monitoring documentation
+
+**Quick Start:**
+```bash
+# Access status dashboard
+open http://localhost:3000/status
+
+# Check health via API
+curl http://localhost:3000/api/status | jq
+```
+
+**Worker Heartbeat:**
+- Writes to Redis every 30 seconds
+- Validates worker is alive (< 90s threshold)
+- Includes metrics: processed count, error count, uptime
 
 ### 🔒 Security Hardening (Production-Ready)
 
@@ -213,10 +194,58 @@ if (result.success) {
 }
 ```
 
-**Monitoring:**
+### ⚡ Native XDR Decoder (Optional, Rust)
+
+A native N-API module (`native/soroban-xdr-decode`) accelerates `secureParseScVal`
+for high-throughput scenarios. It is a **drop-in performance path, not a second
+parser contract**: it enforces the exact same security guards as the TypeScript
+implementation (recursion depth, allocation, timeout, collection size — same
+limits, same error classes, same messages) and the TypeScript parser remains
+the automatic fallback.
+
+**Zero configuration:** if the addon has been built for the current platform it
+is used automatically (for payloads large enough to benefit); if it is missing,
+fails to load, or misbehaves at runtime, `secureParseScVal` transparently uses
+the pure-TypeScript implementation. Set `OPEN_AUDIT_DISABLE_NATIVE_XDR=1` to
+force the TypeScript path (debugging/benchmarking only).
+
+**Building** (requires a [Rust toolchain](https://rustup.rs), or Docker):
 ```bash
-GET /api/security/metrics  # Security metrics API
+npm run build:native          # release build for the current platform
+npm run build:native:debug    # debug build
+npm run build:native:docker   # build inside a clean container (no local Rust needed)
 ```
+
+**Supported platforms:** Linux x64/arm64 (glibc & musl), macOS x64/arm64,
+Windows x64. On anything else the build script exits with a message and the
+TypeScript parser is used — that is a fully supported configuration, not an
+error.
+
+**Verification:** `npm run test:parity` runs every fuzz/security corpus input
+(including all payloads from `fuzz-xdr-parser.test.ts` and
+`secure-xdr-parser.test.ts`, deterministic mutation/random sweeps, UTF-8 edge
+cases and guard-boundary payloads) against both implementations and asserts
+identical results, and covers the automatic fallback with simulated
+missing/crashing/lying addons.
+
+**Measured throughput** (`npm run bench:xdr`, Node v20.20.2, linux-x64,
+release build, interleaved best-of-3 rounds):
+
+| workload                                  | TS ops/s | native ops/s | speedup |
+| ----------------------------------------- | -------- | ------------ | ------- |
+| typical transfer event (4 payloads)       | 104,654  | 104,173      | 1.00x   |
+| medium nested struct (depth 5, 50 fields) | 8,204    | 19,634       | 2.39x   |
+| large vec (1,000 u32)                     | 1,081    | 3,568        | 3.30x   |
+| large map (5,000 entries)                 | 104      | 324          | 3.12x   |
+| attack: nested vec depth 150              | 1,928    | 24,781       | 12.86x  |
+| attack: vec with 20,000 elements          | 292      | 1,401        | 4.80x   |
+| malformed: tiny truncated garbage         | 10,877   | 11,128       | 1.02x   |
+| malformed: 4KB of garbage                 | 23,406   | 29,623       | 1.27x   |
+
+Small payloads (< ~50 bytes) intentionally stay on the TypeScript path — the
+N-API call overhead exceeds the work saved there, so the hybrid is never
+slower than pure TS. The largest wins are on hostile payloads, where rejection
+happens in Rust before the JavaScript XDR parser ever runs.
 
 ### Legacy Monolithic Architecture
 
@@ -245,8 +274,8 @@ For new contributors wanting to understand the system's data flow and internal a
 
 1. **Event Indexer** (`lib/stellar/`, `src/worker/`) — Polls Stellar RPC with resilient rate limiting
 2. **Translation Engine** (`lib/translator/`) — Converts XDR to human-readable text with security hardening
-3. **Redis Pub/Sub** (microservices only) — Message broker for event distribution
-4. **WebSocket Server** (`server-decoupled.ts` or `server.ts`) — Broadcasts events in real-time
+3. **Redis Pub/Sub** — Message broker for event distribution
+4. **WebSocket Server** (`server.ts`) — Broadcasts events in real-time
 5. **Frontend Dashboard** (`app/dashboard/`, `components/`) — Interactive UI
 
 ---
@@ -279,20 +308,14 @@ open-audit/
 │   ├── hooks/              # React hooks for live data
 │   └── utils.ts            # Shared utilities
 ├── src/
-│   └── worker/             # 🆕 Microservices architecture
-│       └── indexer.ts      # Standalone indexer worker
+│   └── worker/             # Standalone indexer worker
+│       └── indexer.ts
 ├── scripts/
 │   ├── lint-registry.ts    # Translation registry validation
 │   └── test-websocket-client.js # WebSocket testing tool
 ├── docs/
 │   └── good-first-issues.json
 ├── server.ts               # Legacy monolithic server (deprecated)
-├── server-decoupled.ts     # 🆕 Microservices web server
-├── ecosystem.config.js     # 🆕 PM2 configuration
-├── docker-compose.microservices.yml # 🆕 Docker Compose config
-├── Dockerfile.worker       # 🆕 Indexer worker Docker image
-├── Dockerfile.web          # 🆕 Web server Docker image
-├── ARCHITECTURE.md         # 📖 Detailed architecture guide
 ├── ARCHITECTURE.md         # 📖 Detailed architecture guide
 ├── SECURITY_HARDENING_GUIDE.md # 🔒 Security documentation
 └── public/
@@ -346,68 +369,6 @@ npm run cli:example
 ```
 ✅ Translation Successful
 Description: GABC...1234 transferred 100.00 USDC to GXYZ...5678
-```
-
----
-
-## 🔒 WASM Sandbox for Community Parsers (NEW)
-
-**Secure execution environment for third-party contract parsers:**
-
-```
-Untrusted WASM → Sandbox → Zero Host Access → Strict Limits → Safe Execution
-```
-
-**Security Features:**
-- ✅ Zero host capabilities (no filesystem, network, or env access)
-- ✅ Memory limits (16MB maximum per execution)
-- ✅ Execution timeouts (5 seconds maximum)
-- ✅ Worker thread isolation (crashes don't affect main process)
-- ✅ Input/output validation (size and schema checks)
-
-**Why WASM?**
-- Community developers can write custom parsers for idiosyncratic contracts
-- **Zero RCE risk** - parsers run in complete isolation
-- Near-native performance with minimal overhead (~60-120ms)
-- Industry-standard sandboxing technology
-
-📚 **Documentation:**
-- **[WASM Sandbox Architecture](lib/wasm-sandbox/WASM_SANDBOX_ARCHITECTURE.md)** - Complete technical documentation
-- **[Community Parser Guide](lib/wasm-sandbox/COMMUNITY_PARSER_GUIDE.md)** - Write your own parser
-- **[WASM Sandbox README](lib/wasm-sandbox/README.md)** - Local usage and test commands
-
-**Quick Start (Parser Development):**
-```bash
-# Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-rustup target add wasm32-unknown-unknown
-
-# Build example parsers
-cd lib/wasm-sandbox/examples/rust
-./build-all.sh  # or build-all.bat on Windows
-
-# Test your parser
-npm run test:wasm:manual custom ./my-parser.wasm
-
-# Run test suite
-npm run test:wasm
-```
-
-**Example Usage:**
-```typescript
-import { WasmSandboxRunner } from '@/lib/wasm-sandbox';
-
-const runner = new WasmSandboxRunner();
-
-const result = await runner.execute('./parser.wasm', {
-  data: JSON.stringify({ from: 'G...', to: 'G...', amount: '1000000' }),
-  contractId: 'CDLZ...YSC',
-  eventType: 'transfer'
-});
-
-if (result.success) {
-  console.log(result.output.description);  // "Transferred 1000000..."
-}
 ```
 
 ---

@@ -44,7 +44,33 @@ export interface SearchError {
     error: string;
 }
 
-type WorkerMessage = BuildIndexRequest | SearchRequest;
+export interface AddEventsRequest {
+    type: "ADD_EVENTS";
+    requestId: string;
+    events: TranslatedEvent[];
+}
+
+export interface AddEventsResponse {
+    type: "ADD_EVENTS_RESULT";
+    requestId: string;
+    ok: true;
+    totalCount: number;
+}
+
+export interface RemoveEventsRequest {
+    type: "REMOVE_EVENTS";
+    requestId: string;
+    eventIds: string[];
+}
+
+export interface RemoveEventsResponse {
+    type: "REMOVE_EVENTS_RESULT";
+    requestId: string;
+    ok: true;
+    totalCount: number;
+}
+
+type WorkerMessage = BuildIndexRequest | SearchRequest | AddEventsRequest | RemoveEventsRequest;
 
 type IndexedEvent = {
     id: string;
@@ -229,6 +255,128 @@ function buildIndex(events: TranslatedEvent[]) {
     built = true;
 }
 
+function addEvents(events: TranslatedEvent[]): number {
+    const startIdx = docs.length;
+    for (let i = 0; i < events.length; i++) {
+        const ev = events[i];
+        const id = ev.raw.id;
+        // Skip duplicates.
+        if (docsById.has(id)) continue;
+
+        const contractId = ev.raw.contractId;
+        const description = ev.description ?? "";
+        const eventType = ev.eventType ?? "";
+        const topicText = Array.isArray(ev.raw.topics) ? ev.raw.topics.join(" ") : "";
+        const ledgerText = String(ev.raw.ledger ?? "");
+        const text = `${id} ${contractId} ${eventType} ${description} ${topicText} ${ledgerText}`;
+
+        const docIdx = docs.length;
+        docs.push({ id, contractId, text });
+        docsById.set(id, docIdx);
+
+        const list = contractIdToDocIds.get(contractId);
+        if (list) list.push(docIdx);
+        else contractIdToDocIds.set(contractId, [docIdx]);
+
+        const tokens = tokenize(text);
+        for (const token of tokens) addToken(token, docIdx);
+    }
+
+    // Re-sort and de-dupe all postings lists that may have grown.
+    for (const [token, posting] of index.entries()) {
+        const arr = posting as number[];
+        arr.sort((a, b) => a - b);
+        let w = 0;
+        for (let r = 0; r < arr.length; r++) {
+            if (r === 0 || arr[r] !== arr[w - 1]) {
+                arr[w++] = arr[r];
+            }
+        }
+        arr.length = w;
+        index.set(token, arr);
+    }
+
+    return docs.length;
+}
+
+function removeEvents(eventIds: string[]): number {
+    const idSet = new Set(eventIds);
+    const removedDocIndices = new Set<number>();
+
+    for (const id of idSet) {
+        const docIdx = docsById.get(id);
+        if (docIdx !== undefined) {
+            removedDocIndices.add(docIdx);
+            docsById.delete(id);
+
+            // Remove from contractIdToDocIds.
+            const doc = docs[docIdx];
+            if (doc) {
+                const contractList = contractIdToDocIds.get(doc.contractId);
+                if (contractList) {
+                    const filtered = contractList.filter((i) => i !== docIdx);
+                    if (filtered.length === 0) {
+                        contractIdToDocIds.delete(doc.contractId);
+                    } else {
+                        contractIdToDocIds.set(doc.contractId, filtered);
+                    }
+                }
+            }
+        }
+    }
+
+    if (removedDocIndices.size === 0) return docs.length;
+
+    // Rebuild index from scratch (removal is rare, rebuild is simpler and correct).
+    const remainingEvents: TranslatedEvent[] = [];
+    for (const doc of docs) {
+        if (!removedDocIndices.has(docsById.get(doc.id) ?? -1)) {
+            // We need the original TranslatedEvent to rebuild, but we only have
+            // the text. Since we can't reconstruct TranslatedEvent from IndexedEvent,
+            // we do a full rebuild from the remaining docs.
+        }
+    }
+
+    // Since we can't easily do incremental removal from the inverted index
+    // without the original TranslatedEvent, we rebuild from the remaining docs.
+    const remainingDocs = docs.filter((_, i) => !removedDocIndices.has(i));
+
+    // Full rebuild from remaining docs.
+    index = new Map();
+    docs = [];
+    docsById = new Map();
+    contractIdToDocIds = new Map();
+
+    for (let i = 0; i < remainingDocs.length; i++) {
+        const doc = remainingDocs[i];
+        docs[i] = doc;
+        docsById.set(doc.id, i);
+
+        const list = contractIdToDocIds.get(doc.contractId);
+        if (list) list.push(i);
+        else contractIdToDocIds.set(doc.contractId, [i]);
+
+        const tokens = tokenize(doc.text);
+        for (const token of tokens) addToken(token, i);
+    }
+
+    // Sort and de-dupe postings lists.
+    for (const [token, posting] of index.entries()) {
+        const arr = posting as number[];
+        arr.sort((a, b) => a - b);
+        let w = 0;
+        for (let r = 0; r < arr.length; r++) {
+            if (r === 0 || arr[r] !== arr[w - 1]) {
+                arr[w++] = arr[r];
+            }
+        }
+        arr.length = w;
+        index.set(token, arr);
+    }
+
+    return docs.length;
+}
+
 function postingsFor(token: string, contractId?: string): number[] {
     const base = index.get(token) as number[] | undefined;
     if (!base) return [];
@@ -371,6 +519,30 @@ self.onmessage = (ev: MessageEvent<WorkerMessage>) => {
             self.postMessage(res);
             return;
 
+        }
+
+        if (msg.type === "ADD_EVENTS") {
+            const totalCount = addEvents(msg.events);
+            const res: AddEventsResponse = {
+                type: "ADD_EVENTS_RESULT",
+                requestId: msg.requestId,
+                ok: true,
+                totalCount,
+            };
+            self.postMessage(res);
+            return;
+        }
+
+        if (msg.type === "REMOVE_EVENTS") {
+            const totalCount = removeEvents(msg.eventIds);
+            const res: RemoveEventsResponse = {
+                type: "REMOVE_EVENTS_RESULT",
+                requestId: msg.requestId,
+                ok: true,
+                totalCount,
+            };
+            self.postMessage(res);
+            return;
         }
     } catch (err) {
         const res: SearchError = {

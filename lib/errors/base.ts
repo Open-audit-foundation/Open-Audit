@@ -34,7 +34,7 @@ export class OpenAuditError extends Error {
 
   /** Sentry-style fingerprint for grouping alerts by error type and contract. */
   fingerprint(): string[] {
-    const parts = [this.code];
+    const parts: string[] = [this.code];
     if (this.context.contractId) {
       parts.push(this.context.contractId);
     }

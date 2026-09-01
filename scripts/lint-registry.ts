@@ -253,8 +253,8 @@ function validateSchema(
       errors.push({
         file: filePath,
         index,
-        contract_id: index >= 0 ? registry[index]?.contract_id : undefined,
-        topics: index >= 0 ? registry[index]?.topics : undefined,
+        contract_id: index >= 0 ? (registry as Array<{ contract_id?: string }>)[index]?.contract_id : undefined,
+        topics: index >= 0 ? ((registry as Array<{ topics?: string[] }>)[index]?.topics) : undefined,
         error: `Schema validation failed at ${err.instancePath || 'root'}: ${err.message}`,
         severity: "error"
       });

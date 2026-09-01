@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Eye, Github, GitBranch, Menu, Network, X } from "lucide-react";
+import { Eye, Github, GitBranch, Menu, Network as NetworkIcon, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { useNetwork, type Network } from "@/lib/hooks/useNetwork";
@@ -49,7 +49,7 @@ export function Header(): React.JSX.Element {
             </Button>
             <Button variant="ghost" size="sm" asChild>
               <a href="/graph">
-                <Network className="h-4 w-4 mr-1.5" />
+                <NetworkIcon className="h-4 w-4 mr-1.5" />
                 Graph
               </a>
             </Button>
@@ -61,7 +61,7 @@ export function Header(): React.JSX.Element {
             </Button>
             <Button variant="ghost" size="sm" asChild>
               <a
-                href="https://github.com/your-org/open-audit"
+                href="https://github.com/Open-audit-foundation/Open-Audit"
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -71,7 +71,7 @@ export function Header(): React.JSX.Element {
             </Button>
             <Button variant="ghost" size="sm" asChild>
               <a
-                href="https://github.com/your-org/open-audit/blob/main/CONTRIBUTING.md"
+                href="https://github.com/Open-audit-foundation/Open-Audit/blob/main/CONTRIBUTING.md"
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -128,7 +128,7 @@ export function Header(): React.JSX.Element {
             </Button>
             <Button variant="ghost" size="sm" className="w-full justify-start" asChild>
               <a href="/graph" onClick={toggleMobileMenu}>
-                <Network className="h-4 w-4 mr-1.5" />
+                <NetworkIcon className="h-4 w-4 mr-1.5" />
                 Graph
               </a>
             </Button>
@@ -156,7 +156,7 @@ export function Header(): React.JSX.Element {
             </div>
             <Button variant="ghost" size="sm" className="w-full justify-start" asChild>
               <a
-                href="https://github.com/your-org/open-audit"
+                href="https://github.com/Open-audit-foundation/Open-Audit"
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={toggleMobileMenu}
@@ -167,7 +167,7 @@ export function Header(): React.JSX.Element {
             </Button>
             <Button variant="ghost" size="sm" className="w-full justify-start" asChild>
               <a
-                href="https://github.com/your-org/open-audit/blob/main/CONTRIBUTING.md"
+                href="https://github.com/Open-audit-foundation/Open-Audit/blob/main/CONTRIBUTING.md"
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={toggleMobileMenu}

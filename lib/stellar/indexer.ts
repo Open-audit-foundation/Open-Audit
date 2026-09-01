@@ -19,6 +19,9 @@ import type { StellarNetworkConfig } from "./client";
 import type { RawEvent } from "../translator/types";
 import { reconstructDagFromMetaXdr } from "../dag/engine";
 import type { ExecutionDag } from "../dag/types";
+import { eventResponseToRawEvent } from "./events";
+import type { IngestionStateStore } from "./ingestion-state";
+export { createFileIngestionStateStore, createMemoryIngestionStateStore } from "./ingestion-state";
 
 /** Configuration for the indexer retry mechanism. */
 export interface IndexerRetryConfig {
@@ -401,8 +404,9 @@ export function startEventIndexer(options: IndexerOptions): IndexerControls {
             lastLedger: response.latestLedger,
             // stellar-sdk v12 does not expose a pagination cursor on GetEventsResponse;
             // retain the previous cursor value until a newer SDK version adds it.
-            paginationCursor: (response as unknown as Record<string, unknown>).cursor as string | undefined ?? cursor.paginationCursor,
-            paginationCursor: (response as unknown as Record<string, unknown>).cursor as string | undefined,
+            paginationCursor:
+              ((response as unknown as Record<string, unknown>).cursor as string | undefined) ??
+              cursor.paginationCursor,
           };
           await stateStore?.save({
             lastLedger: cursor.lastLedger,
@@ -496,6 +500,10 @@ export interface StreamingIndexerOptions {
    * Called on the consumer thread — safe to perform async work.
    */
   onDag?: (dag: ExecutionDag) => void | Promise<void>;
+  /** Optional durable cursor store for resuming Horizon streams. */
+  stateStore?: IngestionStateStore;
+  /** Ledger lookback hint logged on cold start (informational). */
+  coldStartLookbackLedgers?: number;
 }
 
 /**
@@ -553,7 +561,17 @@ export function startHorizonStreamingIndexer(options: StreamingIndexerOptions): 
   stop: () => void;
   getMetrics: () => IngestionPoolMetrics;
 } {
-  const { networkConfig, contractIds, onEvent, onError, workerCount, maxQueueSize, onDag } = options;
+  const {
+    networkConfig,
+    contractIds,
+    onEvent,
+    onError,
+    workerCount,
+    maxQueueSize,
+    onDag,
+    stateStore,
+    coldStartLookbackLedgers,
+  } = options;
   const server = new Horizon.Server(networkConfig.horizonUrl);
 
   let isRunning = true;
@@ -626,11 +644,17 @@ export function startHorizonStreamingIndexer(options: StreamingIndexerOptions): 
               // which contractIds are being monitored.
               if (onDag && tx.result_meta_xdr) {
                 try {
+                  // Extract the transaction source account as the top-level
+                  // authorizing account for auth tracing.
+                  const authAddresses = tx.source_account
+                    ? [tx.source_account]
+                    : undefined;
                   const dag = reconstructDagFromMetaXdr(
                     tx.result_meta_xdr,
                     tx.hash,
                     tx.ledger_attr,
-                    Math.floor(Date.now() / 1000)
+                    Math.floor(Date.now() / 1000),
+                    authAddresses
                   );
                   if (dag !== null) {
                     await onDag(dag);
@@ -732,10 +756,6 @@ export function startHorizonStreamingIndexer(options: StreamingIndexerOptions): 
 }
 
 export interface ResilientStreamingOptions extends StreamingIndexerOptions {
-  captiveCore?: Omit<
-    CaptiveCoreSupervisorOptions,
-    "stateStore" | "contractIds" | "onEvent" | "onError"
-  >;
   fallbackMode?: "horizon" | "rpc";
   fallbackPollIntervalMs?: number;
   retryConfig?: IndexerRetryConfig;
@@ -743,7 +763,7 @@ export interface ResilientStreamingOptions extends StreamingIndexerOptions {
 
 export interface ResilientStreamingControls {
   stop: () => Promise<void>;
-  getMode: () => "captive-core" | "horizon" | "rpc" | "stopped";
+  getMode: () => "horizon" | "rpc" | "stopped";
   getMetrics: () => IngestionPoolMetrics | null;
 }
 
@@ -751,97 +771,62 @@ export function startResilientEventIngestion(
   options: ResilientStreamingOptions
 ): ResilientStreamingControls {
   const {
-    captiveCore,
     fallbackMode = options.contractIds && options.contractIds.length > 0 ? "rpc" : "horizon",
     fallbackPollIntervalMs = 5000,
     onEvent,
     onError,
+    onDag,
     contractIds,
     stateStore,
   } = options;
 
-  let mode: "captive-core" | "horizon" | "rpc" | "stopped" = captiveCore ? "captive-core" : fallbackMode;
-  let fallbackStarted = false;
+  let mode: "horizon" | "rpc" | "stopped" = fallbackMode;
   let fallbackControls:
     | ReturnType<typeof startHorizonStreamingIndexer>
     | IndexerControls
     | null = null;
-  let captiveControls: CaptiveCoreControls | null = null;
 
-  const startFallback = () => {
-    if (fallbackStarted) {
-      return;
-    }
-    fallbackStarted = true;
-    mode = fallbackMode;
-
-    if (fallbackMode === "rpc" && contractIds && contractIds.length > 0) {
-      fallbackControls = startEventIndexer({
-        networkConfig: options.networkConfig,
-        contractIds,
-        startLedger: 0,
-        pollIntervalMs: fallbackPollIntervalMs,
-        retryConfig: options.retryConfig,
-        stateStore,
-        onEvents: async (events) => {
-          for (const event of events) {
-            await onEvent(eventResponseToRawEvent(event, contractIds[0]));
-          }
-        },
-        onError: (error) => onError?.(error),
-      });
-      return;
-    }
-
+  if (fallbackMode === "rpc" && contractIds && contractIds.length > 0) {
+    fallbackControls = startEventIndexer({
+      networkConfig: options.networkConfig,
+      contractIds,
+      startLedger: 0,
+      pollIntervalMs: fallbackPollIntervalMs,
+      retryConfig: options.retryConfig,
+      stateStore,
+      onEvents: async (events) => {
+        for (const event of events) {
+          await onEvent(eventResponseToRawEvent(event, contractIds[0]));
+        }
+      },
+      onError: (error) => onError?.(error),
+    });
+  } else {
+    mode = "horizon";
     fallbackControls = startHorizonStreamingIndexer({
       networkConfig: options.networkConfig,
       contractIds,
       onEvent,
       onError,
+      onDag,
       workerCount: options.workerCount,
       maxQueueSize: options.maxQueueSize,
       stateStore,
       coldStartLookbackLedgers: options.coldStartLookbackLedgers,
-    });
-  };
-
-  if (!captiveCore) {
-    startFallback();
-  } else {
-    void startCaptiveCoreIndexer({
-      ...captiveCore,
-      contractIds,
-      stateStore,
-      onEvent,
-      onError,
-      onExhausted: (error) => {
-        onError?.(error);
-        startFallback();
-      },
-    }).then((controls) => {
-      captiveControls = controls;
-    }).catch((error) => {
-      onError?.(error instanceof Error ? error : new Error(String(error)));
-      startFallback();
     });
   }
 
   return {
     stop: async () => {
       mode = "stopped";
-      await captiveControls?.stop();
-      if (fallbackControls) {
-        if ("stop" in fallbackControls) {
-          await Promise.resolve(fallbackControls.stop());
-        }
-      }
+      fallbackControls?.stop();
     },
     getMode: () => mode,
     getMetrics: () => {
-      if (fallbackControls && "getMetrics" in fallbackControls) {
-        return fallbackControls.getMetrics();
+      if (!fallbackControls || !("getMetrics" in fallbackControls)) {
+        return null;
       }
-      return null;
+      return fallbackControls.getMetrics();
     },
   };
 }

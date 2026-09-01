@@ -6,8 +6,86 @@
  * TranslationBlueprint — the contract-specific translation logic.
  */
 
-/** Supported languages. */
+/**
+ * Supported languages.
+ *
+ * This is the single source of truth for the `Language` type. All locale
+ * files, hooks, and translation functions must import it from here rather
+ * than redeclaring it, so that adding a new locale only requires changing
+ * this declaration.
+ */
 export type Language = "en" | "es" | "fr" | "zh";
+
+/**
+ * The shape every locale file under `./translations/` must implement.
+ * `generic` covers the registry/decoder fallback and error paths so that
+ * unregistered-contract and unknown-event messages are locale-aware rather
+ * than hardcoded English strings.
+ */
+export interface TranslationMap {
+  sac: {
+    transfer: (from: string, amount: string, symbol: string, to: string) => string;
+    mint: (admin: string, amount: string, symbol: string, to: string) => string;
+    burn: (from: string, amount: string, symbol: string) => string;
+    eventTypes: {
+      Transfer: string;
+      Mint: string;
+      Burn: string;
+    };
+  };
+  sdex: {
+    manageBuyOffer: (seller: string, amount: string, buyingAsset: string, sellingAsset: string) => string;
+    manageSellOffer: (seller: string, amount: string, sellingAsset: string, buyingAsset: string) => string;
+    offerFilled: (seller: string, amount: string, assetSold: string, buyer: string) => string;
+    eventTypes: {
+      ManageBuyOffer: string;
+      ManageSellOffer: string;
+      OfferFilled: string;
+    };
+  };
+  soroswap: {
+    swap: (to: string, amountIn: string, tokenIn: string, amountOut: string, tokenOut: string) => string;
+    addLiquidity: (to: string, amountA: string, tokenA: string, amountB: string, tokenB: string, liquidity: string) => string;
+    removeLiquidity: (to: string, amountA: string, tokenA: string, amountB: string, tokenB: string, liquidity: string) => string;
+    eventTypes: {
+      Swap: string;
+      AddLiquidity: string;
+      RemoveLiquidity: string;
+    };
+  };
+  blend: {
+    supply: (from: string, amount: string, asset: string) => string;
+    borrow: (from: string, amount: string, asset: string) => string;
+    repay: (from: string, amount: string, asset: string) => string;
+    withdraw: (from: string, amount: string, asset: string) => string;
+    liquidate: (user: string, filler: string, amount: string) => string;
+    eventTypes: {
+      Supply: string;
+      Borrow: string;
+      Repay: string;
+      Withdraw: string;
+      Liquidate: string;
+    };
+  };
+  generic: {
+    /** Fallback contract name shown when an unregistered contract has no custom ABI name. */
+    unregisteredContractName: string;
+    /** Description shown when the generic decoder could produce a structure for an unregistered contract. */
+    unregisteredContractDescription: (payload: string) => string;
+    /** Description shown when no blueprint is registered for a contract at all. */
+    unknownEventNoBlueprint: (contractId: string, data: string) => string;
+    /** Description shown when a contract is registered but no schema applies at the event's ledger. */
+    unknownEventNoBlueprintApplicable: (contractId: string, ledger: number, data: string) => string;
+    /** Shown by the generic fallback decoder when a String value's declared length overruns the payload. */
+    invalidStringLength: string;
+    /** Shown by the generic fallback decoder when decoded bytes are not valid UTF-8. */
+    invalidUtf8: string;
+    /** Shown by the generic fallback decoder when a Symbol value's declared length overruns the payload. */
+    invalidSymbolLength: string;
+    /** Shown by the generic fallback decoder when an Address's discriminant is unrecognized. */
+    unknownAddress: string;
+  };
+}
 
 /** A raw Soroban contract event as fetched from Horizon/RPC. */
 export interface RawEvent {

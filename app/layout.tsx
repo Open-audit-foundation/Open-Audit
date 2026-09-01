@@ -1,12 +1,9 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
 import { Header } from "@/components/dashboard/Header";
 import { LanguageProvider } from "@/lib/hooks/useLanguage";
 import { NetworkProviderClient } from "@/components/NetworkProviderClient";
 import { Toaster } from "@/components/ui/toaster";
-
-const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
 export const metadata: Metadata = {
   title: {
@@ -30,7 +27,7 @@ interface RootLayoutProps {
 export default function RootLayout({ children }: RootLayoutProps): React.JSX.Element {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.variable} font-sans antialiased min-h-screen bg-background`}>
+      <body className="font-sans antialiased min-h-screen bg-background">
         <NetworkProviderClient>
           <LanguageProvider>
             <div className="relative flex min-h-screen flex-col">
@@ -43,7 +40,7 @@ export default function RootLayout({ children }: RootLayoutProps): React.JSX.Ele
                     <p>Open-Audit — Open source transparency for the Stellar ecosystem.</p>
                     <div className="flex items-center gap-4">
                       <a
-                        href="https://github.com/your-org/open-audit"
+                        href="https://github.com/Open-audit-foundation/Open-Audit"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="hover:text-foreground transition-colors"
@@ -51,7 +48,7 @@ export default function RootLayout({ children }: RootLayoutProps): React.JSX.Ele
                         GitHub
                       </a>
                       <a
-                        href="https://github.com/your-org/open-audit/blob/main/CONTRIBUTING.md"
+                        href="https://github.com/Open-audit-foundation/Open-Audit/blob/main/CONTRIBUTING.md"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="hover:text-foreground transition-colors"
