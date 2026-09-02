@@ -61,6 +61,7 @@ that file is the source of truth if a value here goes stale.
 | Safe error messages (no leakage) | `lib/translator/__tests__/parser-security.test.ts` → `describe("Safe Error Messages")` |
 | End-to-end secure parsing (valid + nested + real-world events) | `lib/translator/__tests__/secure-xdr-parser.test.ts` |
 | Randomized/fuzzed malicious payloads | `lib/translator/__tests__/fuzz-xdr-parser.test.ts` |
+| CSV formula-injection neutralization | `app/api/v1/events/export/route.test.ts` → `describe("GET /api/v1/events/export")` → `it("neutralizes CSV formula-injection prefixes", ...)` |
 
 Run the security-focused suites directly with:
 
@@ -87,6 +88,25 @@ if (result.success) {
 ## Scope
 
 These guards protect the XDR/ScVal parsing layer specifically. They
+
+## CSV / Formula Injection protection
+
+The event export endpoint at `app/api/v1/events/export/route.ts` streams
+untrusted contract event data as CSV. Untranslated or malicious contract
+event fields could start with spreadsheet formula-triggering characters
+(`=`, `+`, `-`, `@`, tab or carriage return). When opened in Excel, Google
+Sheets or LibreOffice Calc, those cells would be executed as formulas
+(CWE-1236).
+
+Mitigation: `escapeCSV()` in the export route prefixes any value that
+starts with one of those characters with a single quote (`'`), which
+forces spreadsheet applications to treat the cell as plain text. The
+standard RFC 4180 quote/comma/newline escaping is still applied on top
+of that prefix, so the two protections compose correctly.
+
+JSON and NDJSON exports are not vulnerable to formula injection because
+they serialize values as JSON strings; any downstream pipeline that
+converts those exports to CSV should apply the same neutralization.
 are not a general-purpose sandbox: there is currently no isolated
 execution environment (e.g. WASM sandboxing) for third-party contract
 parsers in this repository.

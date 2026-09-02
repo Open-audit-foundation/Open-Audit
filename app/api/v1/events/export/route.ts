@@ -45,8 +45,18 @@ const DEFAULT_LIMIT = 100_000;
 const CSV_HEADER = "timestamp,ledger_id,contract_id,tx_hash,event_name,status,plain_english_translation,proof_url,schema_version\r\n";
 
 function escapeCSV(val: string | number): string {
-  const s = String(val);
-  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  let s = String(val);
+  // Neutralize spreadsheet formula-injection triggers (CWE-1236).
+  // A leading single quote forces Excel, Google Sheets and LibreOffice Calc
+  // to treat the cell as text instead of executing a formula.
+  if (/^[=+\-\@\t\r]/.test(s)) {
+    s = "'" + s;
+  }
+  // RFC 4180 quote/comma/newline escaping.
+  if (/[",\r\n]/.test(s)) {
+    s = `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
 }
 
 /**
@@ -100,12 +110,12 @@ function toRow(event: TranslatedEvent) {
 
 function rowToCSVLine(row: ReturnType<typeof toRow>): string {
   return [
-    row.timestamp,
+    escapeCSV(row.timestamp),
     row.ledger_id,
     escapeCSV(row.contract_id),
     escapeCSV(row.tx_hash),
     escapeCSV(row.event_name),
-    row.status,
+    escapeCSV(row.status),
     escapeCSV(row.plain_english_translation),
     escapeCSV(row.proof_url),
     escapeCSV(row.schema_version),

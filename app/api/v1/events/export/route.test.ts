@@ -210,4 +210,24 @@ describe("GET /api/v1/events/export", () => {
     expect(res.status).toBe(400);
     expect(findMany).not.toHaveBeenCalled();
   });
+
+  it("neutralizes CSV formula-injection prefixes", async () => {
+    installTable([
+      makeRow({ id: "e-1", ledger: 100, description: "=cmd|'/c calc'!A0" }),
+      makeRow({ id: "e-2", ledger: 101, description: "+8675309" }),
+      makeRow({ id: "e-3", ledger: 102, description: "-50 tokens" }),
+      makeRow({ id: "e-4", ledger: 103, description: "@SUM(A1:A10)" }),
+    ]);
+
+    const res = await GET(request("?format=csv"));
+    const text = await res.text();
+    const lines = text.trim().split("\r\n");
+
+    expect(lines).toHaveLength(5); // header + 4 rows
+    // Each dangerous prefix is prefixed with a single quote so spreadsheets treat it as text.
+    expect(lines[1]).toContain("'" + "=cmd|'/c calc'!A0");
+    expect(lines[2]).toContain("'" + "+8675309");
+    expect(lines[3]).toContain("'" + "-50 tokens");
+    expect(lines[4]).toContain("'" + "@SUM(A1:A10)");
+  });
 });
