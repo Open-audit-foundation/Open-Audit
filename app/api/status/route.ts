@@ -17,6 +17,7 @@ import { SorobanRpc } from "stellar-sdk";
 import Redis from "ioredis";
 import { resilientStellarClient } from "../../../lib/stellar/resilient-stellar-client";
 import { CircuitState } from "../../../lib/resilience/circuit-breaker";
+import { activeWebSocketConnections } from "../../../lib/metrics";
 
 // ============================================================================
 // Type Definitions
@@ -313,7 +314,43 @@ async function checkWorker(): Promise<ComponentHealthResponse> {
 }
 
 /**
- * Aggregate metrics from database
+ * Read the live WebSocket gauge maintained by lib/server/ws-server.
+ * The gauge is process-local, so this reflects real connections when the
+ * route runs in the same process as the WebSocket server (legacy monolith
+ * and decoupled web server both attach it), and degrades to 0 otherwise.
+ */
+async function getActiveWebSocketConnections(): Promise<number> {
+  try {
+    const sample = await activeWebSocketConnections.get();
+    const value = sample.values?.[0]?.value;
+    return typeof value === "number" ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+
+interface MetricCounts {
+  events_1h: bigint | number | string;
+  events_24h: bigint | number | string;
+  translated_1h: bigint | number | string;
+  translated_24h: bigint | number | string;
+}
+
+function toNumber(value: bigint | number | string | null | undefined): number {
+  if (value === null || value === undefined) return 0;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * Aggregate metrics from the database.
+ *
+ * Event counts and translation success rates come from real queries against
+ * the Event table (Postgres COUNT ... FILTER, evaluated server-side in a
+ * single round-trip). Translation latency is not recorded per event in the
+ * current schema, so it stays 0 until a duration column exists. The
+ * WebSocket connection count is read from the Prometheus gauge kept by
+ * lib/server/ws-server rather than hardcoded.
  */
 async function aggregateMetrics(): Promise<{
   eventsIndexedLast1h: number;
@@ -323,33 +360,63 @@ async function aggregateMetrics(): Promise<{
   averageTranslationLatencyMs: number;
   activeWebSocketConnections: number;
 }> {
+  const activeWs = await getActiveWebSocketConnections();
+
+  const fallback = {
+    eventsIndexedLast1h: 0,
+    eventsIndexedLast24h: 0,
+    translationSuccessRate1h: 0,
+    translationSuccessRate24h: 0,
+    averageTranslationLatencyMs: 0,
+    activeWebSocketConnections: activeWs,
+  };
+
   try {
-    // TODO: Implement actual database queries based on your schema
-    // For now, return mock data as placeholders
-    
-    // Example queries you might implement:
-    // const events1h = await prisma.event.count({
-    //   where: { createdAt: { gte: new Date(Date.now() - 3600000) } }
-    // });
-    
-    return {
-      eventsIndexedLast1h: 0,
-      eventsIndexedLast24h: 0,
-      translationSuccessRate1h: 0,
-      translationSuccessRate24h: 0,
-      averageTranslationLatencyMs: 0,
-      activeWebSocketConnections: 0,
-    };
+    // Import Prisma dynamically to avoid initialization errors
+    const { PrismaClient } = await import("@prisma/client");
+    const prisma = new PrismaClient();
+
+    try {
+      const rows = await Promise.race([
+        prisma.$queryRaw<MetricCounts[]>`
+          SELECT
+            COUNT(*) FILTER (WHERE "createdAt" >= NOW() - INTERVAL '1 hour')   AS events_1h,
+            COUNT(*) FILTER (WHERE "createdAt" >= NOW() - INTERVAL '24 hours') AS events_24h,
+            COUNT(*) FILTER (WHERE "createdAt" >= NOW() - INTERVAL '1 hour'   AND status = 'translated') AS translated_1h,
+            COUNT(*) FILTER (WHERE "createdAt" >= NOW() - INTERVAL '24 hours' AND status = 'translated') AS translated_24h
+          FROM "Event"
+        `,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Timeout")), 2000)
+        ),
+      ]);
+
+      const row = rows[0];
+      if (!row) return fallback;
+
+      const events1h = toNumber(row.events_1h);
+      const events24h = toNumber(row.events_24h);
+      const translated1h = toNumber(row.translated_1h);
+      const translated24h = toNumber(row.translated_24h);
+
+      return {
+        eventsIndexedLast1h: events1h,
+        eventsIndexedLast24h: events24h,
+        // UI renders these as percentages (e.g. "98.5%").
+        translationSuccessRate1h:
+          events1h > 0 ? Math.round((translated1h / events1h) * 1000) / 10 : 0,
+        translationSuccessRate24h:
+          events24h > 0 ? Math.round((translated24h / events24h) * 1000) / 10 : 0,
+        // The schema records no per-event translation duration yet.
+        averageTranslationLatencyMs: 0,
+        activeWebSocketConnections: activeWs,
+      };
+    } finally {
+      await prisma.$disconnect();
+    }
   } catch (error) {
     console.error("Failed to aggregate metrics:", error);
-    return {
-      eventsIndexedLast1h: 0,
-      eventsIndexedLast24h: 0,
-      translationSuccessRate1h: 0,
-      translationSuccessRate24h: 0,
-      averageTranslationLatencyMs: 0,
-      activeWebSocketConnections: 0,
-    };
+    return fallback;
   }
 }
 

@@ -1,6 +1,8 @@
 import type { IncomingMessage, Server as HttpServer } from "http";
 import { WebSocket, WebSocketServer } from "ws";
 
+import { activeWebSocketConnections } from "../metrics";
+
 export interface EventWebSocketServerOptions {
   httpServer: HttpServer;
   path?: string;
@@ -62,9 +64,17 @@ export function createEventWebSocketServer(
     }
 
     connectionsByIp.set(clientIp, activeConnections);
+    activeWebSocketConnections.inc();
     console.log(`${logPrefix} Client connected from ${clientIp} (${activeConnections} active)`);
 
+    // "close" always follows "error" on a ws socket, so guard against a
+    // double release that would underflow both the per-IP counter and the
+    // Prometheus gauge.
+    let released = false;
     const releaseConnection = () => {
+      if (released) return;
+      released = true;
+      activeWebSocketConnections.dec();
       decrementConnectionCount(connectionsByIp, clientIp);
       const remaining = connectionsByIp.get(clientIp) ?? 0;
       console.log(`${logPrefix} Client disconnected from ${clientIp} (${Math.max(remaining, 0)} remaining)`);
