@@ -24,6 +24,9 @@ model Event {
   eventType       String?  // Event type (transfer, mint, burn, etc.)
   schemaVersion   String?  // Blueprint schema version that translated this event (e.g. "v2", "1.0.0")
   executionDagId  String?  // FK to ExecutionDag (a tx can produce multiple events)
+  // Postgres full-text search vector (tsvector), maintained by DB trigger —
+  // see migration 20260904000000_add_event_full_text_search (issue #409).
+  searchVector    Unsupported("tsvector")?
 
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
