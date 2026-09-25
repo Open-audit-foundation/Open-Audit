@@ -84,6 +84,29 @@ if (result.success) {
 }
 ```
 
+## CSV / Formula Injection on event export
+
+`GET /api/v1/events/export` streams translated events as CSV, JSON, or
+NDJSON. Translation text (`plain_english_translation` and related string
+columns) is derived from contract event data, so a crafted or compromised
+contract can emit values that begin with `=`, `+`, `-`, `@`, tab, or CR.
+
+Spreadsheet applications treat those prefixes as formulas (CWE-1236). The
+CSV path neutralizes them in `escapeCSV` inside
+[`app/api/v1/events/export/route.ts`](app/api/v1/events/export/route.ts)
+by prefixing a single quote (`'`) **before** RFC 4180 quote/comma/newline
+escaping. Every textual CSV column goes through `escapeCSV`.
+
+**JSON / NDJSON audit:** formula injection is spreadsheet-specific. The
+JSON and NDJSON export paths leave string values unmodified (correct for
+those formats). Downstream tooling that re-serializes those exports into
+CSV/spreadsheets must apply the same neutralization — Open-Audit does not
+mutate JSON/NDJSON payloads for this class of risk.
+
+Regression coverage lives in
+`app/api/v1/events/export/route.test.ts` (formula-prefix and legitimate-
+value cases).
+
 ## Scope
 
 These guards protect the XDR/ScVal parsing layer specifically. They

@@ -44,8 +44,22 @@ const DEFAULT_LIMIT = 100_000;
 
 const CSV_HEADER = "timestamp,ledger_id,contract_id,tx_hash,event_name,status,plain_english_translation,proof_url,schema_version\r\n";
 
+/**
+ * Escape a CSV cell for both RFC 4180 and CSV/Formula Injection (CWE-1236).
+ *
+ * Spreadsheet apps (Excel, Google Sheets, LibreOffice Calc) treat cell
+ * values that begin with `=`, `+`, `-`, `@`, tab, or CR as formulas. Contract
+ * event translations can carry those prefixes, so we neutralize them by
+ * prefixing a single quote before applying standard quote/comma/newline
+ * escaping. Both steps are required — quoting alone does not disable formula
+ * evaluation in common spreadsheet tools.
+ */
 function escapeCSV(val: string | number): string {
-  const s = String(val);
+  let s = String(val);
+  // Neutralize formula-triggering prefixes (CWE-1236).
+  if (/^[=+\-@\t\r]/.test(s)) {
+    s = "'" + s;
+  }
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
@@ -99,13 +113,18 @@ function toRow(event: TranslatedEvent) {
 }
 
 function rowToCSVLine(row: ReturnType<typeof toRow>): string {
+  // Escape every textual column — contract-influenced fields (event_name,
+  // plain_english_translation, schema_version) and adjacent string columns
+  // alike — so a malicious/compromised translation cannot land a formula
+  // prefix in any cell. ledger_id is a numeric ledger sequence and stays
+  // unquoted as a bare integer.
   return [
-    row.timestamp,
+    escapeCSV(row.timestamp),
     row.ledger_id,
     escapeCSV(row.contract_id),
     escapeCSV(row.tx_hash),
     escapeCSV(row.event_name),
-    row.status,
+    escapeCSV(row.status),
     escapeCSV(row.plain_english_translation),
     escapeCSV(row.proof_url),
     escapeCSV(row.schema_version),

@@ -83,6 +83,38 @@ function request(query: string): NextRequest {
   return new NextRequest(`http://localhost/api/v1/events/export${query}`);
 }
 
+
+/** Minimal RFC 4180 field splitter for assertions (handles quoted cells). */
+function parseCsvLine(line: string): string[] {
+  const fields: string[] = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        cur += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ",") {
+      fields.push(cur);
+      cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+  fields.push(cur);
+  return fields;
+}
+
 beforeEach(() => {
   findMany.mockReset();
 });
@@ -209,5 +241,69 @@ describe("GET /api/v1/events/export", () => {
     const res = await GET(request("?format=xml"));
     expect(res.status).toBe(400);
     expect(findMany).not.toHaveBeenCalled();
+  });
+
+  it("neutralizes CSV formula-injection prefixes in plain_english_translation", async () => {
+    const payloads = [
+      { id: "f-eq", ledger: 10, description: "=cmd|' /C calc'!A0" },
+      { id: "f-plus", ledger: 11, description: "+1+1" },
+      { id: "f-minus", ledger: 12, description: "-2+3" },
+      { id: "f-at", ledger: 13, description: "@SUM(A1:A10)" },
+      { id: "f-tab", ledger: 14, description: "\t=HYPERLINK(\"http://evil\")" },
+      { id: "f-cr", ledger: 15, description: "\r=1+1" },
+    ];
+    installTable(payloads.map((p) => makeRow({ ...p, status: "translated" })));
+
+    const res = await GET(request("?format=csv"));
+    const lines = (await res.text()).trim().split("\r\n").slice(1); // drop header
+    expect(lines).toHaveLength(payloads.length);
+
+    for (const line of lines) {
+      // Column 7 (0-based index 6) is plain_english_translation.
+      // parseCsvLine already returns unquoted field values.
+      const translation = parseCsvLine(line)[6];
+      expect(translation.startsWith("'")).toBe(true);
+      expect(/^[=+\-@\t\r]/.test(translation)).toBe(false);
+    }
+  });
+
+  it("keeps legitimate translations readable and still escapes phone-like + prefixes safely", async () => {
+    installTable([
+      makeRow({ id: "ok-1", ledger: 20, description: "Transferred 100 USDC" }),
+      makeRow({ id: "ok-2", ledger: 21, description: "+15551234567" }),
+      makeRow({
+        id: "ok-3",
+        ledger: 22,
+        description: 'Said "hello, world" to Alice',
+      }),
+    ]);
+
+    const res = await GET(request("?format=csv"));
+    const lines = (await res.text()).trim().split("\r\n").slice(1);
+    const translations = lines.map((line) => parseCsvLine(line)[6]);
+
+    expect(translations[0]).toBe("Transferred 100 USDC");
+    // Leading + is neutralized with a quote but remains human-readable.
+    expect(translations[1]).toBe("'+15551234567");
+    expect(translations[2]).toBe('Said "hello, world" to Alice');
+  });
+
+  it("leaves JSON/NDJSON translation values unmutated (formula injection is CSV-specific)", async () => {
+    installTable([
+      makeRow({ id: "j-1", ledger: 30, description: "=1+1" }),
+      makeRow({ id: "j-2", ledger: 31, description: "@SUM(A1)" }),
+    ]);
+
+    const json = JSON.parse(await (await GET(request("?format=json"))).text());
+    expect(json[0].plain_english_translation).toBe("=1+1");
+    expect(json[1].plain_english_translation).toBe("@SUM(A1)");
+
+    const nd = (await (await GET(request("?format=ndjson"))).text())
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => JSON.parse(l));
+    expect(nd[0].plain_english_translation).toBe("=1+1");
+    expect(nd[1].plain_english_translation).toBe("@SUM(A1)");
   });
 });
