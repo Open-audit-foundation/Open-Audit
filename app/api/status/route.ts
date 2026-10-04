@@ -18,6 +18,9 @@ import Redis from "ioredis";
 import { resilientStellarClient } from "../../../lib/stellar/resilient-stellar-client";
 import { CircuitState } from "../../../lib/resilience/circuit-breaker";
 
+
+export { routeDoc } from "@/lib/openapi/operations/status";
+
 // ============================================================================
 // Type Definitions
 // ============================================================================

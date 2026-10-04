@@ -19,6 +19,9 @@ import { db } from "@/lib/db/client";
 import { authenticateAndRateLimit } from "@/lib/api/middleware";
 import { toErrorResponse, validationErrorResponse } from "@/lib/api/error-response";
 
+
+export { routeDoc } from "@/lib/openapi/operations/events";
+
 const DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 100;
 const STATUS_VALUES = ["translated", "cryptic"] as const;

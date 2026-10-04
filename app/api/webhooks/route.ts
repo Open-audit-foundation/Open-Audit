@@ -9,6 +9,9 @@ import { db } from "@/lib/db/client";
 import { validateWebhookUrl } from "@/lib/webhooks/ssrf-protection";
 import { generateWebhookSecret } from "@/lib/webhooks/signing";
 
+
+export { routeDoc } from "@/lib/openapi/operations/webhooks";
+
 export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {

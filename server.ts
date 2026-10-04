@@ -33,6 +33,7 @@ import { getNetworkConfig } from "./lib/stellar/client";
 import { translateEvent } from "./lib/translator/registry";
 import { processEventForIpfs } from "./lib/ipfs/offloader";
 import { persistExecutionDag } from "./lib/dag/persistence";
+import { startRetentionScheduler } from "./lib/retention";
 
 const dev = process.env.NODE_ENV !== "production";
 const port = parseInt(process.env.PORT ?? "3000", 10);

@@ -5,6 +5,9 @@
 
 import { NextRequest, NextResponse } from "next/server";
 
+
+export { routeDoc } from "@/lib/openapi/operations/health";
+
 interface HealthStatus {
   status: string;
   service: string;

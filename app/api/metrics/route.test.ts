@@ -1,5 +1,16 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { createRequire } from "node:module";
 import { NextRequest } from "next/server";
+import { buildOpenApiDocument } from "@/lib/openapi/build-spec";
+
+// Use the same request builder used by the installed Swagger UI.
+const swaggerClient: {
+  buildRequest(options: {
+    spec: ReturnType<typeof buildOpenApiDocument>;
+    operationId: string;
+    securities: { authorized: Record<string, { value: string }> };
+  }): { headers: Record<string, string> };
+} = createRequire(import.meta.url)("swagger-client");
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -83,19 +94,21 @@ function makeRequest(authHeader?: string): NextRequest {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  delete process.env.METRICS_TOKEN;
+  vi.stubEnv("METRICS_TOKEN", "");
 
   mockCount.mockResolvedValue(5);
   mockFindFirst.mockResolvedValue({ lastLedger: 54321000 });
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("GET /api/metrics", () => {
   it("returns 200 with Prometheus text Content-Type", async () => {
     const res = await GET(makeRequest());
     expect(res.status).toBe(200);
-    expect(res.headers.get("content-type")).toMatch(
-      /text\/plain.*version=0\.0\.4/
-    );
+    expect(res.headers.get("content-type")).toMatch(/text\/plain.*version=0\.0\.4/);
   });
 
   it("sets Cache-Control: no-store", async () => {
@@ -140,6 +153,46 @@ describe("GET /api/metrics", () => {
     process.env.METRICS_TOKEN = "supersecret";
     const res = await GET(makeRequest("Bearer supersecret"));
     expect(res.status).toBe(200);
+  });
+
+  it("lets Swagger send both credentials required by configured metrics", async () => {
+    vi.stubEnv("METRICS_TOKEN", "fixture-metrics-token");
+    const spec = buildOpenApiDocument();
+    const built = swaggerClient.buildRequest({
+      spec,
+      operationId: "getMetrics",
+      securities: {
+        authorized: {
+          ApiKeyAuth: { value: "fixture-api-key" },
+          MetricsBearer: { value: "fixture-metrics-token" },
+        },
+      },
+    });
+    const request = new NextRequest("http://localhost/api/metrics", built);
+
+    expect(request.headers.get("x-api-key")).toBe("fixture-api-key");
+    expect(request.headers.get("authorization")).toBe("Bearer fixture-metrics-token");
+    expect((await GET(request)).status).toBe(200);
+    expect(JSON.stringify(spec)).not.toContain("fixture-metrics-token");
+  });
+
+  it("does not require a bearer token when the metrics handler has none configured", async () => {
+    const spec = buildOpenApiDocument();
+    const built = swaggerClient.buildRequest({
+      spec,
+      operationId: "getMetrics",
+      securities: {
+        authorized: {
+          ApiKeyAuth: { value: "fixture-api-key" },
+          MetricsBearer: { value: "unneeded-token" },
+        },
+      },
+    });
+    const request = new NextRequest("http://localhost/api/metrics", built);
+
+    expect(request.headers.get("x-api-key")).toBe("fixture-api-key");
+    expect(request.headers.has("authorization")).toBe(false);
+    expect((await GET(request)).status).toBe(200);
   });
 
   it("still returns 200 when DB refresh fails (graceful degradation)", async () => {

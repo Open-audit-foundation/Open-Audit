@@ -6,6 +6,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db/client";
 
+
+export { routeDoc } from "@/lib/openapi/operations/webhooks-activate";
+
 export const runtime = "nodejs";
 
 export async function POST(

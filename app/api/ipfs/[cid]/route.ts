@@ -11,6 +11,9 @@
 import { NextResponse } from "next/server";
 import { retrieveIpfsPayload } from "@/lib/ipfs/offloader";
 
+
+export { routeDoc } from "@/lib/openapi/operations/ipfs";
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ cid: string }> }

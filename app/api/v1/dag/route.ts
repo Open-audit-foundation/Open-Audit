@@ -17,6 +17,9 @@ import {
   listReentrancyDags,
 } from "@/lib/dag/persistence";
 
+
+export { routeDoc } from "@/lib/openapi/operations/dag";
+
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const authError = await authenticateAndRateLimit(request);
   if (authError) return authError;

@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
+import Ajv from "ajv";
+import { buildOpenApiDocument } from "@/lib/openapi/build-spec";
+import type { OperationDoc } from "@/lib/openapi/types";
 
 // ── Mock the Prisma client ───────────────────────────────────────────────────
 // A tiny in-memory stand-in for db.event.findMany that honours the subset of
@@ -58,11 +61,13 @@ function installTable(rows: Row[]) {
       result = result.filter((r) => r.contractId === where.contractId);
     }
     if (where.ledger) {
-      if (where.ledger.gte !== undefined) result = result.filter((r) => r.ledger >= where.ledger.gte);
-      if (where.ledger.lte !== undefined) result = result.filter((r) => r.ledger <= where.ledger.lte);
+      if (where.ledger.gte !== undefined)
+        result = result.filter((r) => r.ledger >= where.ledger.gte);
+      if (where.ledger.lte !== undefined)
+        result = result.filter((r) => r.ledger <= where.ledger.lte);
     }
 
-    result.sort((a, b) => (a.ledger - b.ledger) || a.id.localeCompare(b.id));
+    result.sort((a, b) => a.ledger - b.ledger || a.id.localeCompare(b.id));
 
     if (args.cursor?.id) {
       const idx = result.findIndex((r) => r.id === args.cursor.id);
@@ -91,7 +96,13 @@ describe("GET /api/v1/events/export", () => {
   it("streams CSV rows sourced from the database", async () => {
     installTable([
       makeRow({ id: "e-1", ledger: 100 }),
-      makeRow({ id: "e-2", ledger: 101, eventType: "Mint", description: "Minted 5 USDC", schemaVersion: "2.0.0" }),
+      makeRow({
+        id: "e-2",
+        ledger: 101,
+        eventType: "Mint",
+        description: "Minted 5 USDC",
+        schemaVersion: "2.0.0",
+      }),
     ]);
 
     const res = await GET(request("?format=csv"));
@@ -130,10 +141,7 @@ describe("GET /api/v1/events/export", () => {
   });
 
   it("emits a valid JSON array", async () => {
-    installTable([
-      makeRow({ id: "e-1", ledger: 100 }),
-      makeRow({ id: "e-2", ledger: 101 }),
-    ]);
+    installTable([makeRow({ id: "e-1", ledger: 100 }), makeRow({ id: "e-2", ledger: 101 })]);
 
     const res = await GET(request("?format=json"));
     const parsed = JSON.parse(await res.text());
@@ -143,6 +151,49 @@ describe("GET /api/v1/events/export", () => {
     expect(parsed).toHaveLength(2);
     expect(parsed[0].ledger_id).toBe(100);
   });
+
+  it.each([false, true])(
+    "documents the actual JSON export payload with empty=%s",
+    async (empty) => {
+      installTable(
+        empty
+          ? []
+          : [
+              makeRow({ id: "e-1", ledger: 100 }),
+              makeRow({
+                id: "e-2",
+                ledger: 101,
+                status: "cryptic",
+                description: null,
+                txHash: "",
+                schemaVersion: null,
+              }),
+            ]
+      );
+
+      const res = await GET(request("?format=json"));
+      const parsed: unknown = JSON.parse(await res.text());
+      const document = buildOpenApiDocument();
+      const operation = document.paths["/api/v1/events/export"].get as OperationDoc;
+      const schema = operation.responses["200"].content?.["application/json"]?.schema;
+      if (!schema) throw new Error("JSON export response schema is missing");
+
+      // The date rendering below is checked directly; Ajv checks JSON structure.
+      const validate = new Ajv({ validateFormats: false }).compile(schema);
+      expect(validate(parsed), JSON.stringify(validate.errors)).toBe(true);
+      expect(validate(JSON.stringify(parsed))).toBe(false);
+
+      if (!empty && Array.isArray(parsed)) {
+        expect(parsed[0].timestamp).toBe("2023-11-14T22:13:20.000Z");
+        expect(parsed[1]).toMatchObject({
+          status: "cryptic",
+          plain_english_translation: "No translation available",
+          proof_url: "",
+          schema_version: "",
+        });
+      }
+    }
+  );
 
   it("emits newline-delimited JSON", async () => {
     installTable([makeRow({ id: "e-1", ledger: 100 })]);

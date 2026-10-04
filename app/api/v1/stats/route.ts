@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db/client";
 import { getCachedStats, setCachedStats } from "@/lib/cache/redisCache";
 
+
+export { routeDoc } from "@/lib/openapi/operations/stats";
+
 export async function GET(): Promise<NextResponse> {
   try {
     let cached: Awaited<ReturnType<typeof getCachedStats>> = null;

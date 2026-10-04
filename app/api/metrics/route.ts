@@ -18,6 +18,9 @@ import {
   lastIndexedLedger,
 } from "@/lib/metrics";
 
+
+export { routeDoc } from "@/lib/openapi/operations/metrics";
+
 // ---------------------------------------------------------------------------
 // Auth helper
 // ---------------------------------------------------------------------------

@@ -20,6 +20,9 @@ import { db } from "@/lib/db/client";
 import { decodeEventName } from "@/lib/translator/decode";
 import type { TranslatedEvent, TranslationStatus } from "@/lib/translator/types";
 
+
+export { routeDoc } from "@/lib/openapi/operations/events-export";
+
 type ExportFormat = "csv" | "json" | "ndjson";
 
 /** The Event columns we need to build an export row. */

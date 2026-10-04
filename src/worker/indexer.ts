@@ -9,6 +9,7 @@
  */
 
 import { createEventMessage, serializeEventMessage } from "../../lib/events/message-envelope";
+import { persistExecutionDag } from "../../lib/dag/persistence";
 import { getWorkerId, REDIS_CHANNEL, REDIS_URL } from "../../lib/redis/config";
 import { RedisPublisher } from "../../lib/redis/publisher";
 import { getNetworkConfig } from "../../lib/stellar/client";

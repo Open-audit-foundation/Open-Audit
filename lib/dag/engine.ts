@@ -1,28 +1,4 @@
 /**
- * DAG Engine stub
- *
- * This module is referenced by lib/stellar/indexer.ts but has not been
- * implemented yet. The stub provides the minimal exports needed for the
- * module to resolve without errors.
- *
- * TODO: Implement full DAG reconstruction from Soroban DiagnosticEvents.
- */
-
-import type { ExecutionDag } from "./types";
-
-/**
- * Attempts to reconstruct an execution DAG from Soroban transaction meta XDR.
- * Returns null when the transaction contains no Soroban diagnostic events or
- * reconstruction fails.
- */
-export function reconstructDagFromMetaXdr(
-  _metaXdr: string,
-  _txHash: string,
-  _ledger: number,
-  _timestamp: number
-): ExecutionDag | null {
-  // Not yet implemented — returns null so callers handle the missing-DAG case.
-  return null;
  * DAG Engine — reconstructs a Soroban execution call tree from a base64-encoded
  * TransactionMeta XDR string (the `result_meta_xdr` field on Horizon transactions).
  *
@@ -53,23 +29,6 @@ function encodeContractId(rawId: Buffer | Uint8Array | null | undefined): string
     return StrKey.encodeContract(rawId as Parameters<typeof StrKey.encodeContract>[0]);
   } catch {
     return null;
-  }
-}
-
-/**
- * Safely encode a raw address buffer to a Stellar address (G... or C...).
- * Returns null when the buffer is empty or cannot be encoded.
- */
-function encodeAddress(rawId: Buffer | Uint8Array | null | undefined): string | null {
-  if (!rawId || rawId.length === 0) return null;
-  try {
-    return StrKey.encodeAccount(rawId as Parameters<typeof StrKey.encodeAccount>[0]);
-  } catch {
-    try {
-      return StrKey.encodeContract(rawId as Parameters<typeof StrKey.encodeContract>[0]);
-    } catch {
-      return null;
-    }
   }
 }
 
@@ -191,11 +150,8 @@ function detectReentrancyDetailed(nodes: DagNode[]): ReentrancyInfo[] {
 // ---------------------------------------------------------------------------
 
 /**
- * Extract Stellar account addresses from SorobanAuthorizationEntry XDR.
- *
- * Each SorobanAuthorizationEntry contains an Address (either an account G...
- * or contract C...) and the credentials that authorize it. We extract the
- * addresses and map them to the DAG nodes they authorize.
+ * Attribute explicit envelope accounts, or event-derived fallback accounts,
+ * to the DAG nodes that perform authorization checks.
  */
 function extractAuthTraces(
   metaXdr: string,
@@ -206,23 +162,6 @@ function extractAuthTraces(
   if (nodes.length === 0) return traces;
 
   try {
-    const meta = xdr.TransactionMeta.fromXDR(metaXdr, "base64");
-    const switchName: string = (meta.switch() as unknown as { name: string }).name ?? "";
-
-    let authEntries: xdr.SorobanAuthorizationEntry[] | null = null;
-
-    if (switchName === "metaV3" || (meta as any).v3) {
-      const v3 = (meta as any).v3() as xdr.TransactionMetaV3;
-      const sorobanMeta = v3.sorobanMeta();
-      if (sorobanMeta) {
-        try {
-          const resources = sorobanMeta.ext()?.resource_budget_summary();
-        } catch {
-          // Auth data not available in this meta version.
-        }
-      }
-    }
-
     // Authorization entries are in the transaction envelope (SorobanTransactionAuth),
     // not in the meta. The caller can pass explicit auth addresses from the
     // envelope; otherwise we fall back to meta-derived accounts.
@@ -239,7 +178,7 @@ function extractAuthTraces(
       }
     }
   } catch {
-    // Meta parsing failed — return empty traces.
+    // Auth trace extraction failed — return any traces collected so far.
   }
 
   return traces;
@@ -265,10 +204,8 @@ function extractTopLevelAccounts(
   const accounts: string[] = [];
   try {
     const meta = xdr.TransactionMeta.fromXDR(metaXdr, "base64");
-    const switchName: string = (meta.switch() as unknown as { name: string }).name ?? "";
-
-    if (switchName === "metaV3" || (meta as any).v3) {
-      const v3 = (meta as any).v3() as xdr.TransactionMetaV3;
+    if (meta.switch() === 3) {
+      const v3 = meta.v3();
       const sorobanMeta = v3.sorobanMeta();
       if (sorobanMeta) {
         try {
@@ -282,7 +219,6 @@ function extractTopLevelAccounts(
               const name: string = (eventType as unknown as { name: string }).name ?? "";
               if (name === "system") {
                 const body = event.body();
-                const topics = body.v0().topics();
                 // The first topic of a system event may be the event type discriminant.
                 // Address arguments in system events can contain authorizing accounts.
                 const dataVal = body.v0().data();
@@ -293,7 +229,7 @@ function extractTopLevelAccounts(
                       ? addr.accountId().ed25519()
                       : null;
                     if (addrBuf) {
-                      const encoded = StrKey.encodeAccount(addrBuf as Parameters<typeof StrKey.encodeAccount>[0]);
+                      const encoded = StrKey.encodeEd25519PublicKey(addrBuf);
                       if (!accounts.includes(encoded)) {
                         accounts.push(encoded);
                       }
@@ -352,9 +288,8 @@ export function reconstructDagFromMetaXdr(
   // TransactionMeta has variants v1/v2/v3; Soroban data lives in v3.
   let sorobanMeta: xdr.SorobanTransactionMeta | null = null;
   try {
-    const switchName: string = (meta.switch() as unknown as { name: string }).name ?? "";
-    if (switchName === "metaV3" || (meta as any).v3) {
-      const v3 = (meta as any).v3() as xdr.TransactionMetaV3;
+    if (meta.switch() === 3) {
+      const v3 = meta.v3();
       sorobanMeta = v3.sorobanMeta() ?? null;
     }
   } catch {
@@ -374,38 +309,7 @@ export function reconstructDagFromMetaXdr(
 
   if (diagnosticEvents.length === 0) return null;
 
-  // ── 4. Extract auth entries from the transaction ──────────────────────
-  //
-  // Authorization entries live in the transaction envelope (SorobanTransactionAuthEntry),
-  // not in the meta. We extract any that are available for auth tracing.
-  const authAddressesByNode = new Map<number, string[]>();
-  try {
-    const authEntries = extractAuthorizationEntries(meta);
-    if (authEntries.length > 0) {
-      // Map auth entries to nodes by matching contract IDs.
-      // This is a best-effort correlation since the meta doesn't directly
-      // link auth entries to specific diagnostic events.
-      for (const entry of authEntries) {
-        if (entry.address) {
-          // Attribute to the first matching contract node.
-          for (const node of nodes) {
-            if (node.contractId === entry.address) {
-              const existing = authAddressesByNode.get(node.id) ?? [];
-              if (!existing.includes(entry.authorizingAddress)) {
-                existing.push(entry.authorizingAddress);
-                authAddressesByNode.set(node.id, existing);
-              }
-              break;
-            }
-          }
-        }
-      }
-    }
-  } catch {
-    // Auth extraction failed — continue without it.
-  }
-
-  // ── 5. Build a flat list of DagNodes from diagnostic events ───────────
+  // ── 4. Build a flat list of DagNodes from diagnostic events ───────────
   //
   // Each DiagnosticEvent corresponds to one step in the execution trace.
   // We assign IDs sequentially and use a simple stack-based depth tracker
@@ -470,7 +374,7 @@ export function reconstructDagFromMetaXdr(
       depth,
       children: [],
       requiresAuth,
-      authorizedBy: authAddressesByNode.get(nextId - 1) ?? [],
+      authorizedBy: [],
     };
 
     // Wire up parent <-> child relationship.
@@ -492,7 +396,7 @@ export function reconstructDagFromMetaXdr(
 
   if (nodes.length === 0) return null;
 
-  // ── 6. Compute aggregate metrics ──────────────────────────────────────
+  // ── 5. Compute aggregate metrics ──────────────────────────────────────
   const uniqueContractSet = new Set(
     nodes.map((n) => n.contractId).filter((id): id is string => id !== null)
   );
@@ -527,61 +431,4 @@ export function reconstructDagFromMetaXdr(
     reentrancyDetails,
     authTraces,
   };
-}
-
-// ---------------------------------------------------------------------------
-// Authorization entry extraction helpers
-// ---------------------------------------------------------------------------
-
-interface ExtractedAuthEntry {
-  address: string | null;
-  authorizingAddress: string;
-}
-
-/**
- * Attempt to extract authorization entries from the transaction meta.
- * In Soroban v3 transactions, authorization entries are part of the
- * transaction envelope, but the meta may contain references to them.
- *
- * This is a best-effort extraction that works with available meta data.
- */
-function extractAuthorizationEntries(
-  meta: xdr.TransactionMeta
-): ExtractedAuthEntry[] {
-  const entries: ExtractedAuthEntry[] = [];
-
-  try {
-    const switchName: string = (meta.switch() as unknown as { name: string }).name ?? "";
-    if (switchName !== "metaV3" && !(meta as any).v3) {
-      return entries;
-    }
-
-    const v3 = (meta as any).v3() as xdr.TransactionMetaV3;
-    const sorobanMeta = v3.sorobanMeta();
-    if (!sorobanMeta) return entries;
-
-    // The SorobanTransactionMeta in v3 contains:
-    // - events (ContractEvent[])
-    // - diagnosticEvents (DiagnosticEvent[])
-    // - ext (SorobanTransactionMetaExt)
-    //
-    // Authorization entries are not directly in the meta for standard
-    // transactions. They live in the transaction envelope's
-    // SorobanTransactionAuth field. However, we can look at the
-    // transaction-specific data.
-
-    const ext = sorobanMeta.ext();
-    if (ext) {
-      try {
-        const resourceBudget = ext.resource_budget_summary();
-        // Resource budget doesn't contain auth entries.
-      } catch {
-        // Not available.
-      }
-    }
-  } catch {
-    // Meta structure not as expected.
-  }
-
-  return entries;
 }
