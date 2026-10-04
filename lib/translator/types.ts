@@ -131,6 +131,17 @@ export interface TranslatedEvent {
    * e.g. "v2". Null when the blueprint has no version label.
    */
   schemaVersion: string | null;
+  /**
+   * Provenance of the translator that produced this event.
+   * - "native": reviewed TypeScript blueprint shipped in-repo
+   * - "community-wasm": untrusted community parser executed in the WASM sandbox
+   * Defaults to "native" when omitted (back-compat for existing callers).
+   */
+  parserProvenance?: "native" | "community-wasm";
+  /**
+   * When a community-wasm parser failed inside the sandbox, the typed error code.
+   */
+  sandboxError?: string;
 }
 
 /**
@@ -153,6 +164,16 @@ export interface TranslationBlueprint {
    * Returns null if this blueprint cannot handle the given event.
    */
   translate: (event: RawEvent, lang: Language) => TranslationResult | null;
+}
+
+/** A community blueprint whose server adapter owns isolated WASM execution. */
+export interface CommunityWasmBlueprint extends TranslationBlueprint {
+  parserProvenance: "community-wasm";
+  wasmBytes: Uint8Array;
+  /** Manifest version label retained in translated schema provenance. */
+  version?: string;
+  /** Returns the sandbox result, including provenance and any sandbox error. */
+  translateAsync: (event: RawEvent) => Promise<TranslatedEvent>;
 }
 
 /**

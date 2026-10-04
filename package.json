@@ -54,7 +54,9 @@
     "db:seed": "ts-node prisma/seed.ts",
     "db:studio": "prisma studio",
     "retention": "tsx scripts/retention.ts",
-    "retention:dry-run": "tsx scripts/retention.ts --dry-run"
+    "retention:dry-run": "tsx scripts/retention.ts --dry-run",
+    "test:wasm": "vitest run --config vitest.wasm.config.ts",
+    "build:wasm-fixtures": "node lib/wasm-sandbox/fixtures/compile-fixtures.mjs"
   },
   "dependencies": {
     "@clickhouse/client": "^1.0.0",

@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { RawEvent } from "../types";
+import type { RawEvent, TranslatedEvent } from "../types";
 import * as Persistence from "../persistence";
 import { db } from "../../db/client";
 import { translateWithCache } from "../registry";
 import { isRedisEnabled } from "../../cache/redisCache";
+import { triggerWebhooksForEvent } from "../../jobs/queue";
 
 vi.mock("../registry", async () => {
   return {
@@ -14,6 +15,10 @@ vi.mock("../registry", async () => {
 vi.mock("../../cache/redisCache", () => ({
   isRedisEnabled: vi.fn(),
   setCachedTranslation: vi.fn(),
+}));
+
+vi.mock("../../jobs/queue", () => ({
+  triggerWebhooksForEvent: vi.fn(),
 }));
 
 const mockedTranslateWithCache = vi.mocked(translateWithCache);
@@ -29,14 +34,60 @@ const event: RawEvent = {
   txHash: "versioned-tx-hash",
 };
 
-describe("translateAndPersistEvent schemaVersion persistence", () => {
+describe("translateAndPersistEvent translation metadata persistence", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockedIsRedisEnabled.mockReturnValue(false);
-    
-    // Stub db.webhookSubscription so the real triggerWebhooksForEvent runs
-    // but short-circuits (no matching subscriptions → no HTTP calls).
-    vi.spyOn(db.webhookSubscription, "findMany").mockResolvedValue([]);
+  });
+
+  it.each([
+    { status: "translated" as const, sandboxError: undefined },
+    { status: "cryptic" as const, sandboxError: "RUNTIME_TRAP" },
+  ])("persists community parser metadata on create and update for $status results", async ({ status, sandboxError }) => {
+    const translated: TranslatedEvent = {
+      raw: event,
+      description: status === "translated" ? "Community translation" : null,
+      status,
+      blueprintName: "Community Blueprint",
+      eventType: status === "translated" ? "Transfer" : null,
+      schemaVersion: null,
+      parserProvenance: "community-wasm",
+      ...(sandboxError === undefined ? {} : { sandboxError }),
+    };
+    mockedTranslateWithCache.mockResolvedValueOnce(translated);
+    const upsertSpy = vi.spyOn(db.event, "upsert").mockImplementation(async ({ create }) => create as never);
+
+    const result = await Persistence.translateAndPersistEvent(event);
+
+    const metadata = {
+      parserProvenance: "community-wasm",
+      sandboxError: sandboxError ?? null,
+    };
+    expect(result).toEqual(translated);
+    expect(upsertSpy).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining(metadata),
+      update: expect.objectContaining(metadata),
+    }));
+    expect(triggerWebhooksForEvent).toHaveBeenCalledWith(expect.objectContaining(metadata));
+  });
+
+  it("clears stale sandbox metadata when a stored event is translated natively", async () => {
+    mockedTranslateWithCache.mockResolvedValueOnce({
+      raw: event,
+      description: "Native translation",
+      status: "translated",
+      blueprintName: "Native Blueprint",
+      eventType: "Transfer",
+      schemaVersion: null,
+      parserProvenance: "native",
+    });
+    const upsertSpy = vi.spyOn(db.event, "upsert").mockResolvedValue({ id: event.id } as never);
+
+    await Persistence.translateAndPersistEvent(event);
+
+    expect(upsertSpy).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({ parserProvenance: "native", sandboxError: null }),
+    }));
   });
 
   it("writes the schemaVersion computed by a versioned blueprint to the database on create", async () => {

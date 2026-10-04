@@ -263,6 +263,11 @@ export function EventFeedTable({
 
                       {columns.description && (
                         <TableCell className={cellPadding}>
+                          {event.parserProvenance === "community-wasm" ? (
+                            <Badge variant="warning" className="mb-1 whitespace-nowrap">
+                              Community · sandboxed
+                            </Badge>
+                          ) : null}
                           {isTranslated ? (
                             <div className="space-y-0.5">
                               {event.eventType && (

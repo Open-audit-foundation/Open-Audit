@@ -286,6 +286,114 @@ describe("Webhook System - Integration Tests", () => {
     });
   });
 
+  describe("Parser provenance in signed webhook delivery", () => {
+    type ParserMetadata = {
+      parserProvenance?: string | null;
+      sandboxError?: string | null;
+    };
+
+    const cases: Array<{
+      name: string;
+      metadata: ParserMetadata;
+      expected: Required<ParserMetadata>;
+    }> = [
+      {
+        name: "community success",
+        metadata: { parserProvenance: "community-wasm", sandboxError: null },
+        expected: { parserProvenance: "community-wasm", sandboxError: null },
+      },
+      {
+        name: "community sandbox failure",
+        metadata: {
+          parserProvenance: "community-wasm",
+          sandboxError: "MEMORY_LIMIT_EXCEEDED",
+        },
+        expected: {
+          parserProvenance: "community-wasm",
+          sandboxError: "MEMORY_LIMIT_EXCEEDED",
+        },
+      },
+      {
+        name: "reviewed native parser",
+        metadata: { parserProvenance: "native", sandboxError: null },
+        expected: { parserProvenance: "native", sandboxError: null },
+      },
+      {
+        name: "legacy null metadata",
+        metadata: { parserProvenance: null, sandboxError: null },
+        expected: { parserProvenance: null, sandboxError: null },
+      },
+      {
+        name: "legacy omitted metadata",
+        metadata: {},
+        expected: { parserProvenance: null, sandboxError: null },
+      },
+    ];
+
+    it.each(cases)(
+      "preserves $name through signing and retry",
+      async ({ metadata, expected }) => {
+        const url = "https://provenance.example.com/hook";
+        const requests: Array<{ body: string; signature: string | null }> = [];
+        mockSubscriptions.push({
+          id: "sub_provenance",
+          url,
+          contractId: null,
+          secretHash: TEST_SECRET,
+          isActive: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+        server.use(http.post(url, async ({ request }) => {
+          requests.push({
+            body: await request.text(),
+            signature: request.headers.get("X-Open-Audit-Signature"),
+          });
+          return HttpResponse.json({}, { status: requests.length === 1 ? 503 : 200 });
+        }));
+
+        const event = {
+          id: "evt_provenance",
+          contractId: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+          ledger: 123456,
+          timestamp: 1719900000,
+          txHash: "abc123def456",
+          topics: ["AAAADwAAAAh0cmFuc2Zlcg=="],
+          data: "AAAAAwAAAGQ=",
+          description: "Retained parser description",
+          status: metadata.sandboxError ? "cryptic" : "translated",
+          blueprintName: "Retained parser",
+          eventType: "transfer",
+          createdAt: "2026-10-03T07:00:00.000Z",
+          ...metadata,
+        };
+
+        await triggerWebhooksForEvent(event, {
+          maxAttempts: 2,
+          initialBackoffMs: 1,
+          timeoutMs: 2000,
+        });
+
+        expect(requests).toHaveLength(2);
+        expect(requests[1]).toEqual(requests[0]);
+        expect(JSON.parse(requests[0].body)).toMatchObject({
+          eventId: event.id,
+          description: event.description,
+          ...expected,
+        });
+        expect(verifyWebhookSignature(
+          requests[0].body,
+          requests[0].signature!,
+          TEST_SECRET
+        )).toBe(true);
+        expect(mockDeliveries).toMatchObject([
+          { eventId: event.id, succeeded: true, attempts: 2 },
+        ]);
+        expect(mockSubscriptions[0].isActive).toBe(true);
+      }
+    );
+  });
+
   // ==========================================================================
   // 2. Retry mechanism handling 5xx responses with eventual success
   // ==========================================================================

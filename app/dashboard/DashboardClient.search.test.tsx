@@ -16,7 +16,14 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, act, cleanup, fireEvent } from "@testing-library/react";
+import { http, HttpResponse } from "msw";
 import type { RawEvent, TranslatedEvent } from "@/lib/translator/types";
+import { toDashboardEvent, type DashboardEventRow } from "@/lib/dashboard/resolve-events";
+import { mswTestServer } from "@/lib/test-utils/msw-server";
+
+vi.mock("@/lib/telemetry", () => ({
+  captureExceptionSync: vi.fn(),
+}));
 
 // ── EventSearchClient: observable stand-in for the worker ──────────────────
 
@@ -127,6 +134,20 @@ function makeTranslatedEvent(id: string): TranslatedEvent {
 
 const initialEvents = [makeRawEvent("evt_1"), makeRawEvent("evt_2")];
 
+function makeStoredCommunityEvent(id: string): DashboardEventRow {
+  return {
+    ...makeRawEvent(id, "CCOMMUNITY"),
+    timestamp: 1_700_000_000,
+    status: "translated",
+    description: "Stored community translation",
+    blueprintName: "Community contract",
+    eventType: "Transfer",
+    schemaVersion: "community-v1",
+    parserProvenance: "community-wasm",
+    sandboxError: null,
+  };
+}
+
 function renderDashboard() {
   return render(
     <DashboardClient initialEvents={initialEvents} usingMockData={false} />
@@ -141,11 +162,69 @@ beforeEach(() => {
   vi.clearAllMocks();
   liveFeedOnEvent = null;
   mockSearch.mockResolvedValue([]);
+  mswTestServer.use(
+    http.get("*/api/v1/stats", () => HttpResponse.json({
+      totalEvents: 0,
+      translatedCount: 0,
+      crypticCount: 0,
+      translationRate: 0,
+      deadLetterQueueSize: 0,
+      lastIndexedLedger: null,
+    }))
+  );
 });
 
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+});
+
+describe("dashboard persisted community events", () => {
+  it("displays and indexes the stored initial translation without a browser parser", async () => {
+    const event = toDashboardEvent(makeStoredCommunityEvent("community-initial"));
+    await act(async () => {
+      render(<DashboardClient initialEvents={[event]} usingMockData={false} />);
+    });
+
+    expect(screen.getByText("Stored community translation")).toBeInTheDocument();
+    expect(screen.getByText("Community · sandboxed")).toBeInTheDocument();
+    expect(mockBuildIndex.mock.calls[0][0]).toEqual([
+      expect.objectContaining({
+        description: "Stored community translation",
+        parserProvenance: "community-wasm",
+        schemaVersion: "community-v1",
+      }),
+    ]);
+  });
+
+  it("retains a persisted sandbox failure returned by contract search", async () => {
+    const event = {
+      ...makeStoredCommunityEvent("community-search"),
+      status: "cryptic",
+      description: null,
+      eventType: null,
+      sandboxError: "TIMEOUT",
+    };
+    mswTestServer.use(
+      http.post("*/api/v1/events/search", () => HttpResponse.json({ events: [event] }))
+    );
+    renderDashboard();
+
+    fireEvent.change(screen.getByLabelText("Contract ID search"), {
+      target: { value: event.contractId },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Search", exact: true }));
+
+    expect(await screen.findByText("Community · sandboxed")).toBeInTheDocument();
+    expect(mockAddEvents.mock.calls.at(-1)?.[0]).toEqual([
+      expect.objectContaining({
+        status: "cryptic",
+        parserProvenance: "community-wasm",
+        sandboxError: "TIMEOUT",
+        schemaVersion: "community-v1",
+      }),
+    ]);
+  });
 });
 
 // ── Index lifecycle ────────────────────────────────────────────────────────

@@ -36,13 +36,16 @@ type ExportEventRow = {
   blueprintName: string | null;
   eventType: string | null;
   schemaVersion: string | null;
+  parserProvenance: string | null;
+  sandboxError: string | null;
 };
 
 const CHUNK_SIZE = 500; // rows fetched from the DB and flushed per tick
 const MAX_LIMIT = 1_000_000;
 const DEFAULT_LIMIT = 100_000;
 
-const CSV_HEADER = "timestamp,ledger_id,contract_id,tx_hash,event_name,status,plain_english_translation,proof_url,schema_version\r\n";
+const CSV_HEADER =
+  "timestamp,ledger_id,contract_id,tx_hash,event_name,status,plain_english_translation,proof_url,schema_version,parser_provenance,sandbox_error\r\n";
 
 function escapeCSV(val: string | number): string {
   const s = String(val);
@@ -70,13 +73,17 @@ function rowToTranslatedEvent(row: ExportEventRow): TranslatedEvent {
     blueprintName: row.blueprintName,
     eventType: row.eventType,
     schemaVersion: row.schemaVersion,
+    parserProvenance:
+      row.parserProvenance === "native" || row.parserProvenance === "community-wasm"
+        ? row.parserProvenance
+        : undefined,
+    sandboxError: row.sandboxError ?? undefined,
   };
 }
 
 function toRow(event: TranslatedEvent) {
   const eventName =
-    event.eventType ??
-    (event.raw.topics[0] ? decodeEventName(event.raw.topics[0]) : "unknown");
+    event.eventType ?? (event.raw.topics[0] ? decodeEventName(event.raw.topics[0]) : "unknown");
 
   const translation =
     event.status === "translated" && event.description
@@ -95,21 +102,28 @@ function toRow(event: TranslatedEvent) {
       ? `/api/v1/events/proof?txHash=${event.raw.txHash}&ledger=${event.raw.ledger}`
       : "",
     schema_version: event.schemaVersion ?? "",
+    // Missing legacy provenance is unknown, never evidence of a native parser.
+    parser_provenance: event.parserProvenance ?? null,
+    sandbox_error: event.sandboxError ?? null,
   };
 }
 
 function rowToCSVLine(row: ReturnType<typeof toRow>): string {
-  return [
-    row.timestamp,
-    row.ledger_id,
-    escapeCSV(row.contract_id),
-    escapeCSV(row.tx_hash),
-    escapeCSV(row.event_name),
-    row.status,
-    escapeCSV(row.plain_english_translation),
-    escapeCSV(row.proof_url),
-    escapeCSV(row.schema_version),
-  ].join(",") + "\r\n";
+  return (
+    [
+      row.timestamp,
+      row.ledger_id,
+      escapeCSV(row.contract_id),
+      escapeCSV(row.tx_hash),
+      escapeCSV(row.event_name),
+      row.status,
+      escapeCSV(row.plain_english_translation),
+      escapeCSV(row.proof_url),
+      escapeCSV(row.schema_version),
+      escapeCSV(row.parser_provenance ?? ""),
+      escapeCSV(row.sandbox_error ?? ""),
+    ].join(",") + "\r\n"
+  );
 }
 
 /**
@@ -146,6 +160,8 @@ async function* fetchEventPages(
         blueprintName: true,
         eventType: true,
         schemaVersion: true,
+        parserProvenance: true,
+        sandboxError: true,
       },
     })) as ExportEventRow[];
 
@@ -231,14 +247,12 @@ export async function GET(request: NextRequest): Promise<Response> {
 
   const format = (params.get("format") ?? "csv") as ExportFormat;
   if (!["csv", "json", "ndjson"].includes(format)) {
-    return Response.json(
-      { error: "Invalid format. Use csv, json, or ndjson." },
-      { status: 400 }
-    );
+    return Response.json({ error: "Invalid format. Use csv, json, or ndjson." }, { status: 400 });
   }
 
   const limitParam = parseInt(params.get("limit") ?? String(DEFAULT_LIMIT), 10);
-  const limit = isNaN(limitParam) || limitParam < 1 ? DEFAULT_LIMIT : Math.min(limitParam, MAX_LIMIT);
+  const limit =
+    isNaN(limitParam) || limitParam < 1 ? DEFAULT_LIMIT : Math.min(limitParam, MAX_LIMIT);
 
   const contractId = params.get("contractId") ?? "";
   const startLedger = parseInt(params.get("startLedger") ?? "0", 10);

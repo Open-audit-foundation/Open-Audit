@@ -23,6 +23,8 @@ model Event {
   blueprintName   String?  // Contract name from blueprint
   eventType       String?  // Event type (transfer, mint, burn, etc.)
   schemaVersion   String?  // Blueprint schema version that translated this event (e.g. "v2", "1.0.0")
+  parserProvenance String? // "native" | "community-wasm"; null for legacy rows
+  sandboxError    String?  // Typed sandbox failure, cleared after a successful translation
   executionDagId  String?  // FK to ExecutionDag (a tx can produce multiple events)
 
   // Source tag lets callers distinguish live-indexed from backfilled events.

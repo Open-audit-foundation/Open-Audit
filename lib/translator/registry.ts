@@ -42,6 +42,7 @@ import type {
   RawEvent,
   TranslatedEvent,
   TranslationBlueprint,
+  CommunityWasmBlueprint,
   VersionedTranslationBlueprint,
   Language,
   ContractSchema,
@@ -72,11 +73,12 @@ export function getResolutionCacheMax(): number {
   return RESOLUTION_CACHE_MAX;
 }
 
-/**
- * Interpolates a template string with values from an object.
- * e.g. "Hello {name}" + { name: "World" } -> "Hello World"
- */
-export type PersistedRawEvent = RawEvent & Partial<Pick<TranslatedEvent, "description" | "status" | "blueprintName" | "eventType" | "schemaVersion">>;
+/** A database/API event whose translation has already been computed. */
+export type PersistedRawEvent = RawEvent &
+  Partial<Pick<TranslatedEvent, "description" | "status" | "blueprintName" | "eventType" | "schemaVersion">> & {
+    parserProvenance?: TranslatedEvent["parserProvenance"] | null;
+    sandboxError?: string | null;
+  };
 
 function hasPersistedTranslation(event: PersistedRawEvent): boolean {
   return (
@@ -88,7 +90,7 @@ function hasPersistedTranslation(event: PersistedRawEvent): boolean {
   );
 }
 
-function buildTranslationFromPersisted(event: PersistedRawEvent): TranslatedEvent {
+export function buildTranslationFromPersisted(event: PersistedRawEvent): TranslatedEvent {
   return {
     raw: event,
     description: event.description ?? null,
@@ -96,6 +98,8 @@ function buildTranslationFromPersisted(event: PersistedRawEvent): TranslatedEven
     blueprintName: event.blueprintName ?? null,
     eventType: event.eventType ?? null,
     schemaVersion: event.schemaVersion ?? null,
+    ...(event.parserProvenance == null ? {} : { parserProvenance: event.parserProvenance }),
+    ...(event.sandboxError == null ? {} : { sandboxError: event.sandboxError }),
   };
 }
 
@@ -139,15 +143,18 @@ export async function translateWithCache(
   customBlueprints?: Map<string, TranslationBlueprint>,
   lang: Language = "en"
 ): Promise<TranslatedEvent> {
-  if (event.txHash && event.id) {
+  // Stored results are authoritative. An older cache entry may predate the
+  // persisted parser provenance or a subsequent sandbox failure.
+  const hasStoredTranslation = hasPersistedTranslation(event) && event.status !== undefined;
+  if (!hasStoredTranslation && event.txHash && event.id) {
     const cached = await getCachedTranslationIfAvailable(event);
     if (cached) return cached;
   }
 
   const translated =
-    hasPersistedTranslation(event) && event.status !== undefined
+    hasStoredTranslation
       ? buildTranslationFromPersisted(event)
-      : translateEvent(event, customBlueprints, lang);
+      : await translateEventAsync(event, customBlueprints, lang);
 
   if (event.txHash && event.id) {
     await setCachedTranslationIfAvailable(event, translated);
@@ -472,6 +479,10 @@ function applyBlueprint(event: RawEvent, blueprint: TranslationBlueprint, lang: 
   const result = blueprint.translate(event, lang);
   if (!result) return null;
 
+  const provenance =
+    (blueprint as { parserProvenance?: "native" | "community-wasm" }).parserProvenance ??
+    "native";
+
   return {
     raw: event,
     description: result.description ? sanitizeTextField(result.description) : null,
@@ -479,6 +490,7 @@ function applyBlueprint(event: RawEvent, blueprint: TranslationBlueprint, lang: 
     blueprintName: blueprint.contractName,
     eventType: result.eventType ? sanitizeTextField(result.eventType, { maxLength: 64 }) : null,
     schemaVersion: (blueprint as any).version ?? null,
+    parserProvenance: provenance,
   };
 }
 
@@ -518,6 +530,30 @@ export function matchesEventCriteria(
   }
 
   return true;
+}
+
+/**
+ * Async translation path used when a community-wasm blueprint may be selected.
+ * Native blueprints still resolve synchronously inside this helper.
+ */
+export async function translateEventAsync(
+  event: RawEvent,
+  customBlueprints?: Map<string, TranslationBlueprint>,
+  lang: Language = "en"
+): Promise<TranslatedEvent> {
+  const schema = resolveSchema(event.contractId, event.ledger, customBlueprints);
+  const blueprint = schema?.blueprint as Partial<CommunityWasmBlueprint> | undefined;
+  if (
+    blueprint &&
+    blueprint.parserProvenance === "community-wasm" &&
+    blueprint.wasmBytes instanceof Uint8Array &&
+    typeof blueprint.translateAsync === "function"
+  ) {
+    // Registration supplies the server adapter; this shared registry must not
+    // import the filesystem or worker runtime into browser translation callers.
+    return blueprint.translateAsync(event);
+  }
+  return translateEvent(event, customBlueprints, lang);
 }
 
 /**
@@ -615,6 +651,21 @@ export function getBlueprintCount(): number {
  * Call this to add or upgrade a contract's translation schemas without
  * rebuilding the singleton. The blueprint list is re-sorted after insertion.
  */
+
+/**
+ * Removes a contract's schemas from the registry (used by community-parser tests
+ * and hot-reload of sandboxed parsers).
+ */
+export function unregisterBlueprint(contractId: string): boolean {
+  const existed = REGISTRY.delete(contractId);
+  RESOLUTION_CACHE.forEach((_, key) => {
+    if (key.startsWith(`${contractId}:`)) {
+      RESOLUTION_CACHE.delete(key);
+    }
+  });
+  return existed;
+}
+
 export function registerBlueprint(...blueprints: TranslationBlueprint[]): void {
   for (const blueprint of blueprints) {
     const versioned = blueprint as VersionedTranslationBlueprint;

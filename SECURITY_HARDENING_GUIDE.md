@@ -86,7 +86,9 @@ if (result.success) {
 
 ## Scope
 
-These guards protect the XDR/ScVal parsing layer specifically. They
-are not a general-purpose sandbox: there is currently no isolated
-execution environment (e.g. WASM sandboxing) for third-party contract
-parsers in this repository.
+These guards protect the XDR/ScVal parsing layer specifically.
+
+Community-contributed parsers run in a separate isolation boundary — see
+`lib/wasm-sandbox/WASM_SANDBOX_ARCHITECTURE.md` (issue #405). That sandbox
+enforces zero ambient host capabilities, host-capped memory/CPU, and an
+adversarial test suite via `npm run test:wasm`.

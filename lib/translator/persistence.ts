@@ -146,6 +146,8 @@ export async function translateAndPersistEvent(
         blueprintName: translated.blueprintName,
         eventType: translated.eventType,
         schemaVersion: translated.schemaVersion,
+        parserProvenance: translated.parserProvenance ?? null,
+        sandboxError: translated.sandboxError ?? null,
         updatedAt: new Date(),
       },
       create: {
@@ -161,6 +163,8 @@ export async function translateAndPersistEvent(
         blueprintName: translated.blueprintName,
         eventType: translated.eventType,
         schemaVersion: translated.schemaVersion,
+        parserProvenance: translated.parserProvenance ?? null,
+        sandboxError: translated.sandboxError ?? null,
       },
     });
 

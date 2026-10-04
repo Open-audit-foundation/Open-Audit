@@ -87,12 +87,22 @@ export function EventDetailsModal({
                 >
                   {event.status}
                 </Badge>
+                {event.parserProvenance === "community-wasm" ? (
+                  <Badge variant="warning">Community · sandboxed</Badge>
+                ) : null}
                 {event.blueprintName && (
                   <span className="text-sm text-muted-foreground">
                     by {event.blueprintName}
                   </span>
                 )}
               </div>
+
+              {event.parserProvenance === "community-wasm" && event.sandboxError ? (
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+                  <p className="text-xs font-medium text-muted-foreground">Sandbox error</p>
+                  <p className="text-sm font-mono break-all">{event.sandboxError}</p>
+                </div>
+              ) : null}
 
               <div className="space-y-2">
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Time</p>

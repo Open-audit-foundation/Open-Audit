@@ -1,0 +1,9 @@
+{
+  "id": "example-community-sac-transfer",
+  "contractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+  "contractName": "Example Community SAC Transfer Parser",
+  "wasmPath": "./parser.wasm",
+  "version": "1.0.0",
+  "author": "open-audit-foundation",
+  "description": "File-based community parser example for #405."
+}

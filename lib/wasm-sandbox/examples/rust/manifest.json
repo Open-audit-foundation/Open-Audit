@@ -1,0 +1,9 @@
+{
+  "id": "example-community-sac-transfer",
+  "contractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+  "contractName": "Example Community SAC Transfer Parser",
+  "wasmPath": "../../fixtures/compiled/echo_parser.wasm",
+  "version": "1.0.0",
+  "author": "open-audit-foundation",
+  "description": "Demo community parser used by npm run test:wasm (WAT fixture ABI-compatible with the Rust example)."
+}

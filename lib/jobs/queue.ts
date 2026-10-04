@@ -1,24 +1,4 @@
 /**
- * Job Queue stub
- *
- * Referenced by lib/translator/persistence.ts. Provides a no-op
- * implementation until a full job queue (Bull/BullMQ) is wired up.
- */
-
-export interface QueuedEvent {
-  id: string;
-  contractId: string;
-  [key: string]: unknown;
-}
-
-/**
- * Triggers registered webhooks for a persisted event.
- * Currently a no-op — implement when webhook delivery is added.
- */
-export async function triggerWebhooksForEvent(
-  _event: QueuedEvent | Record<string, unknown>
-): Promise<void> {
-  // No-op stub — webhook delivery not yet implemented.
  * Webhook Delivery Queue
  *
  * Implements signed webhook delivery with exponential-backoff retries,
@@ -59,6 +39,10 @@ export interface WebhookPayload {
   status: string;
   blueprintName: string | null;
   eventType: string | null;
+  /** Persisted parser origin; null for unknown legacy events. */
+  parserProvenance?: string | null;
+  /** Persisted sandbox failure code; null when no failure is retained. */
+  sandboxError?: string | null;
   createdAt: string;
 }
 
@@ -191,6 +175,8 @@ export async function triggerWebhooksForEvent(
     status: string;
     blueprintName?: string | null;
     eventType?: string | null;
+    parserProvenance?: string | null;
+    sandboxError?: string | null;
     createdAt?: Date | string;
   },
   options: DeliveryOptions = {}
@@ -236,6 +222,8 @@ export async function triggerWebhooksForEvent(
     status: event.status,
     blueprintName: event.blueprintName ?? null,
     eventType: event.eventType ?? null,
+    parserProvenance: event.parserProvenance ?? null,
+    sandboxError: event.sandboxError ?? null,
     createdAt:
       event.createdAt instanceof Date
         ? event.createdAt.toISOString()

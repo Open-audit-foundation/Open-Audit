@@ -100,18 +100,26 @@ export function ExportDataDialog({
         if (selectedFormat === "csv") {
           triggerDownload(eventsToCSV(events), buildFilename("csv"), "text/csv;charset=utf-8;");
         } else if (selectedFormat === "json") {
-          triggerDownload(eventsToJSON(events), buildFilename("json"), "application/json;charset=utf-8;");
+          triggerDownload(
+            eventsToJSON(events),
+            buildFilename("json"),
+            "application/json;charset=utf-8;"
+          );
         } else {
           const ndjson = events
-            .map((e) => JSON.stringify({
-              timestamp: new Date(e.raw.timestamp * 1000).toISOString(),
-              ledger_id: e.raw.ledger,
-              contract_id: e.raw.contractId,
-              tx_hash: e.raw.txHash,
-              event_name: e.eventType ?? "unknown",
-              status: e.status,
-              plain_english_translation: e.description ?? "No translation available",
-            }))
+            .map((e) =>
+              JSON.stringify({
+                timestamp: new Date(e.raw.timestamp * 1000).toISOString(),
+                ledger_id: e.raw.ledger,
+                contract_id: e.raw.contractId,
+                tx_hash: e.raw.txHash,
+                event_name: e.eventType ?? "unknown",
+                status: e.status,
+                plain_english_translation: e.description ?? "No translation available",
+                parser_provenance: e.parserProvenance ?? null,
+                sandbox_error: e.sandboxError ?? null,
+              })
+            )
             .join("\n");
           triggerDownload(ndjson, buildFilename("ndjson"), "application/x-ndjson;charset=utf-8;");
         }
@@ -121,7 +129,7 @@ export function ExportDataDialog({
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
       }
-      
+
       timeoutRef.current = setTimeout(function () {
         setIsExporting(false);
         onOpenChange(false);
@@ -155,7 +163,17 @@ export function ExportDataDialog({
           <p className="font-medium text-foreground text-[11px] uppercase tracking-wider mb-1.5">
             Exported columns
           </p>
-          {["Timestamp", "Ledger ID", "Contract ID", "Tx Hash", "Event Name", "Status", "Plain English Translation"].map((col) => (
+          {[
+            "Timestamp",
+            "Ledger ID",
+            "Contract ID",
+            "Tx Hash",
+            "Event Name",
+            "Status",
+            "Plain English Translation",
+            "Parser Provenance",
+            "Sandbox Error",
+          ].map((col) => (
             <div key={col} className="flex items-center gap-1.5">
               <CheckCircle2 className="h-3 w-3 text-violet-500 flex-shrink-0" />
               <span>{col}</span>
@@ -184,13 +202,21 @@ export function ExportDataDialog({
                   aria-pressed={isSelected}
                   aria-label={`Export as ${option.label}`}
                 >
-                  <div className={isSelected ? "text-violet-600 dark:text-violet-400" : "text-muted-foreground"}>
+                  <div
+                    className={
+                      isSelected ? "text-violet-600 dark:text-violet-400" : "text-muted-foreground"
+                    }
+                  >
                     {option.icon}
                   </div>
                   <div>
-                    <p className={`text-sm font-semibold ${isSelected ? "text-violet-700 dark:text-violet-300" : ""}`}>
+                    <p
+                      className={`text-sm font-semibold ${isSelected ? "text-violet-700 dark:text-violet-300" : ""}`}
+                    >
                       {option.label}{" "}
-                      <span className="font-normal text-xs text-muted-foreground">{option.ext}</span>
+                      <span className="font-normal text-xs text-muted-foreground">
+                        {option.ext}
+                      </span>
                     </p>
                     <p className="text-xs text-muted-foreground mt-0.5 leading-snug">
                       {option.description}

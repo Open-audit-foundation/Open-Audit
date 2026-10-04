@@ -1,0 +1,22 @@
+;; Adversarial: return bytes that are not valid TranslationResult JSON.
+(module
+  (import "env" "memory" (memory 1))
+  (global $heap (mut i32) (i32.const 1024))
+  (global $out_len (mut i32) (i32.const 0))
+  (data (i32.const 64) "NOT_JSON{{{{garbage")
+
+  (func (export "alloc") (param $size i32) (result i32)
+    (local $ptr i32)
+    (local.set $ptr (global.get $heap))
+    (global.set $heap (i32.add (global.get $heap) (local.get $size)))
+    (local.get $ptr)
+  )
+  (func (export "dealloc") (param i32 i32) nop)
+  (func (export "get_output_len") (result i32) (global.get $out_len))
+  (func (export "translate") (param i32 i32) (result i32)
+    (local $out i32)
+    (local.set $out (i32.const 64))
+    (global.set $out_len (i32.const 18))
+    (local.get $out)
+  )
+)

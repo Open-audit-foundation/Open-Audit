@@ -42,9 +42,8 @@ const EXAMPLE_TOPICS = [
   "0x0000000000000000000000009f8e7d6c5b4a39281706f5e4d3c2b1a0face123404",
 ].join("\n");
 
-// decodeAmount() reads the leading bytes, so the value sits at the front:
-// 0x3B9ACA00 = 1_000_000_000 stroops = 100.00 XLM.
-const EXAMPLE_DATA = "0x000000003B9ACA00" + "0".repeat(48);
+// SDK-serialized ScVal::I128 for 1_000_000_000 stroops = 100.00 XLM.
+const EXAMPLE_DATA = "0x0000000a0000000000000000000000003b9aca00";
 
 const EXAMPLE_CONTRACT_ID = "CSANDBOX0000000000000000000000000000000000000000000000XYZ";
 

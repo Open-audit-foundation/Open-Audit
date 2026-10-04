@@ -36,12 +36,17 @@ import {
   removeCustomAbi,
   saveCustomAbi,
 } from "@/lib/translator/custom-abi";
-import type { TranslatedEvent, RawEvent, CustomAbi } from "@/lib/translator/types";
-import { translateEvents } from "@/lib/translator/registry";
+import type { TranslatedEvent, CustomAbi } from "@/lib/translator/types";
+import type { PersistedRawEvent } from "@/lib/translator/registry";
+import {
+  resolveDisplayEvents,
+  toDashboardEvent,
+  type DashboardEventRow,
+} from "@/lib/dashboard/resolve-events";
 
 interface DashboardClientProps {
   /** Events fetched server-side (from the database, or mock data as a fallback). */
-  initialEvents: RawEvent[];
+  initialEvents: PersistedRawEvent[];
   /** True when initialEvents is mock data because DATABASE_URL isn't configured. */
   usingMockData: boolean;
 }
@@ -50,14 +55,14 @@ export function DashboardClient({
   initialEvents,
   usingMockData,
 }: DashboardClientProps): React.JSX.Element {
-  const [rawEvents] = useState<RawEvent[]>(initialEvents);
+  const [rawEvents] = useState<PersistedRawEvent[]>(initialEvents);
   const [liveEvents, setLiveEvents] = useState<TranslatedEvent[]>([]);
   const [customAbis, setCustomAbis] = useState<CustomAbi[]>([]);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [searchValue, setSearchValue] = useState("");
   const [searchedContract, setSearchedContract] = useState<string | null>(null);
-  const [searchResults, setSearchResults] = useState<RawEvent[] | null>(null);
+  const [searchResults, setSearchResults] = useState<PersistedRawEvent[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -95,13 +100,13 @@ export function DashboardClient({
   // fetched event list; clearing the search falls back to that initial list.
   const sourceEvents = searchResults ?? rawEvents;
 
-  // Derive translations from the raw events + current custom blueprints so the
-  // feed re-translates instantly when an ABI is uploaded or removed.
+  // Preserve stored sandbox outcomes while raw events and native custom-ABI
+  // overrides respond to the viewer's current translation settings.
   const translatedRawEvents = useMemo(
     function () {
-      return translateEvents(sourceEvents, customBlueprints);
+      return resolveDisplayEvents(sourceEvents, customBlueprints, language);
     },
-    [sourceEvents, customBlueprints]
+    [sourceEvents, customBlueprints, language]
   );
 
   // Merge live-streamed events (prepended) with the translated batch.
@@ -235,18 +240,8 @@ export function DashboardClient({
         if (!res.ok) {
           throw new Error(`Search failed: ${res.statusText}`);
         }
-        const data: { events: RawEvent[] } = await res.json();
-        setSearchResults(
-          data.events.map((event) => ({
-            id: event.id,
-            contractId: event.contractId,
-            topics: event.topics,
-            data: event.data,
-            ledger: event.ledger,
-            timestamp: event.timestamp,
-            txHash: event.txHash,
-          }))
-        );
+        const data: { events: DashboardEventRow[] } = await res.json();
+        setSearchResults(data.events.map(toDashboardEvent));
       } catch (err) {
         setError(err instanceof Error ? err.message : "An unknown error occurred");
         setSearchResults(null);

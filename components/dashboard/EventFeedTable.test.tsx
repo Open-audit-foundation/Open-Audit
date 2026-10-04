@@ -119,6 +119,30 @@ function renderTable(
 // Accessibility
 // ---------------------------------------------------------------------------
 
+describe("EventFeedTable – community provenance", () => {
+  it("labels community translations even when the Status column is hidden", () => {
+    renderTable({
+      events: [{ ...translatedEvent, parserProvenance: "community-wasm" }],
+      columns: { ...defaultColumns, status: false },
+    });
+
+    expect(screen.getByText("Community · sandboxed")).toBeInTheDocument();
+    expect(screen.getByText(/transferred 100 USDC/i)).toBeInTheDocument();
+  });
+
+  it("labels failed community results without labeling native results", () => {
+    renderTable({
+      events: [
+        { ...translatedEvent, parserProvenance: "native" },
+        { ...crypticEvent, parserProvenance: "community-wasm", sandboxError: "TIMEOUT" },
+      ],
+    });
+
+    expect(screen.getAllByText("Community · sandboxed")).toHaveLength(1);
+    expect(screen.getByText("Cryptic")).toBeInTheDocument();
+  });
+});
+
 describe("EventFeedTable Accessibility", () => {
   it("should have no accessibility violations with translated and cryptic events", async () => {
     const { container } = renderTable();

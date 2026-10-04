@@ -1,0 +1,18 @@
+[package]
+name = "open_audit_community_parser"
+version = "0.1.0"
+edition = "2021"
+description = "Example community parser for Open-Audit WASM sandbox (#405)"
+license = "Apache-2.0 OR MIT"
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = "s"
+lto = true
+panic = "abort"
+
+[dependencies]
+# Keep dependencies minimal. Prefer no_std + manual JSON for production parsers.
+# This example uses a tiny hand-rolled encoder to avoid pulling serde into WASM.

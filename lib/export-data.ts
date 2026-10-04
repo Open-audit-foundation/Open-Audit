@@ -2,8 +2,10 @@
  * Export utilities for the Open-Audit event feed.
  *
  * Converts the currently filtered list of translated events into either
- * a downloadable CSV or JSON file, containing the five required audit columns:
+ * a downloadable CSV or JSON file, retaining the five required audit columns:
  *   Timestamp | Ledger ID | Contract ID | Event Name | Plain English Translation
+ * Two additional columns, parser_provenance and sandbox_error, preserve parser
+ * metadata. Absent metadata is null in JSON and an empty field in CSV.
  */
 
 import type { TranslatedEvent } from "./translator/types";
@@ -16,6 +18,8 @@ export interface ExportRow {
   contract_id: string;
   event_name: string;
   plain_english_translation: string;
+  parser_provenance: NonNullable<TranslatedEvent["parserProvenance"]> | null;
+  sandbox_error: string | null;
 }
 
 /**
@@ -30,8 +34,7 @@ function toISOTimestamp(unixSeconds: number): string {
  */
 function toExportRow(event: TranslatedEvent): ExportRow {
   const eventName =
-    event.eventType ??
-    (event.raw.topics[0] ? decodeEventName(event.raw.topics[0]) : "unknown");
+    event.eventType ?? (event.raw.topics[0] ? decodeEventName(event.raw.topics[0]) : "unknown");
 
   const translation =
     event.status === "translated" && event.description
@@ -44,6 +47,8 @@ function toExportRow(event: TranslatedEvent): ExportRow {
     contract_id: event.raw.contractId,
     event_name: eventName,
     plain_english_translation: translation,
+    parser_provenance: event.parserProvenance ?? null,
+    sandbox_error: event.sandboxError ?? null,
   };
 }
 
@@ -60,6 +65,8 @@ export function eventsToCSV(events: TranslatedEvent[]): string {
     "contract_id",
     "event_name",
     "plain_english_translation",
+    "parser_provenance",
+    "sandbox_error",
   ];
 
   function escapeCSV(value: string | number): string {
@@ -73,9 +80,11 @@ export function eventsToCSV(events: TranslatedEvent[]): string {
   const headerLine = headers.join(",");
   const rows = events.map(function (event) {
     const row = toExportRow(event);
-    return headers.map(function (h) {
-      return escapeCSV(row[h]);
-    }).join(",");
+    return headers
+      .map(function (h) {
+        return escapeCSV(row[h] ?? "");
+      })
+      .join(",");
   });
 
   return [headerLine, ...rows].join("\r\n");
@@ -97,11 +106,7 @@ export function eventsToJSON(events: TranslatedEvent[]): string {
  * @param filename  - The suggested filename including extension.
  * @param mimeType  - MIME type of the content.
  */
-export function triggerDownload(
-  content: string,
-  filename: string,
-  mimeType: string
-): void {
+export function triggerDownload(content: string, filename: string, mimeType: string): void {
   const blob = new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");

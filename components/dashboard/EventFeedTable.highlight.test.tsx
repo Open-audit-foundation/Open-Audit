@@ -8,9 +8,10 @@
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, within } from "@testing-library/react";
 import { EventFeedTable } from "./EventFeedTable";
 import type { TranslatedEvent } from "@/lib/translator/types";
+import type { ColumnVisibility } from "@/lib/hooks/useDashboardPrefs";
 
 function makeEvent(
   id: string,
@@ -33,13 +34,13 @@ function makeEvent(
   } as unknown as TranslatedEvent;
 }
 
-const columns = {
-  timestamp: true,
+const columns: ColumnVisibility = {
+  time: false,
   contract: true,
   description: true,
   status: true,
-  tx: true,
-} as never;
+  actions: true,
+};
 
 function renderTable(events: TranslatedEvent[], highlightQuery?: string) {
   return render(
@@ -55,6 +56,32 @@ function renderTable(events: TranslatedEvent[], highlightQuery?: string) {
 }
 
 afterEach(cleanup);
+
+describe("event details sandbox outcome", () => {
+  it("shows stored community provenance and failure code when the event is opened", async () => {
+    const event: TranslatedEvent = {
+      ...makeEvent("sandbox-failure", ""),
+      status: "cryptic",
+      description: null,
+      blueprintName: "Community contract",
+      eventType: null,
+      schemaVersion: "community-v1",
+      parserProvenance: "community-wasm",
+      sandboxError: "TIMEOUT",
+    };
+    event.raw.timestamp = 1_700_000_000;
+    renderTable([event]);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "View event details for event sandbox-failure",
+    }));
+
+    const dialog = within(await screen.findByRole("dialog"));
+    expect(dialog.getByText("Community · sandboxed")).toBeInTheDocument();
+    expect(dialog.getByText("Sandbox error")).toBeInTheDocument();
+    expect(dialog.getByText("TIMEOUT")).toBeInTheDocument();
+  });
+});
 
 describe("event feed highlighting", () => {
   it("marks the matching substring in the description", () => {

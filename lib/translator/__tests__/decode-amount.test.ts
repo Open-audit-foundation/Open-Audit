@@ -10,7 +10,10 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { xdr as StellarXdr } from "stellar-sdk";
+import { xdr as StellarXdr, type SorobanRpc } from "stellar-sdk";
+import { eventResponseToRawEvent } from "../../stellar/events";
+import { buildCustomBlueprints, parseCustomAbi } from "../custom-abi";
+import { translateEvent } from "../registry";
 import { 
   decodeAmount, 
   getTokenDecimals, 
@@ -64,6 +67,53 @@ function decodeI128Official(hexXdr: string): bigint {
   return (hi << 64n) | lo;
 }
 
+type IntegerAmountType = "i32" | "u32" | "i64" | "u64" | "i128" | "u128";
+
+/** Build wire values with the SDK rather than arranging bytes for the decoder. */
+function createIntegerScVal(type: IntegerAmountType, value: bigint): StellarXdr.ScVal {
+  switch (type) {
+    case "i32":
+      return StellarXdr.ScVal.scvI32(Number(value));
+    case "u32":
+      return StellarXdr.ScVal.scvU32(Number(value));
+    case "i64":
+      return StellarXdr.ScVal.scvI64(StellarXdr.Int64.fromString(value.toString()));
+    case "u64":
+      return StellarXdr.ScVal.scvU64(StellarXdr.Uint64.fromString(value.toString()));
+    case "i128":
+      return StellarXdr.ScVal.fromXDR(createI128ScVal(value), "hex");
+    case "u128":
+      return StellarXdr.ScVal.scvU128(new StellarXdr.UInt128Parts({
+        hi: StellarXdr.Uint64.fromString((value >> 64n).toString()),
+        lo: StellarXdr.Uint64.fromString((value & 0xFFFFFFFFFFFFFFFFn).toString()),
+      }));
+  }
+}
+
+/** Exercise the same RPC normalization and custom-ABI path as the application. */
+function translateRpcAmount(value: StellarXdr.ScVal | string, type: IntegerAmountType = "i128") {
+  const contractId = "CAMOUNTDECODERFIXTURE";
+  const rawEvent = eventResponseToRawEvent({
+    id: "amount-fixture",
+    contractId,
+    ledger: 1,
+    timestamp: 0,
+    topic: [StellarXdr.ScVal.scvSymbol("transfer")],
+    value,
+    txHash: "amount-fixture",
+  } as unknown as SorobanRpc.Api.EventResponse);
+  const abi = parseCustomAbi({
+    contractId,
+    contractName: "SDK Amount",
+    events: [{ name: "transfer", fields: [{ name: "amount", type }] }],
+  });
+
+  return {
+    rawEvent,
+    translated: translateEvent(rawEvent, buildCustomBlueprints([abi])),
+  };
+}
+
 // ============================================================================
 // Test Fixtures: Real Stellar Transaction Amounts
 // ============================================================================
@@ -73,6 +123,75 @@ describe("decodeAmount() - Real XDR ScVal::I128 Parser", () => {
   beforeEach(() => {
     // Reset custom token registry for each test
     // (In real usage, this would persist)
+  });
+
+  describe("SDK numeric events through custom-ABI translation", () => {
+    // Display constants were calculated independently with decimal arithmetic:
+    // seven base-unit decimals, two display decimals, ties away from zero.
+    const boundaries: Array<{
+      name: string;
+      type: IntegerAmountType;
+      value: bigint;
+      formatted: string;
+    }> = [
+      { name: "i32 minimum", type: "i32", value: -(1n << 31n), formatted: "-214.75" },
+      { name: "i32 maximum", type: "i32", value: (1n << 31n) - 1n, formatted: "214.75" },
+      { name: "u32 minimum", type: "u32", value: 0n, formatted: "0.00" },
+      { name: "u32 maximum", type: "u32", value: (1n << 32n) - 1n, formatted: "429.50" },
+      { name: "i64 minimum", type: "i64", value: -(1n << 63n), formatted: "-922337203685.48" },
+      { name: "i64 maximum", type: "i64", value: (1n << 63n) - 1n, formatted: "922337203685.48" },
+      { name: "u64 minimum", type: "u64", value: 0n, formatted: "0.00" },
+      { name: "u64 maximum", type: "u64", value: (1n << 64n) - 1n, formatted: "1844674407370.96" },
+      { name: "i128 minimum", type: "i128", value: -(1n << 127n), formatted: "-17014118346046923173168730371588.41" },
+      { name: "i128 maximum", type: "i128", value: (1n << 127n) - 1n, formatted: "17014118346046923173168730371588.41" },
+      { name: "u128 minimum", type: "u128", value: 0n, formatted: "0.00" },
+      { name: "u128 maximum", type: "u128", value: (1n << 128n) - 1n, formatted: "34028236692093846346337460743176.82" },
+    ];
+
+    it.each(boundaries)("renders $name from a normalized SDK event", ({ type, value, formatted }) => {
+      const scVal = createIntegerScVal(type, value);
+      const { rawEvent, translated } = translateRpcAmount(scVal, type);
+
+      expect(rawEvent.data).toBe(`0x${scVal.toXDR("hex")}`);
+      expect(decodeAmount(rawEvent.data)).toMatchObject({ raw: value, formatted, symbol: "XLM" });
+      expect(translated).toMatchObject({
+        status: "translated",
+        eventType: "Transfer",
+        description: `Transfer — amount: ${formatted}`,
+      });
+    });
+
+    it.each([
+      { value: 49_999n, formatted: "0.00" },
+      { value: 50_000n, formatted: "0.01" },
+      { value: -49_999n, formatted: "-0.00" },
+      { value: -50_000n, formatted: "-0.01" },
+      { value: 1_000_000_000n, formatted: "100.00" },
+    ])("renders $value base units with the two-decimal display contract", ({ value, formatted }) => {
+      const { translated } = translateRpcAmount(createIntegerScVal("i128", value));
+
+      expect(translated.description).toBe(`Transfer — amount: ${formatted}`);
+      expect(translated.status).toBe("translated");
+    });
+
+    const validAmountHex = `0x${createI128ScVal(1_000_000_000n)}`;
+    it.each([
+      { name: "truncated I128", value: validAmountHex.slice(0, -2) },
+      { name: "odd hex length", value: validAmountHex.slice(0, -1) },
+      { name: "non-hex character", value: validAmountHex.slice(0, -1) + "g" },
+      { name: "trailing bytes", value: validAmountHex + "00000000" },
+      { name: "boolean ScVal", value: StellarXdr.ScVal.scvBool(true) },
+      { name: "vector ScVal", value: StellarXdr.ScVal.scvVec([createIntegerScVal("i128", 1_000_000_000n)]) },
+    ])("keeps $name on the zero fallback through custom-ABI translation", ({ value }) => {
+      const { rawEvent, translated } = translateRpcAmount(value);
+
+      expect(decodeAmount(rawEvent.data)).toMatchObject({ raw: 0n, formatted: "0.00", symbol: "XLM" });
+      expect(translated).toMatchObject({
+        status: "translated",
+        eventType: "Transfer",
+        description: "Transfer — amount: 0.00",
+      });
+    });
   });
   
   describe("Real Production XDR Fixtures", () => {
@@ -192,7 +311,7 @@ describe("decodeAmount() - Real XDR ScVal::I128 Parser", () => {
       const result = decodeAmount(`0x${hexXdr}`, "XLM");
       
       expect(result.raw).toBe(stroops);
-      expect(result.formatted).toBe("-99999999.99");
+      expect(result.formatted).toBe("-100000000.00"); // Round to two decimals, including the integer carry.
       expect(result.symbol).toBe("XLM");
     });
     
@@ -495,7 +614,7 @@ describe("decodeAmount() - Real XDR ScVal::I128 Parser", () => {
       const result = decodeAmount(`0x${hexXdr}`, "XLM");
       
       expect(result.raw).toBe(official);
-      expect(result.formatted).toBe("123.45"); // Truncated to 2 decimals
+      expect(result.formatted).toBe("123.46"); // Round to two decimals rather than truncate.
       expect(result.symbol).toBe("XLM");
     });
     

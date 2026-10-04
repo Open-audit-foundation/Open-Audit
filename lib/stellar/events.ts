@@ -1,8 +1,8 @@
 import type { SorobanRpc } from "stellar-sdk";
 import type { RawEvent } from "../translator/types";
 
-type RpcEventLike = Partial<SorobanRpc.Api.EventResponse> & {
-  contractId?: string;
+type RpcEventLike = Omit<Partial<SorobanRpc.Api.EventResponse>, "contractId"> & {
+  contractId?: string | SorobanRpc.Api.EventResponse["contractId"];
   contract_id?: string;
   pagingToken?: string;
   ledger?: number | string;
@@ -26,10 +26,14 @@ export function eventResponseToRawEvent(
 ): RawEvent {
   const source = event as RpcEventLike;
   const ledger = toNumber(source.ledger, 0);
+  // The SDK returns a Contract instance; raw RPC responses contain a string.
+  const contractId = typeof source.contractId === "string"
+    ? source.contractId
+    : source.contractId?.contractId();
 
   return {
     id: String(source.id ?? source.pagingToken ?? `${ledger}-0`),
-    contractId: source.contractId ?? source.contract_id ?? fallbackContractId ?? "unknown",
+    contractId: contractId ?? source.contract_id ?? fallbackContractId ?? "unknown",
     topics: normalizeTopics(source.topics ?? source.topic),
     data: normalizeScVal(source.data ?? source.value),
     ledger,

@@ -212,22 +212,76 @@ export function decodeAddress(hex: string): DecodedAddress {
 }
 // ─── Amount pool ──────────────────────────────────────────────────────────────
 const STROOP_DIVISOR = BigInt(10_000_000);
-const STROOP_DIVISOR_NUM = 10_000_000;
+const STROOPS_PER_CENT = STROOP_DIVISOR / BigInt(100);
+// Integer ScVals occupy 8, 12, or 20 bytes, including their type tag.
+const AMOUNT_SCVAL_HEX_RE = /^(?:[0-9a-fA-F]{16}|[0-9a-fA-F]{24}|[0-9a-fA-F]{40})$/;
+const AMOUNT_SCVAL_HEX_LENGTHS = new Map<number, number>([
+  [xdr.ScValType.scvU32().value, 16],
+  [xdr.ScValType.scvI32().value, 16],
+  [xdr.ScValType.scvU64().value, 24],
+  [xdr.ScValType.scvI64().value, 24],
+  [xdr.ScValType.scvU128().value, 40],
+  [xdr.ScValType.scvI128().value, 40],
+]);
 /**
  * Same pooling strategy as addresses.
  * decodeAmount() is called once per translated event.
  */
 const AMOUNT_POOL_SIZE = 8;
-const amountPool: DecodedAmount[] = Array.from(
-  { length: AMOUNT_POOL_SIZE },
-  () => ({ raw: BigInt(0), formatted: "0.00", symbol: "" })
-);
+const amountPool: DecodedAmount[] = Array.from({ length: AMOUNT_POOL_SIZE }, () => ({
+  raw: BigInt(0),
+  formatted: "0.00",
+  symbol: "",
+}));
 let amountPoolIndex = 0;
+/**
+ * Decodes a fixed-width integer ScVal with its original signedness and range.
+ * Invalid or non-integer payloads return zero. Display uses seven base-unit
+ * decimals rounded to two places, without converting the integer to Number.
+ */
 export function decodeAmount(hex: string, symbol: string = "XLM"): DecodedAmount {
-  const rawValue = BigInt("0x" + hex.slice(2, 18).replace(NON_HEX_RE, "0") || "0");
+  let rawValue = BigInt(0);
+  const cleanHex = typeof hex === "string" ? (hex.startsWith("0x") ? hex.slice(2) : hex) : "";
+  if (
+    AMOUNT_SCVAL_HEX_RE.test(cleanHex) &&
+    AMOUNT_SCVAL_HEX_LENGTHS.get(Number.parseInt(cleanHex.slice(0, 8), 16)) === cleanHex.length
+  ) {
+    try {
+      const scVal = xdr.ScVal.fromXDR(cleanHex, "hex");
+      switch (scVal.switch().name) {
+        case "scvU32":
+          rawValue = BigInt(scVal.u32());
+          break;
+        case "scvI32":
+          rawValue = BigInt(scVal.i32());
+          break;
+        case "scvU64":
+          rawValue = BigInt(scVal.u64().toString());
+          break;
+        case "scvI64":
+          rawValue = BigInt(scVal.i64().toString());
+          break;
+        case "scvU128": {
+          const parts = scVal.u128();
+          rawValue = (BigInt(parts.hi().toString()) << BigInt(64)) | BigInt(parts.lo().toString());
+          break;
+        }
+        case "scvI128": {
+          const parts = scVal.i128();
+          rawValue = (BigInt(parts.hi().toString()) << BigInt(64)) | BigInt(parts.lo().toString());
+          break;
+        }
+      }
+    } catch {
+      // Malformed XDR has the same safe zero result as unsupported ScVal types.
+    }
+  }
+  const negative = rawValue < BigInt(0);
+  const magnitude = negative ? -rawValue : rawValue;
+  const cents = (magnitude + STROOPS_PER_CENT / BigInt(2)) / STROOPS_PER_CENT;
   const obj = amountPool[amountPoolIndex];
   obj.raw = rawValue;
-  obj.formatted = (Number(rawValue) / STROOP_DIVISOR_NUM).toFixed(2);
+  obj.formatted = `${negative ? "-" : ""}${cents / BigInt(100)}.${(cents % BigInt(100)).toString().padStart(2, "0")}`;
   obj.symbol = symbol;
   amountPoolIndex = (amountPoolIndex + 1) % AMOUNT_POOL_SIZE;
   return obj;

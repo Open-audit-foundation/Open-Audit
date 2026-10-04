@@ -1,0 +1,4 @@
+[target.wasm32-unknown-unknown]
+# The sandbox supplies the only linear memory and enforces its maximum.
+# Rust's default private memory is rejected by the worker.
+rustflags = ["-C", "link-arg=--import-memory"]

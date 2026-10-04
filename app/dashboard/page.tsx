@@ -3,7 +3,8 @@ import type { Metadata } from "next";
 import { DashboardClient } from "./DashboardClient";
 import { db } from "@/lib/db/client";
 import { MOCK_RAW_EVENTS } from "@/lib/mock-data";
-import type { RawEvent } from "@/lib/translator/types";
+import type { PersistedRawEvent } from "@/lib/translator/registry";
+import { toDashboardEvent } from "@/lib/dashboard/resolve-events";
 
 export const metadata: Metadata = {
   title: "Dashboard — Open-Audit",
@@ -19,7 +20,7 @@ const INITIAL_EVENT_LIMIT = 100;
  * DATABASE_URL isn't configured or the query fails, so the dashboard
  * still renders something in local/dev environments without a database.
  */
-async function loadInitialEvents(): Promise<{ events: RawEvent[]; usingMockData: boolean }> {
+async function loadInitialEvents(): Promise<{ events: PersistedRawEvent[]; usingMockData: boolean }> {
   if (!process.env.DATABASE_URL) {
     return { events: MOCK_RAW_EVENTS, usingMockData: true };
   }
@@ -30,15 +31,7 @@ async function loadInitialEvents(): Promise<{ events: RawEvent[]; usingMockData:
       take: INITIAL_EVENT_LIMIT,
     });
 
-    const events: RawEvent[] = rows.map((row) => ({
-      id: row.id,
-      contractId: row.contractId,
-      topics: row.topics as string[],
-      data: row.data,
-      ledger: row.ledger,
-      timestamp: row.timestamp,
-      txHash: row.txHash,
-    }));
+    const events = rows.map(toDashboardEvent);
 
     return { events, usingMockData: false };
   } catch (error) {

@@ -11,12 +11,12 @@ import {
   getRegisteredContracts,
   getBlueprintCount,
   resolveSchema,
+  type PersistedRawEvent,
 } from "../registry";
 import type {
   RawEvent,
   TranslationBlueprint,
   VersionedTranslationBlueprint,
-  PersistedRawEvent,
 } from "../types";
 import { SOROSWAP_ROUTER_CONTRACT_IDS } from "../blueprints/soroswap-router";
 import {
@@ -315,6 +315,64 @@ describe("translateWithCache", () => {
     expect(result.description).toBe("Previously translated description");
     expect(result.status).toBe("translated");
     expect(result.blueprintName).toBe("Persisted Blueprint");
+    expect(result).not.toHaveProperty("parserProvenance");
+    expect(result).not.toHaveProperty("sandboxError");
+  });
+
+  it.each([
+    { status: "translated" as const, sandboxError: undefined },
+    { status: "cryptic" as const, sandboxError: "RUNTIME_TRAP" },
+  ])("preserves persisted community parser metadata for $status results and cache replay", async ({ status, sandboxError }) => {
+    mockIsRedisEnabled.mockReturnValue(true);
+
+    const rawEvent = makeEvent({ txHash: `community-${status}`, id: `community-${status}` });
+    const persistedEvent = {
+      ...rawEvent,
+      status,
+      description: status === "translated" ? "Community translation" : null,
+      blueprintName: "Community Blueprint",
+      eventType: status === "translated" ? "Transfer" : null,
+      schemaVersion: null,
+      parserProvenance: "community-wasm" as const,
+      ...(sandboxError === undefined ? {} : { sandboxError }),
+    } satisfies PersistedRawEvent;
+
+    const result = await translateWithCache(persistedEvent);
+
+    expect(result.parserProvenance).toBe("community-wasm");
+    expect(result.sandboxError).toBe(sandboxError);
+    expect(result.description).toBe(persistedEvent.description);
+    expect(mockSetCachedTranslation).toHaveBeenCalledWith(persistedEvent, result);
+
+    mockGetCachedTranslation.mockResolvedValueOnce(JSON.parse(JSON.stringify(result)));
+    expect(await translateWithCache(rawEvent)).toEqual(result);
+    expect(mockSetCachedTranslation).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps known persisted community provenance when an older cache entry lacks it", async () => {
+    mockIsRedisEnabled.mockReturnValue(true);
+    const persistedEvent: PersistedRawEvent = {
+      ...makeEvent({ txHash: "stale-community", id: "stale-community" }),
+      status: "cryptic",
+      description: null,
+      blueprintName: "Community Blueprint",
+      parserProvenance: "community-wasm",
+      sandboxError: "TIMEOUT",
+    };
+    mockGetCachedTranslation.mockResolvedValue({
+      raw: persistedEvent,
+      status: "cryptic",
+      description: null,
+      blueprintName: "Community Blueprint",
+      eventType: null,
+      schemaVersion: null,
+    });
+
+    const result = await translateWithCache(persistedEvent);
+
+    expect(result.parserProvenance).toBe("community-wasm");
+    expect(result.sandboxError).toBe("TIMEOUT");
+    expect(mockSetCachedTranslation).toHaveBeenCalledWith(persistedEvent, result);
   });
 
   it("builds from persisted fields with default status", async () => {
